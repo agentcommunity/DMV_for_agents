@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DMV - Department of Machine Vehicles</title>
+  <style>
+    /* === Fonts === */
+    @font-face {
+      font-family: "PPSupplyMonoRegular";
+      src: url(hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplyMono-Regular.otf);
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "PPSupplyMonoUltralight";
+      src: url(hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplyMono-Ultralight.otf);
+      font-weight: 300; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "PPSupplySansRegular";
+      src: url(hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplySans-Regular.otf);
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "PPSupplySansUltralight";
+      src: url(hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplySans-Ultralight.otf);
+      font-weight: 300; font-style: normal; font-display: swap;
+    }
+
+    :root {
+      --font-mono-regular: "PPSupplyMonoRegular";
+      --font-sans-regular: "PPSupplySansRegular";
+      --color-light: #ffffff;
+      --color-dark: #101011;
+      --color-gray: #CBCBCB;
+      --color-accent: #32A4C3;
+      --transition: 0.5s ease-in-out;
+      --container-padding: 11.7rem;
+    }
+    @media (max-width: 1919px) { :root { --container-padding: 8.3rem; } }
+    @media (max-width: 1439px) { :root { --container-padding: 6.6rem; } }
+    @media (max-width: 1023px) { :root { --container-padding: 4rem; } }
+    @media (max-width: 767px) { :root { --container-padding: 4.27vw; } }
+
+    *, *:after, *:before { padding: 0; margin: 0; box-sizing: border-box; }
+    html {
+      font-size: 62.5%;
+      font-family: var(--font-sans-regular);
+      background-color: var(--color-dark);
+      color: var(--color-light);
+    }
+    html, body {
+      position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+      padding: 0; margin: 0; overflow: hidden;
+      overscroll-behavior: none;
+    }
+    button { all: unset; cursor: pointer; }
+    a { all: unset; cursor: pointer; }
+    ul { display: block; margin: 0; padding: 0; list-style-type: none; }
+    .p2 {
+      font-family: var(--font-mono-regular);
+      font-size: 1.5rem; font-weight: 400; line-height: 1.3;
+    }
+    @media (min-width: 1920px) { .p2 { font-size: 1.7rem; } }
+
+    #scroller {
+      position: absolute; left: 0; width: 100%; height: 100%;
+      overflow-y: auto; scrollbar-width: none;
+    }
+    #scroller::-webkit-scrollbar { display: none; }
+
+    .start-screen-wrapper { position: relative; height: 300vh; }
+    .start-screen {
+      position: sticky; top: 0;
+      width: 100%; height: 100vh;
+      overflow: hidden;
+      transition: background-color var(--transition);
+    }
+
+    .start-screen__canvas-wrapper {
+      width: 100%; height: 100%;
+      position: absolute; left: 0; top: 0;
+    }
+    .start-screen__canvas-wrapper canvas { display: block; }
+
+    /* === Night mode label === */
+    .start-screen__mode-switcher {
+      position: fixed; left: 50%; top: 50%;
+      pointer-events: none;
+      transition: opacity var(--transition);
+    }
+    .start-screen__mode-switcher.hidden { opacity: 0; }
+    .nightmode-label {
+      display: flex; align-items: flex-end; gap: 0.8rem;
+      white-space: nowrap; pointer-events: none; user-select: none;
+    }
+    .nightmode-label__icon { flex-shrink: 0; align-self: flex-start; }
+    .nightmode-label__text { opacity: 0.6; margin-bottom: 0.2rem; }
+
+    /* === Header === */
+    .start-header {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 100; padding: 4.8rem var(--container-padding);
+      display: flex; justify-content: space-between; align-items: flex-start;
+      pointer-events: none;
+    }
+    .start-header > * { pointer-events: auto; }
+    .start-header__navigation-list {
+      display: flex; flex-direction: column; gap: 0.8rem;
+    }
+    .link-switcher {
+      display: flex; align-items: center; gap: 0.8rem;
+      padding: 0.4rem; margin: -0.4rem;
+      transition: opacity var(--transition);
+    }
+    @media (hover: hover) { .link-switcher:hover { opacity: 0.5; } }
+    .link-switcher__icon { display: flex; align-items: center; }
+    .switcher-icon {
+      position: relative; display: inline-flex;
+      width: 3.2rem; height: 1.6rem;
+    }
+    .switcher-icon__shadow {
+      position: absolute; inset: 0; border-radius: 999px;
+      background: rgba(255,255,255,0.1);
+    }
+    .switcher-icon__body {
+      position: absolute; inset: 0.2rem; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.3);
+      display: flex; align-items: center; padding: 0 0.2rem;
+    }
+    .switcher-icon__marker {
+      width: 0.8rem; height: 0.8rem; border-radius: 50%;
+      background: var(--color-light); transition: transform 0.3s ease;
+    }
+    .start-header__logo {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      width: 3.3rem; height: auto;
+    }
+    @media (max-width: 767px) { .start-header__logo { width: 2.5rem; } }
+    .sound-switcher {
+      display: flex; align-items: center; gap: 0.8rem;
+      padding: 0.4rem; margin: -0.4rem;
+    }
+    .switcher-2 { display: inline-flex; width: 3.2rem; height: 1.6rem; position: relative; }
+    .switcher-2__body {
+      position: absolute; inset: 0.2rem; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.3);
+      display: flex; align-items: center; padding: 0 0.2rem;
+    }
+    .switcher-2__marker { width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--color-light); }
+    .start-header__dots {
+      position: fixed; right: var(--container-padding); top: 50%;
+      transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 0.6rem;
+    }
+    .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 1px solid var(--color-light); }
+    .dot:first-child { background: var(--color-light); }
+
+    .start-screen__footer {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+      padding: 4.8rem var(--container-padding);
+      display: flex; justify-content: space-between; align-items: flex-end;
+      pointer-events: none;
+    }
+    .start-screen__footer-left { max-width: 40rem; opacity: 0.6; }
+    .start-screen__footer-center {
+      position: absolute; left: 50%; bottom: 4.8rem; transform: translateX(-50%);
+    }
+    .scroll-down {
+      display: flex; flex-direction: column; align-items: center; gap: 0.8rem;
+      font-family: var(--font-mono-regular); font-size: 1.5rem;
+    }
+    .scroll-down__icon {
+      display: block; width: 1px; height: 4rem;
+      background: var(--color-light); opacity: 0.4;
+      animation: scrollPulse 2s ease-in-out infinite;
+    }
+    @keyframes scrollPulse {
+      0%, 100% { opacity: 0.2; transform: scaleY(0.6); }
+      50% { opacity: 0.6; transform: scaleY(1); }
+    }
+
+    /* Hidden input to capture keystrokes */
+    #hiddenInput {
+      position: fixed; left: -9999px; top: -9999px;
+      opacity: 0; width: 1px; height: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div id="scroller">
+    <div class="start-screen-wrapper">
+      <div class="start-screen" id="startScreen">
+        <div class="start-screen__canvas-wrapper" id="canvasWrapper">
+          <div class="start-screen__mode-switcher" id="modeLabel">
+            <div class="nightmode-label">
+              <svg width="35" height="75" viewBox="0 0 35 75" fill="none"
+                xmlns="http://www.w3.org/2000/svg" class="nightmode-label__icon">
+                <path opacity="0.3"
+                  d="M35 72L30.1455 68.8748L29.8662 74.6415L35 72ZM35 3L29.8221 0.446117L30.1993 6.20728L35 3ZM30.5539 71.2847C20.7118 70.305 13.4635 66.05 8.66893 59.9053C3.86743 53.7518 1.5 45.6676 1.5 37H0.5C0.5 45.8421 2.91483 54.1565 7.88054 60.5205C12.8532 66.8933 20.357 71.2746 30.4548 72.2798L30.5539 71.2847ZM1.5 37C1.5 19.9994 14.1641 5.95586 30.573 3.78986L30.4421 2.79846C13.5424 5.02925 0.5 19.4911 0.5 37H1.5Z"
+                  fill="#101011" />
+              </svg>
+              <p class="nightmode-label__text p2">Switch Day 'N' Night</p>
+            </div>
+          </div>
+        </div>
+
+        <header class="start-header">
+          <nav class="start-header__navigation">
+            <ul class="start-header__navigation-list">
+              <li><a href="#" class="link-switcher p2"><span class="link-switcher__icon"><span class="switcher-icon"><span class="switcher-icon__shadow"></span><span class="switcher-icon__body"><span class="switcher-icon__marker"></span></span></span></span><span class="link-switcher__text">About</span></a></li>
+              <li><a href="#" class="link-switcher p2"><span class="link-switcher__icon"><span class="switcher-icon"><span class="switcher-icon__shadow"></span><span class="switcher-icon__body"><span class="switcher-icon__marker"></span></span></span></span><span class="link-switcher__text">Register</span></a></li>
+              <li><button class="link-switcher p2"><span class="link-switcher__icon"><span class="switcher-icon"><span class="switcher-icon__shadow"></span><span class="switcher-icon__body"><span class="switcher-icon__marker"></span></span></span></span><span class="link-switcher__text">FAQ</span></button></li>
+            </ul>
+          </nav>
+          <div class="start-header__logo" id="logoContainer">
+            <img src="hle_mirror/hle.io/img/logo-white.svg" alt="DMV" style="width:100%;height:auto;">
+          </div>
+          <div class="start-header__sound">
+            <button class="sound-switcher">
+              <span class="sound-switcher__text p2">Sound</span>
+              <span class="switcher-2"><span class="switcher-2__body"><span class="switcher-2__marker"></span></span></span>
+            </button>
+          </div>
+          <div class="start-header__dots"><div class="dot"></div><div class="dot"></div></div>
+        </header>
+
+        <footer class="start-screen__footer">
+          <div class="start-screen__footer-left p2">
+            Department of Machine Vehicles — Identity Registration
+          </div>
+          <div class="start-screen__footer-center">
+            <p class="scroll-down p2"><span>Scroll Down</span><span class="scroll-down__icon"></span></p>
+          </div>
+          <div class="start-screen__footer-right">
+            <p class="clock p2" id="clockEl">12 : 00 am</p>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden input for capturing keystrokes when terminal is active -->
+  <input id="hiddenInput" type="text" autocomplete="off" />
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/"
+    }
+  }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+    // =============================================
+    // CRT Terminal — drawn on a canvas, used as texture
+    // =============================================
+    class CRTTerminal {
+      constructor(width = 1024, height = 1024) {
+        this.w = width;
+        this.h = height;
+        this.canvas = document.createElement('canvas');
+        this.canvas.width = width;
+        this.canvas.height = height;
+        this.ctx = this.canvas.getContext('2d');
+
+        // Terminal state
+        this.isOn = false;
+        this.bootPhase = 0;       // 0=off, 1=flickering, 2=booting, 3=ready, 4=form, 5=processing, 6=done
+        this.bootTimer = 0;
+        this.flickerCount = 0;
+
+        // CRT colors
+        this.bgColor = '#0a0d0a';
+        this.textColor = '#33ff88';
+        this.dimColor = '#1a5a3a';
+        this.cursorColor = '#33ff88';
+        this.headerColor = '#88ffcc';
+
+        // Text state
+        this.lines = [];           // { text, color, typed (chars revealed so far) }
+        this.typeSpeed = 2;        // chars per frame
+        this.lineHeight = 28;
+        this.fontSize = 22;
+        this.padding = 60;
+        this.scrollY = 0;
+
+        // Form state
+        this.fields = [
+          { key: 'userName',  prompt: 'Your name',                    value: '', active: false },
+          { key: 'agentName', prompt: 'Agent name (.agent domain)',   value: '', active: false },
+          { key: 'email',     prompt: 'Email address',                value: '', active: false },
+          { key: 'type',      prompt: 'Type (individual/org)',        value: '', active: false },
+          { key: 'orgName',   prompt: 'Organization name (if org)',   value: '', active: false },
+        ];
+        this.currentField = -1;
+        this.cursorVisible = true;
+        this.cursorTimer = 0;
+        this.inputActive = false;
+
+        // Boot sequence text
+        this.bootLines = [
+          { text: '', color: this.textColor },
+          { text: '  ██████╗ ███╗   ███╗██╗   ██╗', color: this.headerColor },
+          { text: '  ██╔══██╗████╗ ████║██║   ██║', color: this.headerColor },
+          { text: '  ██║  ██║██╔████╔██║██║   ██║', color: this.headerColor },
+          { text: '  ██║  ██║██║╚██╔╝██║╚██╗ ██╔╝', color: this.headerColor },
+          { text: '  ██████╔╝██║ ╚═╝ ██║ ╚████╔╝ ', color: this.headerColor },
+          { text: '  ╚═════╝ ╚═╝     ╚═╝  ╚═══╝  ', color: this.headerColor },
+          { text: '', color: this.textColor },
+          { text: '  DEPARTMENT OF MACHINE VEHICLES', color: this.headerColor },
+          { text: '  Identity Registration System v1.0', color: this.dimColor },
+          { text: '  ─────────────────────────────────', color: this.dimColor },
+          { text: '', color: this.textColor },
+          { text: '  Initializing registration terminal...', color: this.textColor },
+          { text: '  Connection secure. Ready for input.', color: this.textColor },
+          { text: '', color: this.textColor },
+        ];
+
+        // Scanline + noise
+        this.time = 0;
+      }
+
+      turnOn() {
+        if (this.isOn) return;
+        this.isOn = true;
+        this.bootPhase = 1;
+        this.bootTimer = 0;
+        this.flickerCount = 0;
+      }
+
+      addFormPrompt() {
+        const f = this.fields[this.currentField];
+        this.lines.push({ text: `  > ${f.prompt}: `, color: this.textColor, typed: 0 });
+      }
+
+      handleKey(key) {
+        if (!this.inputActive || this.currentField < 0) return;
+        const f = this.fields[this.currentField];
+
+        if (key === 'Enter') {
+          // Skip org name if individual
+          if (f.key === 'type' && f.value.toLowerCase().startsWith('i')) {
+            this.fields[4].value = '—';
+          }
+          // Finalize current line display
+          const lastLine = this.lines[this.lines.length - 1];
+          lastLine.fullyTyped = true;
+
+          this.currentField++;
+
+          // Skip orgName if individual
+          if (this.currentField === 4 && this.fields[3].value.toLowerCase().startsWith('i')) {
+            this.currentField++;
+          }
+
+          if (this.currentField >= this.fields.length) {
+            this.inputActive = false;
+            this.startProcessing();
+          } else {
+            this.fields[this.currentField].active = true;
+            this.addFormPrompt();
+          }
+        } else if (key === 'Backspace') {
+          f.value = f.value.slice(0, -1);
+        } else if (key.length === 1) {
+          f.value += key;
+        }
+      }
+
+      startProcessing() {
+        this.bootPhase = 5;
+        this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        this.lines.push({ text: '  Processing registration...', color: this.textColor, typed: 0 });
+        this.processProgress = 0;
+      }
+
+      update() {
+        this.time++;
+        this.cursorTimer++;
+        if (this.cursorTimer % 30 === 0) this.cursorVisible = !this.cursorVisible;
+
+        // Boot sequence state machine
+        if (this.bootPhase === 1) {
+          // Flicker on/off
+          this.bootTimer++;
+          if (this.bootTimer % 4 === 0) this.flickerCount++;
+          if (this.flickerCount > 8) {
+            this.bootPhase = 2;
+            this.bootTimer = 0;
+            // Start adding boot lines
+            this.lines = [];
+            this.bootLineIndex = 0;
+          }
+        } else if (this.bootPhase === 2) {
+          // Typing boot text
+          this.bootTimer++;
+          if (this.bootTimer % 3 === 0 && this.bootLineIndex < this.bootLines.length) {
+            const bl = this.bootLines[this.bootLineIndex];
+            this.lines.push({ text: bl.text, color: bl.color, typed: 0 });
+            this.bootLineIndex++;
+          }
+          // Check if all boot lines added and typed
+          const allTyped = this.lines.length >= this.bootLines.length &&
+            this.lines.every(l => l.typed >= l.text.length);
+          if (allTyped) {
+            this.bootPhase = 4;
+            this.currentField = 0;
+            this.fields[0].active = true;
+            this.inputActive = true;
+            this.addFormPrompt();
+          }
+        } else if (this.bootPhase === 5) {
+          // Processing animation
+          this.processProgress = Math.min((this.processProgress || 0) + 0.8, 100);
+          if (this.processProgress >= 100) {
+            this.bootPhase = 6;
+            this.lines.push({ text: '  ████████████████████████ 100%', color: this.headerColor, typed: 0 });
+            this.lines.push({ text: '', color: this.textColor, typed: 999 });
+            this.lines.push({ text: '  ✓ IDENTITY CERTIFICATE ISSUED', color: this.headerColor, typed: 0 });
+            const serial = 'DMV-' + new Date().getFullYear() + '-' +
+              String(Math.floor(Math.random() * 99999)).padStart(5, '0');
+            this.lines.push({ text: `  Serial: ${serial}`, color: this.dimColor, typed: 0 });
+            this.lines.push({ text: `  Agent: ${this.fields[1].value}.agent`, color: this.textColor, typed: 0 });
+            this.lines.push({ text: `  Registered to: ${this.fields[0].value}`, color: this.textColor, typed: 0 });
+            this.lines.push({ text: '', color: this.textColor, typed: 999 });
+            this.lines.push({ text: '  Certificate will be delivered to:', color: this.dimColor, typed: 0 });
+            this.lines.push({ text: `  ${this.fields[2].value}`, color: this.textColor, typed: 0 });
+          }
+        }
+
+        // Advance typing on all lines
+        for (const line of this.lines) {
+          if (line.typed < line.text.length) {
+            line.typed = Math.min(line.typed + this.typeSpeed, line.text.length);
+          }
+        }
+
+        this.draw();
+      }
+
+      draw() {
+        const ctx = this.ctx;
+        const w = this.w;
+        const h = this.h;
+
+        // Background
+        ctx.fillStyle = this.bgColor;
+        ctx.fillRect(0, 0, w, h);
+
+        if (!this.isOn) return;
+
+        // Flicker phase — random on/off
+        if (this.bootPhase === 1) {
+          if (this.flickerCount % 2 === 0) {
+            // Screen briefly white-green flash
+            ctx.fillStyle = 'rgba(51, 255, 136, 0.03)';
+            ctx.fillRect(0, 0, w, h);
+          }
+          // Occasional bright flash
+          if (Math.random() > 0.6) {
+            ctx.fillStyle = `rgba(51, 255, 136, ${Math.random() * 0.15})`;
+            ctx.fillRect(0, 0, w, h);
+          }
+          this.drawScanlines(ctx, w, h);
+          return;
+        }
+
+        // Subtle background glow
+        const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.7);
+        grad.addColorStop(0, 'rgba(51, 255, 136, 0.03)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // Draw text lines
+        ctx.font = `${this.fontSize}px "Courier New", monospace`;
+        ctx.textBaseline = 'top';
+
+        // Auto-scroll: if content exceeds canvas, scroll to bottom
+        const totalHeight = this.lines.length * this.lineHeight + this.padding * 2;
+        const maxScroll = Math.max(0, totalHeight - h + 40);
+        this.scrollY += (maxScroll - this.scrollY) * 0.1;
+
+        let y = this.padding - this.scrollY;
+        for (let i = 0; i < this.lines.length; i++) {
+          const line = this.lines[i];
+          const displayText = line.text.substring(0, line.typed);
+
+          if (y > -this.lineHeight && y < h) {
+            // Glow effect — draw text twice
+            ctx.shadowColor = line.color;
+            ctx.shadowBlur = 4;
+            ctx.fillStyle = line.color;
+            ctx.fillText(displayText, this.padding, y);
+            ctx.shadowBlur = 0;
+          }
+
+          // If this is the active input line, draw the input value + cursor
+          if (this.inputActive && i === this.lines.length - 1 &&
+              this.currentField >= 0 && this.currentField < this.fields.length) {
+            const f = this.fields[this.currentField];
+            const promptWidth = ctx.measureText(displayText).width;
+            const inputText = f.value;
+            ctx.fillStyle = this.textColor;
+            ctx.shadowColor = this.textColor;
+            ctx.shadowBlur = 4;
+            ctx.fillText(inputText, this.padding + promptWidth, y);
+            ctx.shadowBlur = 0;
+
+            // Blinking cursor
+            if (this.cursorVisible) {
+              const cursorX = this.padding + promptWidth + ctx.measureText(inputText).width;
+              ctx.fillStyle = this.cursorColor;
+              ctx.fillRect(cursorX + 2, y + 2, this.fontSize * 0.55, this.fontSize - 2);
+            }
+          }
+
+          y += this.lineHeight;
+        }
+
+        // Processing bar
+        if (this.bootPhase === 5 && this.processProgress < 100) {
+          const barY = y;
+          const barWidth = (w - this.padding * 2) * 0.6;
+          const filled = barWidth * (this.processProgress / 100);
+          ctx.fillStyle = this.dimColor;
+          ctx.fillRect(this.padding + 16, barY, barWidth, this.lineHeight - 8);
+          ctx.fillStyle = this.headerColor;
+          ctx.fillRect(this.padding + 16, barY, filled, this.lineHeight - 8);
+          ctx.fillStyle = this.textColor;
+          ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+          ctx.fillText(`  ${Math.floor(this.processProgress)}%`, this.padding + barWidth + 24, barY + 2);
+          ctx.font = `${this.fontSize}px "Courier New", monospace`;
+        }
+
+        // CRT effects
+        this.drawScanlines(ctx, w, h);
+        this.drawVignette(ctx, w, h);
+
+        // Random noise flicker
+        if (Math.random() > 0.97) {
+          ctx.fillStyle = `rgba(51, 255, 136, ${Math.random() * 0.02})`;
+          ctx.fillRect(0, Math.random() * h, w, 2);
+        }
+      }
+
+      drawScanlines(ctx, w, h) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+        for (let y = 0; y < h; y += 3) {
+          ctx.fillRect(0, y, w, 1);
+        }
+        // Rolling scanline
+        const rollY = (this.time * 1.5) % (h + 100) - 50;
+        ctx.fillStyle = 'rgba(51, 255, 136, 0.03)';
+        ctx.fillRect(0, rollY, w, 40);
+      }
+
+      drawVignette(ctx, w, h) {
+        const grad = ctx.createRadialGradient(w/2, h/2, w * 0.25, w/2, h/2, w * 0.7);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.4)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
+
+    // =============================================
+    // TV Class — 3D scene with CRT canvas texture
+    // =============================================
+    class TV {
+      constructor(parentDOM, label) {
+        this.toneMappingExposureMax = 3.0;
+        this.toneMappingExposureMin = 0.6;
+        this.parent = parentDOM;
+        this.isNightMode = false;
+        this.label = label;
+
+        // CRT terminal
+        this.crt = new CRTTerminal(1024, 1024);
+        this.crtTexture = new THREE.CanvasTexture(this.crt.canvas);
+        this.crtTexture.encoding = THREE.sRGBEncoding;
+        this.crtTexture.repeat.set(1.7, 1.7);
+        this.crtTexture.offset.set(-0.64, -0.42);
+        this.crtTexture.flipY = false;
+
+        // Mouse
+        this.mouseTarget = new THREE.Vector2(0, 0);
+        this._NDC = { x: 0, y: 0 };
+        this._intersects = [];
+
+        // Sizes
+        this.sizes = {
+          width: this.parent.getBoundingClientRect().width,
+          height: this.parent.getBoundingClientRect().height,
+          get aspect() { return this.width / this.height; }
+        };
+        this.mouse = new THREE.Vector2(this.sizes.width / 2, this.sizes.height / 2);
+
+        // Renderer
+        this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        this.renderer.physicallyCorrectLights = true;
+        this.renderer.outputEncoding = THREE.sRGBEncoding;
+        this.renderer.toneMappingExposure = this.toneMappingExposureMax;
+        this.renderer.toneMapping = THREE.CineonToneMapping;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this._setRendererSizes();
+
+        this.fogColor = 0x7a7a7a;
+        this.fogColorDark = 0x454546;
+        this.renderer.setClearColor(this.fogColor, 1);
+
+        this.canvas = this.renderer.domElement;
+        this.parent.prepend(this.canvas);
+
+        this.model = null;
+        this.triggerEl = null;
+        this.screen = null;
+        this.trigger = null;
+        this.fakeTrigger = null;
+        this.progress = 0;
+        this.crtBooted = false;
+
+        this.scene = new THREE.Scene();
+        this.scene.fog = new THREE.Fog(this.fogColor, 27, 29);
+
+        this.camera = null;
+        this.cameraPosition = { x: 0, y: -0.5, z: 20 };
+
+        this.raycaster = new THREE.Raycaster();
+
+        this.dracoLoader = new DRACOLoader();
+        this.dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/libs/draco/');
+        this.gltfLoader = new GLTFLoader();
+        this.gltfLoader.setDRACOLoader(this.dracoLoader);
+
+        this._animationEndCallbacks = [];
+
+        document.addEventListener('mouseleave', (e) => {
+          if (e.clientY <= 0 || e.clientX <= 0 ||
+              e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+            this.setMousePosition(this.sizes.width / 2, this.sizes.height / 2);
+          }
+        });
+      }
+
+      async init() {
+        try { await this.loadModel(); }
+        catch (err) { console.error('Error loading model:', err); }
+        this.createCamera();
+        this.createLights();
+        this._render();
+      }
+
+      loadModel() {
+        this.trigger = new THREE.Mesh(
+          new THREE.BoxGeometry(0.9, 1.8, 1.8),
+          new THREE.MeshBasicMaterial({ color: 0xff0000 })
+        );
+        this.fakeTrigger = new THREE.Mesh(
+          new THREE.BoxGeometry(0.9, 1.8, 1.8),
+          new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+        );
+        this.scene.add(this.trigger);
+        this.trigger.visible = false;
+        this.fakeTrigger.visible = false;
+        this.trigger.position.set(-1.41, -1.71, 1.66);
+        this.fakeTrigger.position.set(-1.41, -1.71, 1.66);
+
+        if (window.innerWidth < 768) {
+          this.trigger.position.set(0, 0, 2);
+          this.trigger.scale.set(3, 3, 3);
+        }
+
+        return new Promise((resolve, reject) => {
+          this.gltfLoader.load('hle_mirror/hle.io/models/tv1.glb', (gltf) => {
+            this.model = gltf.scene;
+            this.triggerEl = this.model.getObjectByName('Cube001');
+            this.screen = this.model.getObjectByName('Glass');
+
+            // CRT canvas texture on the screen
+            if (this.screen) {
+              this.screen.material = new THREE.MeshBasicMaterial({ map: this.crtTexture });
+            }
+            if (this.triggerEl) {
+              this.triggerEl.material = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            }
+            this.scene.add(gltf.scene);
+            resolve();
+          }, undefined, reject);
+        });
+      }
+
+      createCamera() {
+        this.camera = new THREE.PerspectiveCamera(45, this.sizes.aspect, 0.1, 100);
+        this.camera.position.set(this.cameraPosition.x, this.cameraPosition.y, this.cameraPosition.z);
+        this.camera.lookAt(0, 0, 0);
+        this.scene.add(this.camera);
+      }
+
+      createLights() {
+        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        this.scene.add(this.ambientLight);
+        this.pointLight = new THREE.PointLight(0xffffff, 0.5);
+        this.pointLight.position.set(0, 3, 0.5);
+        this.scene.add(this.pointLight);
+      }
+
+      _setRendererSizes() {
+        this.renderer.setSize(this.sizes.width, this.sizes.height);
+      }
+
+      _setLabelPosition() {
+        if (!this.fakeTrigger || !this.camera) return;
+        const point = this.fakeTrigger.position.clone();
+        point.project(this.camera);
+        const translate = {
+          x: point.x * this.sizes.width * 0.5 - 40,
+          y: -point.y * this.sizes.height * 0.5 - 4
+        };
+        this.label.style.transform = `translate(${translate.x}px, ${translate.y}px)`;
+      }
+
+      animateCameraPosition(progress) {
+        this.progress = progress;
+        // Boot the CRT when user scrolls close enough
+        if (progress > 0.6 && !this.crtBooted) {
+          this.crtBooted = true;
+          this.crt.turnOn();
+        }
+        if (progress > 0.99) {
+          this._animationEndCallbacks.forEach(cb => cb());
+          this._animationEndCallbacks = [];
+        }
+      }
+
+      rotateCamera() {
+        if (!this.camera) return;
+        this.mouseTarget.lerp(this.toNDC(), 0.05);
+        this.camera.position.x = 0.5 * 14.7 * this.mouseTarget.x * (1 - this.progress);
+        this.camera.position.z = (1 - this.progress) * 20 + this.progress * 3.6;
+        this.camera.position.y = (1 - this.progress) * -0.5 + this.progress * 0.5;
+        this.camera.lookAt(0, 0.5, 0);
+      }
+
+      toggleNightModeTV() {
+        let target, triggerPos;
+        if (this.renderer.toneMappingExposure < 1) {
+          target = this.toneMappingExposureMax;
+          triggerPos = 0;
+          this.scene.fog = new THREE.Fog(this.fogColor, 27, 29);
+          this.renderer.setClearColor(this.fogColor, 1);
+          this.isNightMode = false;
+        } else {
+          target = this.toneMappingExposureMin;
+          triggerPos = 0.45;
+          this.scene.fog = new THREE.Fog(this.fogColorDark, 27, 29);
+          this.renderer.setClearColor(this.fogColorDark, 1);
+          this.isNightMode = true;
+        }
+        gsap.to(this.renderer, { toneMappingExposure: target, duration: 0.4, overwrite: true });
+        if (this.triggerEl) {
+          gsap.to(this.triggerEl.position, { x: triggerPos, duration: 0.4, overwrite: true });
+        }
+      }
+
+      _intersect() {
+        if (!this.camera || !this.trigger) return;
+        this.raycaster.setFromCamera(this._NDC, this.camera);
+        this._intersects = this.raycaster.intersectObjects([this.trigger]);
+      }
+
+      getIntersects() {
+        this._intersect();
+        return this._intersects.length > 0 ? ['button'] : ['none'];
+      }
+
+      _render() {
+        // Update CRT terminal canvas every frame
+        this.crt.update();
+        this.crtTexture.needsUpdate = true;
+
+        if (this.camera) {
+          this.renderer.render(this.scene, this.camera);
+          this._setLabelPosition();
+          this.rotateCamera();
+        }
+        requestAnimationFrame(() => this._render());
+      }
+
+      setMousePosition(x, y) {
+        this.mouse.x = x;
+        this.mouse.y = y;
+        this._NDC = this.toNDC();
+      }
+
+      toNDC() {
+        return {
+          x: (this.mouse.x / this.sizes.width) * 2 - 1,
+          y: -(this.mouse.y / this.sizes.height) * 2 + 1
+        };
+      }
+
+      resize() {
+        const box = this.parent.getBoundingClientRect();
+        this.sizes.width = box.width;
+        this.sizes.height = box.height;
+        this._setRendererSizes();
+        this.camera.aspect = this.sizes.aspect;
+        this.camera.updateProjectionMatrix();
+      }
+
+      on(event, cb) {
+        if (event === 'animationEnd') this._animationEndCallbacks.push(cb);
+      }
+    }
+
+    // =============================================
+    // Initialize
+    // =============================================
+    const container = document.getElementById('canvasWrapper');
+    const label = document.getElementById('modeLabel');
+    const startScreen = document.getElementById('startScreen');
+    const hiddenInput = document.getElementById('hiddenInput');
+
+    const tv = new TV(container, label);
+    await tv.init();
+
+    // Clock
+    function updateClock() {
+      const now = new Date();
+      let h = now.getHours();
+      const m = String(now.getMinutes()).padStart(2, '0');
+      const ampm = h >= 12 ? 'pm' : 'am';
+      h = h % 12 || 12;
+      document.getElementById('clockEl').textContent =
+        `${String(h).padStart(2, '0')} : ${m} ${ampm}`;
+    }
+    updateClock();
+    setInterval(updateClock, 10000);
+
+    // Scroll
+    gsap.registerPlugin(ScrollTrigger);
+    ScrollTrigger.create({
+      scroller: '#scroller',
+      trigger: '.start-screen-wrapper',
+      start: 'top top',
+      end: 'bottom bottom',
+      onUpdate: ({ progress }) => {
+        if (window.innerWidth < 768) label.classList.add('hidden');
+        tv.animateCameraPosition(Math.min(progress, 0.95));
+      }
+    });
+
+    // Mouse parallax
+    window.addEventListener('mousemove', (e) => {
+      tv.setMousePosition(e.clientX, e.clientY);
+    });
+
+    // Click: night mode toggle OR focus terminal input
+    window.addEventListener('click', () => {
+      const intersects = tv.getIntersects();
+      if (intersects.includes('button')) {
+        tv.toggleNightModeTV();
+        startScreen.classList.toggle('night-mode', tv.isNightMode);
+      }
+      // Focus hidden input to capture keystrokes when CRT is active
+      if (tv.crt.inputActive) {
+        hiddenInput.focus();
+      }
+    });
+
+    // Auto-focus when terminal becomes interactive
+    const checkFocus = setInterval(() => {
+      if (tv.crt.inputActive) {
+        hiddenInput.focus();
+        clearInterval(checkFocus);
+      }
+    }, 200);
+
+    // Route keystrokes to CRT terminal (single global handler)
+    window.addEventListener('keydown', (e) => {
+      if (!tv.crt.inputActive) return;
+      if (e.key === 'Backspace' || e.key === 'Enter') {
+        e.preventDefault();
+        tv.crt.handleKey(e.key);
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        tv.crt.handleKey(e.key);
+      }
+    });
+
+    // Resize
+    window.addEventListener('resize', () => tv.resize());
+  </script>
+</body>
+</html>

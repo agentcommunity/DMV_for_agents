@@ -1,0 +1,9 @@
+{
+  "name": "the-first-the-last",
+  "short_name": "the-first-the-last",
+  "icons": [],
+  "start_url": "/?standalone=true",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "lang": "en"
+}
