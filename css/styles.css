@@ -191,6 +191,89 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 
 .clock { opacity: 0.6; }
 
+/* === Permalink overlay === */
+.permalink-overlay {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  z-index: 200;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 2rem var(--container-padding) 4rem;
+  gap: 1.6rem;
+  background: linear-gradient(to top, rgba(16, 16, 17, 0.95) 0%, rgba(16, 16, 17, 0.6) 40%, transparent 100%);
+  pointer-events: none;
+}
+.permalink-overlay__card-info {
+  text-align: center;
+  opacity: 0.5;
+}
+.permalink-overlay__label {
+  font-size: 1.8rem; letter-spacing: 0.1em;
+}
+.permalink-overlay__cert {
+  font-size: 1.4rem; opacity: 0.5; margin-top: 0.4rem;
+}
+.permalink-overlay__actions {
+  display: flex; gap: 1.6rem; flex-wrap: wrap; justify-content: center;
+}
+.permalink-overlay__cta {
+  all: unset; cursor: pointer; pointer-events: auto;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 1.6rem 3.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(16, 16, 17, 0.5);
+  transition: border-color 0.3s ease, transform 0.2s ease, background 0.3s ease;
+}
+.permalink-overlay__cta:hover {
+  border-color: rgba(255, 255, 255, 0.7);
+  background: rgba(16, 16, 17, 0.7);
+  transform: translateY(-2px);
+}
+.permalink-overlay__cta--share {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.permalink-overlay__cta--share:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.permalink-overlay__cta-text {
+  font-size: 2.4rem; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.permalink-overlay__cta-sub {
+  font-family: var(--font-mono-regular);
+  font-size: 1.2rem; opacity: 0.4; margin-top: 0.4rem;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+/* === Header CTA (permalink mode) === */
+.header-cta {
+  font-family: var(--font-mono-regular);
+  font-size: 2.4rem; font-weight: 400; line-height: 1.3;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 0.4rem 0;
+  transition: opacity 0.3s ease;
+  color: #33ff88;
+}
+@media (hover: hover) { .header-cta:hover { opacity: 0.7; } }
+
+/* === Permalink overlay — mobile === */
+@media (max-width: 767px) {
+  .permalink-overlay {
+    padding: 1.6rem var(--container-padding) 2.4rem;
+    gap: 1.2rem;
+  }
+  .permalink-overlay__cta {
+    padding: 1.2rem 2.4rem;
+  }
+  .permalink-overlay__cta-text {
+    font-size: 2rem;
+  }
+  .permalink-overlay__label {
+    font-size: 1.6rem;
+  }
+  .permalink-overlay__cert {
+    font-size: 1.2rem;
+  }
+}
+
 /* Hidden input to capture keystrokes */
 #hiddenInput {
   position: fixed; left: -9999px; top: -9999px;
