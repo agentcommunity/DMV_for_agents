@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the Project
 
 ```bash
-python3 -m http.server 8080
+uv run python -m http.server 8080
 # open http://localhost:8080
 ```
 
@@ -13,20 +13,23 @@ No build system. Native ES modules via browser importmap. Serve from project roo
 
 ## Architecture
 
-Interactive 3D web experience: a retro CRT terminal inside a Three.js TV model accepts form input and issues a verification certificate (identity card) on completion.
+Interactive 3D web experience: a retro CRT terminal inside a Three.js TV model accepts form input and issues a holographic verification certificate (identity card) on completion.
 
-**Data flow:** Scroll drives camera zoom → CRT boots at 60% progress → user types form fields → processing bar → `CRTTerminal.onComplete(formData)` fires → `CardPoster.show(formData)` draws and fades in an identity card in the 3D scene.
+**Data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → TnC acceptance → Charter acceptance → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
 
 **Module graph:**
 ```
 app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canvas as Three.js texture)
-        └─► CardPoster.js               (adds mesh to TV's scene)
+        ├─► HoloCard.js                (holographic card, self-contained module)
+        └─► AboutPoster.js             (about panel)
 ```
 
-- `app.js` — Entry point. Wires TV + CardPoster, events (scroll, click, keyboard, resize), sound toggle, clock. Top-level await, no exports.
-- `TV.js` — Three.js scene: GLTF model loading (Draco), camera, renderer, night mode toggle, raycaster, render loop. Calls `crt.update()` every frame and marks texture dirty.
-- `CRTTerminal.js` — Pure Canvas2D, no Three.js dependency. 6-phase boot state machine, form input handling, color scheme swapping, CRT visual effects (scanlines, vignette, glow, noise).
-- `CardPoster.js` — PlaneGeometry + CanvasTexture. Draws CRT-style identity card from form data, fades in via GSAP.
+- `app.js` — Entry point. Wires TV + HoloCard + AboutPoster, events (scroll, click, keyboard, resize, gyro), sound toggle, clock, permalink routing. Top-level await, no exports.
+- `TV.js` — Three.js scene: GLTF model loading (Draco), camera, renderer, night mode toggle, raycaster, card/about zoom/unzoom, `onRender(cb)` callbacks, render loop with delta time.
+- `CRTTerminal.js` — Pure Canvas2D, no Three.js dependency. 8-phase boot state machine (off, flicker, boot text, type selector, form, TnC/charter, processing, done), conditional form fields with validation, color scheme swapping, CRT visual effects.
+- `HoloCard.js` — Self-contained holographic card module. Custom ShaderMaterial (GLSL) with rainbow iridescence, foil lines, glare, fresnel, sparkle. Front + back faces with Canvas2D content. Rarity system, identicon, QR pattern. Bob + tilt animation. See [CARD.md](CARD.md).
+- `CardPoster.js` — **Legacy.** Original flat card, replaced by HoloCard.js.
+- `AboutPoster.js` — PlaneGeometry + CanvasTexture. UI-style about text, toggle show/hide.
 
 **External deps (all CDN, no npm):**
 - Three.js 0.152.2 via importmap
@@ -40,6 +43,7 @@ app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canv
 - **CSS base font-size is 62.5%** so `1rem = 10px`. All rem values are 10x what you'd expect (e.g., `2.4rem` = 24px).
 - **Color schemes are swapped in-place.** `setColorScheme()` remaps existing line color strings. If you add new hardcoded color values in CRTTerminal, add them to the remap logic too.
 - **`flickerRGB`** is an `"R, G, B"` string used in template literal `rgba()` calls throughout CRTTerminal. All glow/scanline/noise effects use it — don't replace with hex.
+- **Cache busting:** All imports use `?v=N` query params. Bump in app.js imports, TV.js import, AND index.html script tag together.
 
 ## Night Mode
 
@@ -52,14 +56,28 @@ Toggled by clicking the TV button (raycaster hit on invisible trigger box). Swap
 | Tone mapping exposure | 3.0 | 0.6 |
 | Fog/clear color | `0x7a7a7a` | `0x454546` |
 
-CardPoster colors are hardcoded green — does not respond to night mode yet.
+HoloCard shader is tone-mapped, so it dims in night mode but holo effects still show through.
+
+## Permalink System
+
+Hash format: `#/CERT-ID` (optionally `#/CERT-ID/agentname`).
+
+In permalink mode:
+- Card shown instantly, camera jumps to it
+- Header "About" swapped to green "Get Yours" CTA
+- Bottom overlay: "Get Yours" + "Share on X" buttons with backdrop blur
+- Click anywhere or Escape to zoom out to full scene view
+- Footer hidden to avoid overlap with overlay
+- Scroll still wired — visitors can explore after unzooming
 
 ## Key Patterns
 
-- **Adding 3D objects:** Get scene via `tv.getScene()`, add meshes. CardPoster demonstrates the pattern.
-- **Adding CRT form fields:** Edit `CRTTerminal.fields` array, update `CardPoster.drawCard()` to render them.
+- **Adding 3D objects:** Get scene via `tv.getScene()`, add meshes. HoloCard demonstrates the pattern.
+- **Frame-synced updates:** Use `tv.onRender(cb)` to get delta-time callbacks in the render loop.
+- **Adding CRT form fields:** Edit the field sets in `CRTTerminal.selectAccountType()`.
 - **New color schemes:** Add to `CRTTerminal.palettes`, call `setColorScheme('name')`.
 - **Scroll-triggered events:** Add thresholds in `TV.animateCameraPosition(progress)` or use `tv.on('animationEnd', cb)`.
+- **Zoom transitions:** When transitioning between zoomed states (card → about), unzoom first with a delay, then zoom to new target.
 
 ## Static Assets
 
