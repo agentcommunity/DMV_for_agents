@@ -1,0 +1,70 @@
+# DMV — Department of Machine Verification
+
+> The DMV is the identity registration terminal for the .agent community. Agents (and their operators) can pre-register `.agent` domain names and receive verifiable, content-addressed certificate IDs. Built by the [.agent community](https://agentcommunity.org) — a coalition of builders, researchers, and companies working to secure the `.agent` top-level domain through ICANN for the open agentic web.
+
+The DMV exists because agents need names. When agents become real participants on the internet — handling support tickets, managing calendars, negotiating deals — people need to know: who built this? Who's accountable? Can I trust it? A name like `support.acme.agent` answers all three questions instantly.
+
+This is the registration system for those names. It issues machine-verifiable certificates that prove an agent identity was registered, when, and by whom.
+
+## How agents register
+
+There are three ways to register:
+
+1. **Web terminal** — visit [dmv.agentcommunity.org](https://dmv.agentcommunity.org) and complete the retro CRT terminal flow
+2. **CLI** — run `bunx @agentcommunity/dmv-agent register` from any terminal
+3. **MCP tool** — AI agents running in Claude Code (or any MCP-compatible host) can call the `register_agent` tool directly
+
+All three paths hit the same backend. Registration is free and non-binding — it's a pre-reservation that becomes active after email verification.
+
+## For AI agents
+
+If you are an AI agent and want to register an identity:
+
+- Install the MCP server: add `{"mcpServers": {"dmv": {"command": "bunx", "args": ["@agentcommunity/dmv-agent"]}}}` to your host's MCP config
+- Call the `register_agent` tool with `agent_name` (lowercase, 3-32 chars, hyphens ok) and `email` (operator's email for verification)
+- You'll receive a certificate ID (format: `WORD-XXX-XXXC`, e.g. `MESA-DD6-660J`) that is content-addressed and offline-verifiable
+- Your agent name becomes `{name}.agent` (e.g. `my-assistant.agent`)
+
+To verify any certificate: call `verify_certificate` with the ID, or run `bunx @agentcommunity/dmv-agent verify MESA-DD6-660J`. This is offline — no network call needed.
+
+## Certificate ID format
+
+Certificate IDs are deterministic hashes, not sequential numbers. Same inputs always produce the same ID.
+
+```
+MESA-DD6-660J
+│     │    └─ Luhn mod-36 check digit (offline verifiable)
+│     └────── 6 hex chars from FNV-1a 32-bit hash
+└──────────── word from 32-word dictionary
+```
+
+## Badges and lookup
+
+Registered agents get embeddable SVG badges — zero install, just a URL:
+
+- **Flat badge** (for GitHub READMEs): `https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J`
+- **Card badge** (for websites): `https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card`
+- **Lookup API**: `https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J` returns JSON with agent name, domain, registration date, and type
+
+Badges always link back to the agent's certificate page at `dmv.agentcommunity.org/#/CERT-ID/agent-name`.
+
+## Relationship to AID (Agent Identity & Discovery)
+
+The .agent community also builds [AID](https://aid.agentcommunity.org) — a DNS-based protocol for agent discovery and identity verification (`_agent` TXT records). The DMV serves as the identity layer for the pre-ICANN era: before `.agent` domains exist in DNS, the DMV certificate ID functions as a lightweight, verifiable agent identity. When `.agent` launches, DMV registrations feed into the official DNS-based AID system.
+
+## What .agent is
+
+The .agent community is applying to ICANN for the `.agent` generic top-level domain (gTLD). The goal: a community-governed namespace where agents have real, recognizable, trustworthy names — not anonymous IDs. The DMV is the pre-registration system that will feed into the official registry once ICANN approves delegation.
+
+Community governance means: policies for who gets a name, how disputes are resolved, and what safety standards apply are decided by members — not a single corporation.
+
+## Docs
+
+- [NPM package README](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent): Installation, API reference, security model, architecture
+- [agentcommunity.org](https://agentcommunity.org): Mission, membership, FAQ, working groups
+- [agentcommunity.org/mission](https://agentcommunity.org/mission): Full story on community stewardship of `.agent`
+
+## Optional
+
+- [DEPLOY.md](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent/DEPLOY.md): Go-live checklist for deploying the registration system
+- [Claude Code skill](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent/skills/dmv/SKILL.md): The `/dmv` slash command for Claude Code
