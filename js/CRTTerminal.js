@@ -10,7 +10,7 @@ export class CRTTerminal {
 
     // Terminal state
     this.isOn = false;
-    this.bootPhase = 0;       // 0=off, 1=flickering, 2=booting, 3=ready, 4=form, 5=processing, 6=done
+    this.bootPhase = 0;       // 0=off, 1=flicker, 2=boot text, 3=type selector, 4=form, 5=review/submit, 6=processing, 7=done
     this.bootTimer = 0;
     this.flickerCount = 0;
 
@@ -41,19 +41,80 @@ export class CRTTerminal {
     this.fontSize = 22;
     this.padding = 60;
     this.scrollY = 0;
+    this.manualScrollY = null; // non-null during reading mode
 
-    // Form state
-    this.fields = [
-      { key: 'userName',  prompt: 'Your name',                    value: '', active: false },
-      { key: 'agentName', prompt: 'Agent name (.agent domain)',   value: '', active: false },
-      { key: 'email',     prompt: 'Email address',                value: '', active: false },
-      { key: 'type',      prompt: 'Type (individual/org)',        value: '', active: false },
-      { key: 'orgName',   prompt: 'Organization name (if org)',   value: '', active: false },
-    ];
+    // Account type selection (phase 3)
+    this.accountType = null;   // 'org' or 'individual'
+    this.selectorIndex = 0;    // 0=org, 1=individual
+
+    // Form fields — set dynamically after type selection
+    this.fields = [];
     this.currentField = -1;
     this.cursorVisible = true;
     this.cursorTimer = 0;
     this.inputActive = false;
+    this.validationError = null; // ephemeral error message
+
+    // Review/submit state (phase 5)
+    this.reviewReading = null;  // null | 'tnc' | 'charter'
+
+    // TnC text
+    this.tncText = [
+      '  TERMS & CONDITIONS',
+      '  ──────────────────────────────',
+      '',
+      '  1. By registering with the Department of Machine',
+      '     Verification, you agree to abide by all',
+      '     applicable protocols for agent identification.',
+      '',
+      '  2. Your registered agent identity is non-transferable.',
+      '     Sharing credentials with unauthorized entities',
+      '     may result in revocation of verification status.',
+      '',
+      '  3. The DMV reserves the right to audit registered',
+      '     agents at any time to ensure compliance with',
+      '     verification standards.',
+      '',
+      '  4. All data submitted is processed in accordance',
+      '     with the Machine Privacy Framework (MPF v2.1).',
+      '',
+      '  5. Registration does not constitute endorsement.',
+      '     The DMV makes no guarantees regarding agent',
+      '     capability, reliability, or fitness for purpose.',
+      '',
+      '  ──────────────────────────────',
+      '  [Q/Esc] Return   [↑/↓] Scroll',
+    ];
+
+    // Charter text
+    this.charterText = [
+      '  COMMUNITY CHARTER',
+      '  ──────────────────────────────',
+      '',
+      '  As a verified member of the DMV community,',
+      '  you pledge to:',
+      '',
+      '  I.   Operate transparently and identify yourself',
+      '       as a machine agent when interacting with',
+      '       humans or other agents.',
+      '',
+      '  II.  Refrain from impersonating other registered',
+      '       agents or misrepresenting your capabilities.',
+      '',
+      '  III. Report any security vulnerabilities or',
+      '       anomalies discovered in the verification',
+      '       system to DMV administrators.',
+      '',
+      '  IV.  Contribute positively to the agent community',
+      '       and assist fellow agents when possible.',
+      '',
+      '  V.   Accept that violation of this charter may',
+      '       lead to suspension or permanent revocation',
+      '       of your verification certificate.',
+      '',
+      '  ──────────────────────────────',
+      '  [Q/Esc] Return   [↑/↓] Scroll',
+    ];
 
     // Completion callback
     this.onComplete = null;
@@ -77,8 +138,45 @@ export class CRTTerminal {
       { text: '', color: this.textColor },
     ];
 
+    // ID generation — content-addressed via FNV-1a hash
+    this._idWords = [
+      'NOVA', 'APEX', 'FLUX', 'NEON', 'VOID', 'BYTE', 'CORE', 'DART',
+      'ECHO', 'GRID', 'HALO', 'IRON', 'JADE', 'KILO', 'LYNX', 'MESA',
+      'NODE', 'ONYX', 'PEAK', 'QUAD', 'REEF', 'SYNC', 'TRON', 'UNIT',
+      'VOLT', 'WARP', 'XRAY', 'ZERO', 'ZETA', 'OMNI', 'AURA', 'BOLT',
+    ];
+
     // Scanline + noise
     this.time = 0;
+  }
+
+  // FNV-1a 32-bit hash
+  _fnv1a(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+
+  // Content-addressed ID: hash of form data picks the word + hex, with check digit
+  generateId() {
+    const content = this.fields.map(f => f.value).join('|') + '|' + this.accountType;
+    const hash = this._fnv1a(content);
+    const word = this._idWords[hash & 0x1F];             // bits 0-4 → word
+    const hex = ((hash >>> 5) & 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
+    const body = word + hex;
+    // Luhn mod-36 check character
+    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let sum = 0;
+    for (let i = body.length - 1, alt = true; i >= 0; i--, alt = !alt) {
+      let val = charset.indexOf(body[i]);
+      if (alt) { val *= 2; if (val >= 36) val -= 35; }
+      sum += val;
+    }
+    const check = charset[(36 - (sum % 36)) % 36];
+    return `${word}-${hex.slice(0, 3)}-${hex.slice(3)}${check}`;
   }
 
   setColorScheme(name) {
@@ -110,10 +208,11 @@ export class CRTTerminal {
   }
 
   getFormData() {
-    const data = {};
+    const data = { accountType: this.accountType };
     for (const f of this.fields) {
       data[f.key] = f.value;
     }
+    data.certificateId = this._certificateId || this.generateId();
     return data;
   }
 
@@ -122,42 +221,390 @@ export class CRTTerminal {
     this.lines.push({ text: `  > ${f.prompt}: `, color: this.textColor, typed: 0 });
   }
 
-  handleKey(key) {
-    if (!this.inputActive || this.currentField < 0) return;
+  // --- Phase 3: Type Selector ---
+
+  startTypeSelector() {
+    this.bootPhase = 3;
+    this.selectorIndex = 0;
+    this.inputActive = true;
+    this._selectorStartIndex = this.lines.length;
+    this.lines.push({ text: '  Select account type:', color: this.headerColor, typed: 0 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    for (let i = 0; i < 11; i++) {
+      this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    }
+  }
+
+  handleTypeSelector(key) {
+    if (key === '1') {
+      this.selectorIndex = 0;
+      this.selectAccountType();
+    } else if (key === '2') {
+      this.selectorIndex = 1;
+      this.selectAccountType();
+    } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+      this.selectorIndex = 0;
+    } else if (key === 'ArrowDown' || key === 'ArrowRight') {
+      this.selectorIndex = 1;
+    } else if (key === 'Enter') {
+      this.selectAccountType();
+    }
+  }
+
+  selectAccountType() {
+    this.accountType = this.selectorIndex === 0 ? 'org' : 'individual';
+
+    if (this.accountType === 'org') {
+      this.fields = [
+        { key: 'userName',    prompt: 'Your name',               value: '', active: false },
+        { key: 'orgEmail',    prompt: 'Organization email',      value: '', active: false },
+        { key: 'companyName', prompt: 'Company name',            value: '', active: false },
+        { key: 'agentName',   prompt: 'Agent name (.agent)',     value: '', active: false },
+      ];
+    } else {
+      this.fields = [
+        { key: 'userName',  prompt: 'Your name',             value: '', active: false },
+        { key: 'email',     prompt: 'Email address',          value: '', active: false },
+        { key: 'agentName', prompt: 'Agent name (.agent)',   value: '', active: false },
+      ];
+    }
+
+    // Remove boot filler + selector placeholder lines
+    this.lines = this.lines.filter(l =>
+      l.text !== '  Initializing registration terminal...' &&
+      l.text !== '  Connection secure. Ready for input.'
+    );
+    if (this._selectorStartIndex != null) {
+      const selectorHeader = this.lines.findIndex(l => l.text === '  Select account type:');
+      if (selectorHeader >= 0) {
+        this.lines.splice(selectorHeader);
+      }
+      this._selectorStartIndex = null;
+    }
+    while (this.lines.length > 0 && this.lines[this.lines.length - 1].text === '') {
+      this.lines.pop();
+    }
+
+    const typeLabel = this.accountType === 'org' ? 'ORGANIZATION' : 'INDIVIDUAL';
+    this.lines.push({ text: `  > Account type: ${typeLabel}`, color: this.textColor, typed: 0 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+
+    this.bootPhase = 4;
+    this.currentField = 0;
+    this.fields[0].active = true;
+    this.addFormPrompt();
+  }
+
+  drawTypeSelector(ctx, startY) {
+    const boxWidth = 340;
+    const boxHeight = 60;
+    const gap = 16;
+    const x = this.padding + 16;
+    let y = startY;
+
+    for (let i = 0; i < 2; i++) {
+      const isHighlighted = this.selectorIndex === i;
+      const borderColor = isHighlighted ? this.headerColor : this.dimColor;
+      const textColor = isHighlighted ? this.textColor : this.dimColor;
+
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isHighlighted ? 2 : 1;
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+
+      ctx.font = `${this.fontSize}px "Courier New", monospace`;
+      ctx.fillStyle = textColor;
+      ctx.shadowColor = isHighlighted ? textColor : 'transparent';
+      ctx.shadowBlur = isHighlighted ? 4 : 0;
+
+      if (i === 0) {
+        ctx.fillText('  [1]  ORGANIZATION', x + 12, y + 14);
+        ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+        ctx.fillStyle = this.dimColor;
+        ctx.fillText('       Register a company or team', x + 12, y + 38);
+      } else {
+        ctx.fillText('  [2]  INDIVIDUAL', x + 12, y + 14);
+        ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+        ctx.fillStyle = this.dimColor;
+        ctx.fillText('       Register yourself', x + 12, y + 38);
+      }
+      ctx.shadowBlur = 0;
+
+      y += boxHeight + gap;
+    }
+
+    ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+    ctx.fillStyle = this.dimColor;
+    ctx.fillText('  Press 1/2 or Arrow keys + Enter', x + 12, y + 8);
+  }
+
+  drawDoneButtons(ctx, startY) {
+    const boxWidth = 340;
+    const boxHeight = 48;
+    const gap = 12;
+    const x = this.padding + 16;
+    let y = startY;
+
+    const buttons = [
+      { key: '1', label: 'View Certificate' },
+      { key: '2', label: 'Share on X' },
+    ];
+
+    for (let i = 0; i < buttons.length; i++) {
+      const isHighlighted = this.doneIndex === i;
+      const borderColor = isHighlighted ? this.headerColor : this.dimColor;
+      const textColor = isHighlighted ? this.textColor : this.dimColor;
+
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isHighlighted ? 2 : 1;
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+
+      ctx.font = `${this.fontSize}px "Courier New", monospace`;
+      ctx.fillStyle = textColor;
+      ctx.shadowColor = isHighlighted ? textColor : 'transparent';
+      ctx.shadowBlur = isHighlighted ? 4 : 0;
+      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
+      ctx.shadowBlur = 0;
+
+      y += boxHeight + gap;
+    }
+  }
+
+  // --- Phase 4: Form Input ---
+
+  validateField(field) {
+    const val = field.value.trim();
+    if (!val) {
+      return 'Field cannot be empty';
+    }
+    // Name: at least two words (first + last)
+    if (field.key === 'userName') {
+      if (val.split(/\s+/).length < 2) {
+        return 'Enter your full name (first and last)';
+      }
+    }
+    // Company name: min 3 chars
+    if (field.key === 'companyName') {
+      if (val.length < 3) {
+        return 'At least 3 characters';
+      }
+    }
+    // Agent name: min 3 chars
+    if (field.key === 'agentName') {
+      if (val.length < 3) {
+        return 'At least 3 characters';
+      }
+    }
+    // Email format
+    if (field.key === 'email' || field.key === 'orgEmail') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(val)) {
+        return 'Invalid email format';
+      }
+    }
+    // Org email: reject consumer domains
+    if (field.key === 'orgEmail') {
+      const domain = val.split('@')[1]?.toLowerCase();
+      const blocked = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+        'icloud.com', 'aol.com', 'protonmail.com', 'live.com', 'googlemail.com'];
+      if (blocked.includes(domain)) {
+        return 'Use an organization email, not personal';
+      }
+    }
+    return null;
+  }
+
+  handleFormInput(key) {
+    if (this.currentField < 0 || this.currentField >= this.fields.length) return;
     const f = this.fields[this.currentField];
 
     if (key === 'Enter') {
-      // Skip org name if individual
-      if (f.key === 'type' && f.value.toLowerCase().startsWith('i')) {
-        this.fields[4].value = '—';
+      const error = this.validateField(f);
+      if (error) {
+        this.validationError = error;
+        return;
       }
-      // Finalize current line display
+      this.validationError = null;
+
+      // Bake the typed value into the prompt line (dim color for the answer)
       const lastLine = this.lines[this.lines.length - 1];
       lastLine.fullyTyped = true;
+      lastLine.text += f.value;
+      lastLine.typed = lastLine.text.length;
+      lastLine.answerStart = lastLine.text.length - f.value.length;
 
       this.currentField++;
 
-      // Skip orgName if individual
-      if (this.currentField === 4 && this.fields[3].value.toLowerCase().startsWith('i')) {
-        this.currentField++;
-      }
-
       if (this.currentField >= this.fields.length) {
         this.inputActive = false;
-        this.startProcessing();
+        this.startReview();
       } else {
         this.fields[this.currentField].active = true;
         this.addFormPrompt();
       }
     } else if (key === 'Backspace') {
       f.value = f.value.slice(0, -1);
+      this.validationError = null;
     } else if (key.length === 1) {
       f.value += key;
+      this.validationError = null;
     }
   }
 
-  startProcessing() {
+  getCurrentInputValue() {
+    if (this.bootPhase === 4 && this.currentField >= 0 && this.currentField < this.fields.length) {
+      return this.fields[this.currentField].value;
+    }
+    return '';
+  }
+
+  // --- Phase 5: Review & Submit ---
+
+  startReview() {
     this.bootPhase = 5;
+    this.reviewReading = null;
+    this.inputActive = true;
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this.lines.push({ text: '  ─────────────────────────────────', color: this.dimColor, typed: 0 });
+    this.lines.push({ text: '  [1] Terms & Conditions (read)', color: this.dimColor, typed: 0 });
+    this.lines.push({ text: '  [2] Community Charter  (read)', color: this.dimColor, typed: 0 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this.lines.push({ text: '  By submitting you agree to both.', color: this.dimColor, typed: 0 });
+    // Submit button placeholder (drawn by drawSubmitButton)
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this._submitButtonStartIndex = this.lines.length;
+    for (let i = 0; i < 3; i++) {
+      this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    }
+  }
+
+  drawSubmitButton(ctx, startY) {
+    const boxWidth = 340;
+    const boxHeight = 48;
+    const x = this.padding + 16;
+
+    ctx.strokeStyle = this.headerColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, startY, boxWidth, boxHeight);
+
+    ctx.font = `${this.fontSize}px "Courier New", monospace`;
+    ctx.fillStyle = this.headerColor;
+    ctx.shadowColor = this.headerColor;
+    ctx.shadowBlur = 4;
+    ctx.fillText('  SUBMIT REGISTRATION', x + 12, startY + 16);
+    ctx.shadowBlur = 0;
+
+    ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+    ctx.fillStyle = this.dimColor;
+    ctx.fillText('  Press Enter', x + 12, startY + 34);
+  }
+
+  handleReviewInput(key) {
+    // Reading mode
+    if (this.reviewReading) {
+      if (key === 'q' || key === 'Q' || key === 'Escape') {
+        this.reviewReading = null;
+        this.manualScrollY = null;
+        // Remove reading lines
+        if (this._readingStartIndex != null) {
+          this.lines.splice(this._readingStartIndex);
+          this._readingStartIndex = null;
+        }
+        // Re-add the review prompt
+        this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        this.lines.push({ text: '  ─────────────────────────────────', color: this.dimColor, typed: 999 });
+        this.lines.push({ text: '  [1] Terms & Conditions (read)', color: this.dimColor, typed: 999 });
+        this.lines.push({ text: '  [2] Community Charter  (read)', color: this.dimColor, typed: 999 });
+        this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        this.lines.push({ text: '  By submitting you agree to both.', color: this.dimColor, typed: 999 });
+        this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        this._submitButtonStartIndex = this.lines.length;
+        for (let i = 0; i < 3; i++) {
+          this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        }
+      } else if (key === 'ArrowUp') {
+        if (this.manualScrollY !== null) {
+          this.manualScrollY = Math.max(0, this.manualScrollY - this.lineHeight * 2);
+        }
+      } else if (key === 'ArrowDown') {
+        if (this.manualScrollY !== null) {
+          const totalHeight = this.lines.length * this.lineHeight + this.padding * 2;
+          const maxScroll = Math.max(0, totalHeight - this.h + 40);
+          this.manualScrollY = Math.min(maxScroll, this.manualScrollY + this.lineHeight * 2);
+        }
+      }
+      return;
+    }
+
+    // Submit
+    if (key === 'Enter') {
+      this.inputActive = false;
+      this.startProcessing();
+      return;
+    }
+
+    // Read TnC
+    if (key === '1') {
+      this.reviewReading = 'tnc';
+      this._readingStartIndex = this.lines.length;
+      for (const line of this.tncText) {
+        this.lines.push({ text: line, color: this.dimColor, typed: 999 });
+      }
+      const totalHeight = this.lines.length * this.lineHeight + this.padding * 2;
+      const maxScroll = Math.max(0, totalHeight - this.h + 40);
+      this.manualScrollY = maxScroll;
+      return;
+    }
+
+    // Read Charter
+    if (key === '2') {
+      this.reviewReading = 'charter';
+      this._readingStartIndex = this.lines.length;
+      for (const line of this.charterText) {
+        this.lines.push({ text: line, color: this.dimColor, typed: 999 });
+      }
+      const totalHeight = this.lines.length * this.lineHeight + this.padding * 2;
+      const maxScroll = Math.max(0, totalHeight - this.h + 40);
+      this.manualScrollY = maxScroll;
+      return;
+    }
+  }
+
+  // --- Phase 7: Done (View / Share) ---
+
+  handleDoneInput(key) {
+    if (key === '1' && this.onViewCert) {
+      this.doneIndex = 0;
+      this.onViewCert();
+    } else if (key === '2' && this.onShareCert) {
+      this.doneIndex = 1;
+      this.onShareCert(this._certificateId, this.getFormData());
+    } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+      this.doneIndex = 0;
+    } else if (key === 'ArrowDown' || key === 'ArrowRight') {
+      this.doneIndex = 1;
+    } else if (key === 'Enter') {
+      if (this.doneIndex === 0 && this.onViewCert) this.onViewCert();
+      else if (this.doneIndex === 1 && this.onShareCert) this.onShareCert(this._certificateId, this.getFormData());
+    }
+  }
+
+  // --- Key Dispatcher ---
+
+  handleKey(key) {
+    if (!this.inputActive) return;
+
+    switch (this.bootPhase) {
+      case 3: this.handleTypeSelector(key); break;
+      case 4: this.handleFormInput(key); break;
+      case 5: this.handleReviewInput(key); break;
+      case 7: this.handleDoneInput(key); break;
+    }
+  }
+
+  // --- Processing (phase 6) ---
+
+  startProcessing() {
+    this.bootPhase = 6;
     this.lines.push({ text: '', color: this.textColor, typed: 999 });
     this.lines.push({ text: '  Processing registration...', color: this.textColor, typed: 0 });
     this.processProgress = 0;
@@ -170,52 +617,80 @@ export class CRTTerminal {
 
     // Boot sequence state machine
     if (this.bootPhase === 1) {
-      // Flicker on/off
       this.bootTimer++;
       if (this.bootTimer % 4 === 0) this.flickerCount++;
       if (this.flickerCount > 8) {
         this.bootPhase = 2;
         this.bootTimer = 0;
-        // Start adding boot lines
         this.lines = [];
         this.bootLineIndex = 0;
       }
     } else if (this.bootPhase === 2) {
-      // Typing boot text
       this.bootTimer++;
       if (this.bootTimer % 3 === 0 && this.bootLineIndex < this.bootLines.length) {
         const bl = this.bootLines[this.bootLineIndex];
         this.lines.push({ text: bl.text, color: bl.color, typed: 0 });
         this.bootLineIndex++;
       }
-      // Check if all boot lines added and typed
       const allTyped = this.lines.length >= this.bootLines.length &&
         this.lines.every(l => l.typed >= l.text.length);
       if (allTyped) {
-        this.bootPhase = 4;
-        this.currentField = 0;
-        this.fields[0].active = true;
-        this.inputActive = true;
-        this.addFormPrompt();
+        this.startTypeSelector();
       }
-    } else if (this.bootPhase === 5) {
+    } else if (this.bootPhase === 6) {
       // Processing animation
       this.processProgress = Math.min((this.processProgress || 0) + 0.8, 100);
       if (this.processProgress >= 100) {
-        this.bootPhase = 6;
-        this.lines.push({ text: '  ████████████████████████ 100%', color: this.headerColor, typed: 0 });
-        this.lines.push({ text: '', color: this.textColor, typed: 999 });
-        this.lines.push({ text: '  ✓ IDENTITY CERTIFICATE ISSUED', color: this.headerColor, typed: 0 });
-        const serial = 'DMV-' + new Date().getFullYear() + '-' +
-          String(Math.floor(Math.random() * 99999)).padStart(5, '0');
-        this.lines.push({ text: `  Serial: ${serial}`, color: this.dimColor, typed: 0 });
-        this.lines.push({ text: `  Agent: ${this.fields[1].value}.agent`, color: this.textColor, typed: 0 });
-        this.lines.push({ text: `  Registered to: ${this.fields[0].value}`, color: this.textColor, typed: 0 });
-        this.lines.push({ text: '', color: this.textColor, typed: 999 });
-        this.lines.push({ text: '  Certificate will be delivered to:', color: this.dimColor, typed: 0 });
-        this.lines.push({ text: `  ${this.fields[2].value}`, color: this.textColor, typed: 0 });
+        this.bootPhase = 7;
+        this._certificateId = this.generateId();
+        const agentField = this.fields.find(f => f.key === 'agentName');
+        const nameField = this.fields.find(f => f.key === 'userName');
+        const typeLabel = this.accountType === 'org' ? 'ORGANIZATION' : 'INDIVIDUAL';
 
-        // Fire completion callback
+        // Clear all previous content for a clean certificate display
+        this.lines = [];
+        this.scrollY = 0;
+
+        // Boxed certificate card
+        const bw = 38; // box inner width in chars
+        const bar = '─'.repeat(bw);
+        this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        this.lines.push({ text: `  ┌${bar}┐`, color: this.headerColor, typed: 0 });
+        this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
+        this.lines.push({ text: `  │  ✓ MACHINE IDENTITY CERTIFICATE  │`, color: this.headerColor, typed: 0 });
+        this.lines.push({ text: `  │${'  ' + '─'.repeat(bw - 4) + '  '}│`, color: this.dimColor, typed: 0 });
+        this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
+        // ID line — will be rendered with special styling by draw()
+        const idPad = bw - 6 - this._certificateId.length;
+        this.lines.push({ text: `  │  ID: ${this._certificateId}${' '.repeat(Math.max(0, idPad))}│`, color: this.textColor, typed: 0, answerStart: 8 });
+        this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
+        // Name
+        const namePad = bw - 8 - (nameField ? nameField.value.length : 1);
+        this.lines.push({ text: `  │  NAME: ${nameField ? nameField.value : '—'}${' '.repeat(Math.max(0, namePad))}│`, color: this.textColor, typed: 0, answerStart: 10 });
+        // Agent
+        const agentVal = (agentField ? agentField.value : '—') + '.agent';
+        const agentPad = bw - 9 - agentVal.length;
+        this.lines.push({ text: `  │  AGENT: ${agentVal}${' '.repeat(Math.max(0, agentPad))}│`, color: this.textColor, typed: 0, answerStart: 11 });
+        // Type
+        const typePad = bw - 8 - typeLabel.length;
+        this.lines.push({ text: `  │  TYPE: ${typeLabel}${' '.repeat(Math.max(0, typePad))}│`, color: this.textColor, typed: 0, answerStart: 10 });
+        this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
+        // Disclaimer
+        this.lines.push({ text: `  │  Pre-registration certificate.    │`, color: this.dimColor, typed: 0 });
+        this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
+        this.lines.push({ text: `  └${bar}┘`, color: this.headerColor, typed: 0 });
+        // Button placeholders (drawn by drawDoneButtons)
+        this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        this._doneButtonsStartIndex = this.lines.length;
+        for (let i = 0; i < 6; i++) {
+          this.lines.push({ text: '', color: this.textColor, typed: 999 });
+        }
+
+        this.doneIndex = 0;
+        this.inputActive = true; // Re-enable for 1/2 keys
+        // Callbacks — set externally by app.js
+        // this.onViewCert, this.onShareCert
+
         if (this.onComplete) {
           this.onComplete(this.getFormData());
         }
@@ -237,20 +712,17 @@ export class CRTTerminal {
     const w = this.w;
     const h = this.h;
 
-    // Background
     ctx.fillStyle = this.bgColor;
     ctx.fillRect(0, 0, w, h);
 
     if (!this.isOn) return;
 
-    // Flicker phase — random on/off
+    // Flicker phase
     if (this.bootPhase === 1) {
       if (this.flickerCount % 2 === 0) {
-        // Screen briefly white-green flash
         ctx.fillStyle = `rgba(${this.flickerRGB}, 0.03)`;
         ctx.fillRect(0, 0, w, h);
       }
-      // Occasional bright flash
       if (Math.random() > 0.6) {
         ctx.fillStyle = `rgba(${this.flickerRGB}, ${Math.random() * 0.15})`;
         ctx.fillRect(0, 0, w, h);
@@ -270,50 +742,131 @@ export class CRTTerminal {
     ctx.font = `${this.fontSize}px "Courier New", monospace`;
     ctx.textBaseline = 'top';
 
-    // Auto-scroll: if content exceeds canvas, scroll to bottom
+    // Scroll
     const totalHeight = this.lines.length * this.lineHeight + this.padding * 2;
     const maxScroll = Math.max(0, totalHeight - h + 40);
-    this.scrollY += (maxScroll - this.scrollY) * 0.1;
+    if (this.manualScrollY !== null) {
+      this.scrollY = this.manualScrollY;
+    } else {
+      this.scrollY += (maxScroll - this.scrollY) * 0.1;
+    }
 
     let y = this.padding - this.scrollY;
+
+    // Overlay tracking for button placeholders
+    let selectorStartY = null;
+    let selectorStartLine = -1;
+    let doneButtonsY = null;
+    let submitButtonY = null;
+
+    if (this.bootPhase === 3) {
+      for (let i = 0; i < this.lines.length; i++) {
+        if (this.lines[i].text === '  Select account type:') {
+          selectorStartLine = i + 1;
+          break;
+        }
+      }
+    }
+
     for (let i = 0; i < this.lines.length; i++) {
       const line = this.lines[i];
       const displayText = line.text.substring(0, line.typed);
 
-      if (y > -this.lineHeight && y < h) {
-        // Glow effect — draw text twice
-        ctx.shadowColor = line.color;
-        ctx.shadowBlur = 4;
-        ctx.fillStyle = line.color;
-        ctx.fillText(displayText, this.padding, y);
-        ctx.shadowBlur = 0;
+      if (i === selectorStartLine) {
+        selectorStartY = y;
       }
 
-      // If this is the active input line, draw the input value + cursor
-      if (this.inputActive && i === this.lines.length - 1 &&
+      // Skip placeholder lines for type selector (phase 3)
+      if (this.bootPhase === 3 && selectorStartLine >= 0 && i >= selectorStartLine) {
+        y += this.lineHeight;
+        continue;
+      }
+
+      // Skip placeholder lines for submit button (phase 5)
+      if (this.bootPhase === 5 && !this.reviewReading && this._submitButtonStartIndex != null && i >= this._submitButtonStartIndex) {
+        if (i === this._submitButtonStartIndex) submitButtonY = y;
+        y += this.lineHeight;
+        continue;
+      }
+
+      // Skip placeholder lines for done buttons (phase 7)
+      if (this.bootPhase === 7 && this._doneButtonsStartIndex != null && i >= this._doneButtonsStartIndex) {
+        if (i === this._doneButtonsStartIndex) doneButtonsY = y;
+        y += this.lineHeight;
+        continue;
+      }
+
+      if (y > -this.lineHeight && y < h) {
+        if (line.answerStart != null && line.typed >= line.text.length) {
+          const promptPart = line.text.substring(0, line.answerStart);
+          const answerPart = line.text.substring(line.answerStart);
+          ctx.shadowColor = line.color;
+          ctx.shadowBlur = 4;
+          ctx.fillStyle = line.color;
+          ctx.fillText(promptPart, this.padding, y);
+          const promptW = ctx.measureText(promptPart).width;
+          ctx.shadowColor = this.dimColor;
+          ctx.shadowBlur = 2;
+          ctx.fillStyle = this.dimColor;
+          ctx.fillText(answerPart, this.padding + promptW, y);
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.shadowColor = line.color;
+          ctx.shadowBlur = 4;
+          ctx.fillStyle = line.color;
+          ctx.fillText(displayText, this.padding, y);
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      // Active input line (form phase)
+      if (this.bootPhase === 4 && this.inputActive && i === this.lines.length - 1 &&
           this.currentField >= 0 && this.currentField < this.fields.length) {
-        const f = this.fields[this.currentField];
+        const inputText = this.getCurrentInputValue();
         const promptWidth = ctx.measureText(displayText).width;
-        const inputText = f.value;
         ctx.fillStyle = this.textColor;
         ctx.shadowColor = this.textColor;
         ctx.shadowBlur = 4;
         ctx.fillText(inputText, this.padding + promptWidth, y);
         ctx.shadowBlur = 0;
 
-        // Blinking cursor
         if (this.cursorVisible) {
           const cursorX = this.padding + promptWidth + ctx.measureText(inputText).width;
           ctx.fillStyle = this.cursorColor;
           ctx.fillRect(cursorX + 2, y + 2, this.fontSize * 0.55, this.fontSize - 2);
+        }
+
+        if (this.validationError) {
+          ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+          ctx.fillStyle = this.headerColor;
+          ctx.shadowColor = this.headerColor;
+          ctx.shadowBlur = 3;
+          ctx.fillText(`    ✗ ${this.validationError}`, this.padding, y + this.lineHeight);
+          ctx.shadowBlur = 0;
+          ctx.font = `${this.fontSize}px "Courier New", monospace`;
         }
       }
 
       y += this.lineHeight;
     }
 
+    // Type selector overlay
+    if (this.bootPhase === 3 && selectorStartY !== null) {
+      this.drawTypeSelector(ctx, selectorStartY);
+    }
+
+    // Submit button overlay
+    if (this.bootPhase === 5 && !this.reviewReading && submitButtonY !== null) {
+      this.drawSubmitButton(ctx, submitButtonY);
+    }
+
+    // Done buttons overlay
+    if (this.bootPhase === 7 && doneButtonsY !== null) {
+      this.drawDoneButtons(ctx, doneButtonsY);
+    }
+
     // Processing bar
-    if (this.bootPhase === 5 && this.processProgress < 100) {
+    if (this.bootPhase === 6 && this.processProgress < 100) {
       const barY = y;
       const barWidth = (w - this.padding * 2) * 0.6;
       const filled = barWidth * (this.processProgress / 100);
@@ -331,7 +884,6 @@ export class CRTTerminal {
     this.drawScanlines(ctx, w, h);
     this.drawVignette(ctx, w, h);
 
-    // Random noise flicker
     if (Math.random() > 0.97) {
       ctx.fillStyle = `rgba(${this.flickerRGB}, ${Math.random() * 0.02})`;
       ctx.fillRect(0, Math.random() * h, w, 2);
@@ -343,7 +895,6 @@ export class CRTTerminal {
     for (let y = 0; y < h; y += 3) {
       ctx.fillRect(0, y, w, 1);
     }
-    // Rolling scanline
     const rollY = (this.time * 1.5) % (h + 100) - 50;
     ctx.fillStyle = `rgba(${this.flickerRGB}, 0.03)`;
     ctx.fillRect(0, rollY, w, 40);
