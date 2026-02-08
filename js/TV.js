@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { CRTTerminal } from './CRTTerminal.js';
+import { CRTTerminal } from './CRTTerminal.js?v=6';
 
 const gsap = window.gsap;
 
@@ -25,6 +25,16 @@ export class TV {
     this.mouseTarget = new THREE.Vector2(0, 0);
     this._NDC = { x: 0, y: 0 };
     this._intersects = [];
+
+    // Card zoom
+    this.cardMesh = null;
+    this.isCardZoomed = false;
+    this.savedCameraState = null;
+
+    // About zoom
+    this.aboutMesh = null;
+    this.isAboutZoomed = false;
+    this.savedAboutCameraState = null;
 
     // Sizes
     this.sizes = {
@@ -72,6 +82,8 @@ export class TV {
     this.gltfLoader.setDRACOLoader(this.dracoLoader);
 
     this._animationEndCallbacks = [];
+    this._renderCallbacks = [];
+    this._clock = new THREE.Clock();
 
     document.addEventListener('mouseleave', (e) => {
       if (e.clientY <= 0 || e.clientX <= 0 ||
@@ -176,12 +188,157 @@ export class TV {
   }
 
   rotateCamera() {
-    if (!this.camera) return;
+    if (!this.camera || this.isCardZoomed || this.isAboutZoomed) return;
     this.mouseTarget.lerp(this.toNDC(), 0.05);
     this.camera.position.x = 0.5 * 14.7 * this.mouseTarget.x * (1 - this.progress);
-    this.camera.position.z = (1 - this.progress) * 20 + this.progress * 3.6;
+    // Pull back on narrow viewports so TV fits in frame
+    const endZ = this.sizes.aspect < 1 ? 3.6 + (1 - this.sizes.aspect) * 2.5 : 3.6;
+    this.camera.position.z = (1 - this.progress) * 20 + this.progress * endZ;
     this.camera.position.y = (1 - this.progress) * -0.5 + this.progress * 0.5;
     this.camera.lookAt(0, 0.5, 0);
+  }
+
+  // Compute camera distance so a rectangle of given world-size fits in viewport
+  _zoomDistanceToFit(width, height, margin = 1.15) {
+    const fovRad = this.camera.fov * Math.PI / 180;
+    const halfTan = Math.tan(fovRad / 2);
+    const aspect = this.sizes.aspect;
+    const distH = (height / 2) / halfTan;
+    const distW = (width / 2) / (halfTan * aspect);
+    return Math.max(distH, distW) * margin;
+  }
+
+  // Position camera along a mesh's facing normal at the given distance
+  _zoomTarget(mesh, dist) {
+    const pos = mesh.position;
+    const ry = mesh.rotation.y;
+    return {
+      x: pos.x + Math.sin(ry) * dist,
+      y: pos.y,
+      z: pos.z + Math.cos(ry) * dist,
+    };
+  }
+
+  // --- Card Zoom ---
+
+  setCardMesh(mesh) {
+    this.cardMesh = mesh;
+  }
+
+  // Instantly position camera at card (no animation, for permalink mode)
+  jumpToCard() {
+    if (!this.camera || !this.cardMesh) return;
+    this.isCardZoomed = true;
+    this.progress = 1; // Prevent rotateCamera from overriding
+    const geo = this.cardMesh.geometry.parameters;
+    const margin = this.sizes.aspect < 1 ? 1.5 : 1.3;
+    const dist = this._zoomDistanceToFit(geo.width, geo.height, margin);
+    const target = this._zoomTarget(this.cardMesh, dist);
+    // Offset camera down so card renders in upper portion of viewport (clears overlay)
+    target.y -= this.sizes.aspect < 1 ? 0.35 : 0.2;
+    this.camera.position.set(target.x, target.y, target.z);
+    const p = this.cardMesh.position;
+    this.camera.lookAt(p.x, p.y, p.z);
+    // Zoom-out goes to initial far position so new visitors see the full scene
+    this.savedCameraState = {
+      x: this.cameraPosition.x,
+      y: this.cameraPosition.y,
+      z: this.cameraPosition.z,
+    };
+  }
+
+  zoomToCard() {
+    if (!this.camera || !this.cardMesh || this.isCardZoomed) return;
+    this.isCardZoomed = true;
+    this.savedCameraState = {
+      x: this.camera.position.x,
+      y: this.camera.position.y,
+      z: this.camera.position.z,
+    };
+    const geo = this.cardMesh.geometry.parameters;
+    const margin = this.sizes.aspect < 1 ? 1.5 : 1.3;
+    const dist = this._zoomDistanceToFit(geo.width, geo.height, margin);
+    const target = this._zoomTarget(this.cardMesh, dist);
+    target.y -= this.sizes.aspect < 1 ? 0.35 : 0.2;
+    const lookAt = this.cardMesh.position;
+
+    gsap.to(this.camera.position, {
+      x: target.x, y: target.y, z: target.z,
+      duration: 0.8, ease: 'power2.inOut',
+      onUpdate: () => this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z),
+      onComplete: () => this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z),
+    });
+  }
+
+  zoomOutFromCard() {
+    if (!this.camera || !this.isCardZoomed || !this.savedCameraState) return;
+    const saved = this.savedCameraState;
+    const cardPos = this.cardMesh.position;
+    // If returning to the initial far position, use a longer animation
+    const isFarZoom = saved.z > 10;
+    const duration = isFarZoom ? 1.4 : 0.8;
+    // Smoothly transition lookAt from card → scene center
+    const lookTarget = isFarZoom ? { x: 0, y: 0, z: 0 } : { x: 0, y: 0.5, z: 0 };
+    const look = { x: cardPos.x, y: cardPos.y, z: cardPos.z };
+    gsap.to(look, { ...lookTarget, duration, ease: 'power2.inOut' });
+    gsap.to(this.camera.position, {
+      x: saved.x, y: saved.y, z: saved.z,
+      duration, ease: 'power2.inOut',
+      onUpdate: () => this.camera.lookAt(look.x, look.y, look.z),
+      onComplete: () => {
+        this.camera.lookAt(lookTarget.x, lookTarget.y, lookTarget.z);
+        this.isCardZoomed = false;
+        this.savedCameraState = null;
+        // Reset progress so rotateCamera drives from the right state
+        if (isFarZoom) this.progress = 0;
+      },
+    });
+  }
+
+  // --- About Zoom ---
+
+  setAboutMesh(mesh) {
+    this.aboutMesh = mesh;
+  }
+
+  zoomToAbout() {
+    if (!this.camera || !this.aboutMesh || this.isAboutZoomed) return;
+    this.isAboutZoomed = true;
+    this.savedAboutCameraState = {
+      x: this.camera.position.x,
+      y: this.camera.position.y,
+      z: this.camera.position.z,
+    };
+    const geo = this.aboutMesh.geometry.parameters;
+    const dist = this._zoomDistanceToFit(geo.width, geo.height);
+    const target = this._zoomTarget(this.aboutMesh, dist);
+    const lookAt = this.aboutMesh.position;
+
+    gsap.to(this.camera.position, {
+      x: target.x, y: target.y, z: target.z,
+      duration: 0.8, ease: 'power2.inOut',
+      onUpdate: () => this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z),
+      onComplete: () => this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z),
+    });
+  }
+
+  zoomOutFromAbout() {
+    if (!this.camera || !this.isAboutZoomed || !this.savedAboutCameraState) return;
+    const saved = this.savedAboutCameraState;
+    const aboutPos = this.aboutMesh.position;
+    // Smoothly transition lookAt from about poster → TV center
+    const look = { x: aboutPos.x, y: aboutPos.y, z: aboutPos.z };
+    gsap.to(look, { x: 0, y: 0.5, z: 0, duration: 0.8, ease: 'power2.inOut' });
+    gsap.to(this.camera.position, {
+      x: saved.x, y: saved.y, z: saved.z,
+      duration: 0.8, ease: 'power2.inOut',
+      onUpdate: () => this.camera.lookAt(look.x, look.y, look.z),
+      onComplete: () => {
+        this.camera.lookAt(0, 0.5, 0);
+        this.isAboutZoomed = false;
+        this.savedAboutCameraState = null;
+      },
+    });
   }
 
   toggleNightModeTV() {
@@ -212,18 +369,41 @@ export class TV {
   _intersect() {
     if (!this.camera || !this.trigger) return;
     this.raycaster.setFromCamera(this._NDC, this.camera);
-    this._intersects = this.raycaster.intersectObjects([this.trigger]);
+    const targets = [this.trigger];
+    // Include card mesh if visible
+    if (this.cardMesh && this.cardMesh.visible) {
+      targets.push(this.cardMesh);
+    }
+    this._intersects = this.raycaster.intersectObjects(targets);
   }
 
   getIntersects() {
     this._intersect();
-    return this._intersects.length > 0 ? ['button'] : ['none'];
+    if (this._intersects.length === 0) return ['none'];
+    const results = [];
+    for (const hit of this._intersects) {
+      if (hit.object === this.cardMesh) {
+        results.push('card');
+      } else if (hit.object === this.trigger) {
+        results.push('button');
+      }
+    }
+    return results.length > 0 ? results : ['none'];
+  }
+
+  onRender(cb) {
+    this._renderCallbacks.push(cb);
   }
 
   _render() {
+    const dt = this._clock.getDelta();
+
     // Update CRT terminal canvas every frame
     this.crt.update();
     this.crtTexture.needsUpdate = true;
+
+    // Fire render callbacks (used by HoloCard etc.)
+    for (const cb of this._renderCallbacks) cb(dt);
 
     if (this.camera) {
       this.renderer.render(this.scene, this.camera);
