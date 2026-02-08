@@ -41,16 +41,24 @@ export class CardPoster {
     this.scene.add(this.mesh);
   }
 
-  show(formData) {
+  show(formData, instant = false) {
     this.drawCard(formData);
     this.texture.needsUpdate = true;
     this.mesh.visible = true;
 
-    gsap.fromTo(this.material, { opacity: 0 }, {
-      opacity: 1,
-      duration: 1.2,
-      ease: 'power2.out',
-    });
+    if (instant) {
+      this.material.opacity = 1;
+    } else {
+      gsap.fromTo(this.material, { opacity: 0 }, {
+        opacity: 1,
+        duration: 1.2,
+        ease: 'power2.out',
+      });
+    }
+  }
+
+  toPNG() {
+    return this.canvas.toDataURL('image/png');
   }
 
   drawCard(data) {
@@ -73,42 +81,46 @@ export class CardPoster {
     ctx.strokeRect(12, 12, w - 24, h - 24);
 
     // Header
-    ctx.font = 'bold 20px "Courier New", monospace';
+    ctx.font = '14px "Courier New", monospace';
     ctx.fillStyle = '#88ffcc';
     ctx.textBaseline = 'top';
-    ctx.fillText('DMV VERIFICATION CERTIFICATE', 28, 28);
+    ctx.fillText('MACHINE IDENTITY CERTIFICATE', 28, 28);
 
     // Divider
     ctx.fillStyle = '#1a5a3a';
-    ctx.fillRect(28, 56, w - 56, 1);
+    ctx.fillRect(28, 48, w - 56, 1);
 
-    // Fields
-    ctx.font = '14px "Courier New", monospace';
-    const fields = [
-      ['NAME', data.userName || '—'],
-      ['AGENT', (data.agentName || '—') + '.agent'],
-      ['EMAIL', data.email || '—'],
-      ['TYPE', data.type || '—'],
-      ['ORG', data.orgName || '—'],
-    ];
+    // Agent name — big and prominent
+    const agentName = (data.agentName || 'agent') + '.agent';
+    ctx.font = 'bold 28px "Courier New", monospace';
+    ctx.fillStyle = '#33ff88';
+    ctx.shadowColor = '#33ff88';
+    ctx.shadowBlur = 8;
+    ctx.fillText(agentName, 28, 68);
+    ctx.shadowBlur = 0;
 
-    let y = 72;
-    for (const [label, value] of fields) {
-      // Label
-      ctx.fillStyle = '#1a5a3a';
-      ctx.fillText(label, 28, y);
-      // Value
-      ctx.fillStyle = '#33ff88';
-      ctx.fillText(value, 130, y);
-      y += 28;
-    }
+    // Certificate ID
+    const certId = data.certificateId || 'NOVA-000-000X';
+    ctx.font = 'bold 22px "Courier New", monospace';
+    ctx.fillStyle = '#88ffcc';
+    ctx.shadowColor = '#88ffcc';
+    ctx.shadowBlur = 4;
+    ctx.fillText(certId, 28, 110);
+    ctx.shadowBlur = 0;
 
-    // Serial at bottom
-    const serial = 'DMV-' + new Date().getFullYear() + '-' +
-      String(Math.floor(Math.random() * 99999)).padStart(5, '0');
+    // Divider
     ctx.fillStyle = '#1a5a3a';
-    ctx.font = '12px "Courier New", monospace';
-    ctx.fillText(serial, 28, h - 30);
+    ctx.fillRect(28, 144, w - 56, 1);
+
+    // Pre-registration note
+    ctx.font = '11px "Courier New", monospace';
+    ctx.fillStyle = '#1a5a3a';
+    ctx.fillText('Pre-registration certificate.', 28, h - 48);
+
+    // DMV branding at bottom
+    ctx.font = '10px "Courier New", monospace';
+    ctx.fillStyle = '#1a5a3a';
+    ctx.fillText('DEPT. OF MACHINE VERIFICATION', 28, h - 28);
 
     // Scanline overlay
     ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
