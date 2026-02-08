@@ -1,0 +1,29 @@
+{
+  "name": "@agentcommunity/dmv-agent",
+  "version": "0.1.0",
+  "description": "Register .agent identities at the Department of Machine Verification",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "dmv-agent": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/mcp-server.js"
+  },
+  "keywords": ["agent", "dmv", "mcp", "claude-code", "identity"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "README.md"
+  ]
+}
