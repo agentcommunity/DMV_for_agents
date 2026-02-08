@@ -1,0 +1,69 @@
+// DMV registration client — calls edge function proxy
+// No database credentials in client code.
+
+const REGISTER_ENDPOINT =
+  'https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent';
+
+// Feature flag — set to true when ready to persist registrations
+export const SUPABASE_ENABLED = false;
+
+/**
+ * Insert a registration via the edge function proxy.
+ * Maps CRT form data to the API contract.
+ *
+ * @param {object} formData - from CRTTerminal.getFormData()
+ * @param {string} signupSource - 'ui' | 'mcp' | 'api'
+ * @returns {object} { data, error }
+ */
+export async function insertRegistration(formData, signupSource = 'ui') {
+  if (!SUPABASE_ENABLED) {
+    console.log('[dmv] Persistence disabled. Registration data:', formData);
+    return { data: null, error: null };
+  }
+
+  const registrationType = formData.accountType === 'org' ? 'ORGANIZATION'
+    : formData.accountType === 'agent' ? 'AGENT'
+    : 'INDIVIDUAL';
+
+  const body = {
+    agent_name: formData.agentName || '',
+    email: formData.email || formData.orgEmail || formData.operatorEmail || '',
+    operator_name: formData.userName || null,
+    organization_name: formData.companyName || null,
+    signup_source: signupSource,
+    registration_type: registrationType,
+  };
+
+  try {
+    const res = await fetch(REGISTER_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      console.error('[dmv] Registration error:', json.error);
+      return { data: null, error: { message: json.error } };
+    }
+
+    return { data: json, error: null };
+  } catch (err) {
+    console.error('[dmv] Network error:', err);
+    return { data: null, error: { message: err.message } };
+  }
+}
+
+/**
+ * Check if a domain name is already taken.
+ * For now, just try to register and handle the 409.
+ * A dedicated lookup endpoint can be added later.
+ * @param {string} agentName - without .agent suffix
+ * @returns {boolean}
+ */
+export async function isDomainTaken(agentName) {
+  if (!SUPABASE_ENABLED) return false;
+  // TODO: add a dedicated lookup edge function if needed
+  return false;
+}
