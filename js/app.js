@@ -1,7 +1,7 @@
-import { TV } from './TV.js?v=8';
-import { AboutPoster } from './AboutPoster.js?v=8';
-import { HoloCard } from './HoloCard.js?v=8';
-import { insertRegistration } from './supabase.js?v=8';
+import { TV } from './TV.js?v=9';
+import { AboutPoster } from './AboutPoster.js?v=9';
+import { HoloCard } from './HoloCard.js?v=9';
+import { insertRegistration } from './supabase.js?v=9';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
@@ -26,7 +26,6 @@ const permalink = parsePermalink();
 
 const container = document.getElementById('canvasWrapper');
 const label = document.getElementById('modeLabel');
-const startScreen = document.getElementById('startScreen');
 const hiddenInput = document.getElementById('hiddenInput');
 const aboutToggleLink = document.getElementById('aboutToggleLink');
 const aboutCursorHost = container;
@@ -34,6 +33,8 @@ const cardShareBar = document.getElementById('cardShareBar');
 const cardShareBtn = document.getElementById('cardShareBtn');
 const cardCopyBtn = document.getElementById('cardCopyBtn');
 const cardShareTicker = document.getElementById('cardShareTicker');
+const appFavicon = document.getElementById('appFavicon');
+const agentMark = document.getElementById('agentMark');
 
 const tv = new TV(container, label);
 await tv.init();
@@ -44,6 +45,53 @@ tv.setCardMesh(holoCard.getMesh());
 
 const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
+
+function applyOuterUITheme(isNightMode) {
+  const isDarkTheme = Boolean(isNightMode);
+  document.documentElement.classList.toggle('ui-dark', isDarkTheme);
+  if (appFavicon) {
+    appFavicon.href = isDarkTheme ? 'images/favicon_dark.ico?v=1' : 'images/favicon.ico?v=1';
+  }
+  if (typeof aboutPoster.setTheme === 'function') {
+    aboutPoster.setTheme(isDarkTheme ? 'dark' : 'light');
+  }
+}
+
+function downloadAgentWordmark(isDarkTheme) {
+  const fill = isDarkTheme ? '#FFFFFF' : '#101011';
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="320" viewBox="0 0 960 320">',
+    '<rect width="100%" height="100%" fill="none"/>',
+    `<text x="50%" y="56%" text-anchor="middle" dominant-baseline="middle" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="220" font-weight="700" letter-spacing="-0.03em" fill="${fill}">.agent</text>`,
+    '</svg>',
+  ].join('');
+  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = isDarkTheme ? 'agent-wordmark-dark.svg' : 'agent-wordmark-light.svg';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+if (agentMark) {
+  agentMark.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+  });
+  agentMark.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  agentMark.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    downloadAgentWordmark(document.documentElement.classList.contains('ui-dark'));
+  });
+}
+
+applyOuterUITheme(tv.isNightMode);
 
 let latestCardData = null;
 let isCardShareVisible = false;
@@ -534,7 +582,7 @@ window.addEventListener('click', (e) => {
   }
   if (intersects.includes('button')) {
     tv.toggleNightModeTV();
-    startScreen.classList.toggle('night-mode', tv.isNightMode);
+    applyOuterUITheme(tv.isNightMode);
     return;
   }
 
