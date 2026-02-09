@@ -7,31 +7,34 @@ Terse docs for agents. File-by-file, function-by-function.
 ## File Map
 
 ```
-index.html          → HTML shell. No logic. Loads CSS, importmap, GSAP CDNs, then js/app.js
-css/styles.css      → All styles. CSS grid header/footer, toggle, fonts, layout
-js/app.js           → Entry point. Inits TV + HoloCard, wires events, scroll, sound, clock
+index.html          → HTML shell. Loads CSS, importmap, GSAP CDNs, Inter (center wordmark), then js/app.js
+css/styles.css      → All styles. Theme tokens, header/footer layout, center `.agent` mark hover reveal, responsive rules
+js/app.js           → Entry point. Inits TV + HoloCard, wires events, scroll, sound, clock, theme sync + favicon switch
 js/TV.js            → 3D scene. Loads GLTF model, manages camera/lights/renderer, night mode, card zoom
 js/CRTTerminal.js   → Canvas2D CRT terminal. Boot sequence, type selector, form input, TnC/Charter, color schemes
 js/CardPoster.js    → [LEGACY] Original flat card. Replaced by HoloCard.js
 js/HoloCard.js      → Holographic 3D card. ShaderMaterial holo effects, front+back, rarity system, identicon, QR
-js/AboutPoster.js   → 3D plane with CanvasTexture. UI-style about text, toggle show/hide, camera zoom
-hle_mirror/         → Static assets only (fonts, logo SVG, tv1.glb model). Nothing executable.
+js/AboutPoster.js   → 3D plane with CanvasTexture. Theme-aware about text, toggle show/hide, camera zoom
+images/             → Favicon assets (`favicon.ico`, `favicon_dark.ico`)
+hle_mirror/         → Static assets only (fonts, tv1.glb model). Nothing executable.
 ```
 
 ---
 
-## js/app.js (entry point, ~170 lines)
+## js/app.js (entry point, ~650 lines)
 
 Top-level await module. No exports.
 
-- **Imports**: TV, HoloCard, AboutPoster. Gets gsap/ScrollTrigger from window globals.
+- **Imports**: TV, HoloCard, AboutPoster, supabase helper. Gets gsap/ScrollTrigger from window globals.
 - **Init**: Creates TV, HoloCard, AboutPoster. Registers meshes via `tv.setCardMesh()` + `tv.setAboutMesh()`.
+- **Theme sync**: `applyOuterUITheme()` toggles root `ui-dark` class, swaps favicon light/dark, updates About poster theme.
+- **Center wordmark**: Header `.agent` mark right-click downloads generated SVG (`.agent`) in current theme color.
 - **Render callback**: `tv.onRender(dt => holoCard.update(dt))` drives card animation.
 - **Mouse → card tilt**: Mousemove maps to normalized coords, feeds `holoCard.setPointer()`.
 - **Mobile gyro**: DeviceOrientationEvent maps gamma/beta to card tilt.
 - **Callbacks**: `onComplete` → card show, `onViewCert` → card zoom, `onShareCert` → X/Twitter intent.
 - **About toggle**: Header link click → show/hide about poster + zoom/unzoom camera.
-- **Sound toggle**: `Audio('audio/music.mp3')`, loop=true, click toggles play/pause.
+- **Sound toggle**: `Audio('audio/pat102 - electro dance.mp3')`, loop=true, click toggles play/pause.
 - **Clock**: Updates `#clockEl` every 10s, format `HH : MM am/pm`.
 - **Scroll**: GSAP ScrollTrigger drives `tv.animateCameraPosition(progress)`, capped at 0.95.
 - **Click handler**: Priority order: dismiss about zoom → card zoom toggle → night mode → focus hidden input.
@@ -200,7 +203,7 @@ Exports: `class AboutPoster`
 - PlaneGeometry sized to 4:3 aspect (height=3.0 world units).
 - Material: MeshBasicMaterial, transparent, opacity=0, DoubleSide.
 - Position: `(-4.5, 1.2, -0.5)`, rotation.y = `0.2` (left wall, mirrors card).
-- UI-style text: PPSupply fonts, white with glow, transparent background.
+- UI-style text: PPSupply fonts, transparent background, colors pulled from CSS theme tokens.
 
 ### Methods
 
@@ -209,22 +212,25 @@ Exports: `class AboutPoster`
 | `toggle()` | Show or hide based on current `visible` state |
 | `show()` | Makes visible, GSAP fades in 0.6s |
 | `hide()` | GSAP fades out 0.4s, hides mesh on complete |
+| `setTheme(mode)` | Sets `light`/`dark` and redraws |
 | `draw()` | Renders about text with title, body paragraphs, bullets, footer |
 
 Camera zoom controlled by TV.js (`zoomToAbout` / `zoomOutFromAbout`), wired in app.js.
 
 ---
 
-## css/styles.css (~199 lines)
+## css/styles.css (~560 lines)
 
 - Base: `html { font-size: 62.5% }` → 1rem = 10px.
-- Header/footer: CSS grid, fixed position, z-index 100.
-- Night mode label positioned by JS.
+- Theme tokens: Light defaults + dark overrides under `:root.ui-dark`.
+- Header/footer: CSS grid, fixed position, z-index 100, tuned typography.
+- Center mark: Inter-only `.agent` wordmark with `.a` fixed and `gent` hover-reveal.
+- Footer byline: `by agentcommunity.org` link under department line.
 - Responsive padding.
 
 ---
 
-## index.html (~73 lines)
+## index.html (~115 lines)
 
 HTML shell. Key structure:
 ```
@@ -232,17 +238,18 @@ HTML shell. Key structure:
 #hiddenInput (off-screen for keyboard capture)
 ```
 
-External deps: Three.js 0.152.2 importmap, GSAP 3.12.2 + ScrollTrigger globals.
+External deps: Three.js 0.152.2 importmap, GSAP 3.12.2 + ScrollTrigger globals, Google Fonts Inter (center mark only).
 
 ---
 
-## Static Assets (hle_mirror/)
+## Static Assets
 
 | Path | Used by | Purpose |
 |------|---------|---------|
 | `hle.io/models/tv1.glb` | TV.js | GLTF model (Glass screen, Cube001 button) |
-| `hle.io/img/logo-white.svg` | index.html | Header logo |
 | `hle.io/_nuxt/assets/fonts/SupplyFree/*.otf` | styles.css | 4 font files |
+| `images/favicon.ico` | index.html/app.js | Light mode favicon |
+| `images/favicon_dark.ico` | app.js | Dark mode favicon |
 
 ---
 
@@ -253,3 +260,4 @@ External deps: Three.js 0.152.2 importmap, GSAP 3.12.2 + ScrollTrigger globals.
 - **CardPoster night mode**: Currently hardcoded green. Could accept color scheme and redraw.
 - **New 3D objects**: Get scene via `tv.getScene()`, add meshes.
 - **Scroll-triggered events**: Use `tv.on('animationEnd', cb)` or add thresholds in `animateCameraPosition()`.
+- **Center mark behavior**: Edit `.agent-mark` in `css/styles.css` and `downloadAgentWordmark()` in `js/app.js`.

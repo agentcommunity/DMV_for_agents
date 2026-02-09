@@ -1,7 +1,7 @@
-import { TV } from './TV.js?v=9';
-import { AboutPoster } from './AboutPoster.js?v=9';
-import { HoloCard } from './HoloCard.js?v=9';
-import { insertRegistration } from './supabase.js?v=9';
+import { TV } from './TV.js?v=12';
+import { AboutPoster } from './AboutPoster.js?v=12';
+import { HoloCard } from './HoloCard.js?v=12';
+import { insertRegistration } from './supabase.js?v=12';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
@@ -47,14 +47,12 @@ const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
 
 function applyOuterUITheme(isNightMode) {
-  const isDarkTheme = Boolean(isNightMode);
-  document.documentElement.classList.toggle('ui-dark', isDarkTheme);
+  const dark = Boolean(isNightMode);
+  document.documentElement.classList.toggle('ui-dark', dark);
   if (appFavicon) {
-    appFavicon.href = isDarkTheme ? 'images/favicon_dark.ico?v=1' : 'images/favicon.ico?v=1';
+    appFavicon.href = dark ? 'images/favicon_dark.ico?v=1' : 'images/favicon.ico?v=1';
   }
-  if (typeof aboutPoster.setTheme === 'function') {
-    aboutPoster.setTheme(isDarkTheme ? 'dark' : 'light');
-  }
+  aboutPoster.setTheme(dark ? 'dark' : 'light');
 }
 
 function downloadAgentWordmark(isDarkTheme) {
@@ -94,7 +92,6 @@ if (agentMark) {
 applyOuterUITheme(tv.isNightMode);
 
 let latestCardData = null;
-let isCardShareVisible = false;
 let cardShareTickerTimeout = null;
 let lastScrollProgress = 0;
 let gyroEnabled = false;
@@ -104,6 +101,7 @@ const mobileViewportQuery = window.matchMedia('(max-width: 767px)');
 
 const isCoarsePointer = () => coarsePointerQuery.matches;
 const isMobileViewport = () => mobileViewportQuery.matches;
+const CARD_FOCUS_SAMPLES = [[0, 0], [0.18, 0], [-0.18, 0], [0, 0.18], [0, -0.18]];
 
 function syncMobileUICompact(progress = lastScrollProgress) {
   const isSceneFocused = tv.isCardZoomed || tv.isAboutZoomed;
@@ -167,9 +165,13 @@ async function maybeEnableGyro() {
   }
 }
 
+function buildPermalinkUrl(certId) {
+  return `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+}
+
 function buildSharePayload(certId, data = {}) {
   const agentName = data.agentName || 'agent';
-  const shareUrl = `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+  const shareUrl = buildPermalinkUrl(certId);
   const text = encodeURIComponent(
     `I just registered ${agentName}.agent at the Department of Machine Verification.\n\n` +
     `Get yours -> ${shareUrl}`
@@ -230,9 +232,7 @@ async function copyShareLink(certId, data = {}) {
 
 function setCardShareVisible(visible) {
   if (!cardShareBar) return;
-  isCardShareVisible = visible;
   cardShareBar.hidden = !visible;
-  cardShareBar.style.display = visible ? '' : 'none';
   if (!visible && cardShareTicker) {
     cardShareTicker.classList.remove('is-visible', 'card-share-bar__ticker--warn');
     cardShareTicker.hidden = true;
@@ -245,16 +245,9 @@ function syncCardShareBar() {
   const cardMesh = holoCard.getMesh();
   if (cardShareBtn) cardShareBtn.disabled = !canShare;
   if (cardCopyBtn) cardCopyBtn.disabled = !canShare;
-  const cardFocusSamples = [
-    [0, 0],
-    [0.18, 0],
-    [-0.18, 0],
-    [0, 0.18],
-    [0, -0.18],
-  ];
   let isCardInView = false;
   if (cardMesh && tv.getMeshIntersectionAtNDC) {
-    for (const [x, y] of cardFocusSamples) {
+    for (const [x, y] of CARD_FOCUS_SAMPLES) {
       if (tv.getMeshIntersectionAtNDC(cardMesh, x, y)) {
         isCardInView = true;
         break;
@@ -366,7 +359,7 @@ if (permalink) {
 
   shareBtn?.addEventListener('click', () => {
     const certId = permalink.certificateId;
-    const shareUrl = `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+    const shareUrl = buildPermalinkUrl(certId);
     const agentPart = permalink.agentName ? `${permalink.agentName}.agent` : 'an agent';
     const text = encodeURIComponent(
       `Check out ${agentPart} - verified at the Department of Machine Verification.\n\n` +
@@ -505,6 +498,7 @@ window.addEventListener('pointerdown', (e) => {
   syncAboutHover(e.clientX, e.clientY);
 });
 
+let aboutTouchY = null;
 window.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
   if (!t) return;
@@ -512,6 +506,7 @@ window.addEventListener('touchstart', (e) => {
   updatePointer(t.clientX, t.clientY);
   aboutPoster.clearHoveredLink();
   if (aboutCursorHost) aboutCursorHost.style.cursor = '';
+  if (aboutPoster.visible) aboutTouchY = t.clientY;
 }, { passive: true });
 
 window.addEventListener('wheel', (e) => {
@@ -520,19 +515,11 @@ window.addEventListener('wheel', (e) => {
   e.preventDefault();
 }, { passive: false });
 
-let aboutTouchY = null;
-window.addEventListener('touchstart', (e) => {
-  if (!aboutPoster.visible) return;
-  const t = e.touches[0];
-  if (!t) return;
-  aboutTouchY = t.clientY;
-}, { passive: true });
-
 window.addEventListener('touchmove', (e) => {
   if (!aboutPoster.visible) return;
   const t = e.touches[0];
   if (!t) return;
-  if (aboutTouchY == null) {
+  if (aboutTouchY === null) {
     aboutTouchY = t.clientY;
     return;
   }

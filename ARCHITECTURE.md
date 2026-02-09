@@ -106,19 +106,20 @@ All five paths call the same edge function. Zero database credentials on the cli
 ```
 threejs_box_design_dmv/
 │
-├── index.html                    Web UI entry point (importmap, GSAP, CSS)
-├── css/styles.css                All styles (grid layout, permalink overlay, responsive)
+├── index.html                    Web UI entry point (importmap, GSAP, Inter wordmark font, CSS)
+├── css/styles.css                All styles (theme tokens, layout, center `.agent` mark, responsive)
 ├── js/
-│   ├── app.js                    Main: events, scroll, permalink, zoom, sound, clock
+│   ├── app.js                    Main: events, scroll, permalink, zoom, sound, clock, theme/favicon sync
 │   ├── TV.js                     Three.js scene: GLTF model, camera, zoom, night mode
 │   ├── CRTTerminal.js            Canvas2D CRT: 8-phase boot, form, validation, effects
 │   ├── HoloCard.js               Holographic card: ShaderMaterial, rarity, identicon, QR
-│   ├── AboutPoster.js            About panel: PPSupply fonts, show/hide, zoom
+│   ├── AboutPoster.js            About panel: PPSupply fonts, show/hide, zoom, theme-aware text colors
 │   ├── CardPoster.js             [Legacy] Original flat card — replaced by HoloCard
 │   └── supabase.js               Registration client: fetch() to edge function
 │
-├── hle_mirror/                   Static assets: fonts, logo SVG, tv1.glb model
-├── audio/                        music.mp3 (user-provided, not in repo)
+├── images/                       Favicons: favicon.ico + favicon_dark.ico
+├── hle_mirror/                   Static assets: Supply fonts + tv1.glb model
+├── audio/                        Background track(s) (user-provided, optional)
 │
 ├── supabase/functions/
 │   ├── register-agent/index.ts   POST — registration proxy (validate, rate limit, insert)

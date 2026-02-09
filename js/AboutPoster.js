@@ -84,9 +84,9 @@ export class AboutPoster {
   }
 
   setTheme(mode) {
-    const nextTheme = mode === 'dark' ? 'dark' : 'light';
-    if (nextTheme === this.theme) return;
-    this.theme = nextTheme;
+    const theme = mode === 'dark' ? 'dark' : 'light';
+    if (theme === this.theme) return;
+    this.theme = theme;
     this.draw();
   }
 
@@ -133,9 +133,9 @@ export class AboutPoster {
   getLinkAtUV(uv) {
     if (!uv) return null;
     const x = uv.x * this.canvasW;
-    const yFromTop = (1 - uv.y) * this.canvasH;
-    const yRaw = uv.y * this.canvasH;
-    return this.getLinkAtCanvasPoint(x, yFromTop) || this.getLinkAtCanvasPoint(x, yRaw);
+    const yFlipped = (1 - uv.y) * this.canvasH;
+    const yDirect = uv.y * this.canvasH;
+    return this.getLinkAtCanvasPoint(x, yFlipped) || this.getLinkAtCanvasPoint(x, yDirect);
   }
 
   setHoveredLinkFromUV(uv) {
