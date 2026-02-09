@@ -67,6 +67,30 @@ function syncMobileUICompact(progress = lastScrollProgress) {
   document.body.classList.toggle('mobile-ui-compact', shouldCompact);
 }
 
+function syncHiddenInputValueFromCRT() {
+  if (!hiddenInput) return;
+  const nextValue = tv.crt.bootPhase === 4 ? tv.crt.getCurrentInputValue() : '';
+  if (hiddenInput.value !== nextValue) {
+    hiddenInput.value = nextValue;
+  }
+  const caret = hiddenInput.value.length;
+  try {
+    hiddenInput.setSelectionRange(caret, caret);
+  } catch (err) {
+    // Selection APIs can throw on some mobile browsers while focus changes.
+  }
+}
+
+function focusTerminalInput() {
+  if (!hiddenInput) return;
+  syncHiddenInputValueFromCRT();
+  try {
+    hiddenInput.focus({ preventScroll: true });
+  } catch (err) {
+    hiddenInput.focus();
+  }
+}
+
 function handleDeviceOrientation(event) {
   const gamma = Number(event.gamma);
   const beta = Number(event.beta);
@@ -491,6 +515,10 @@ window.addEventListener('click', (e) => {
     const crtPoint = tv.getCRTSurfacePointAt(e.clientX, e.clientY);
     if (crtPoint) {
       const handled = tv.crt.handlePointerTap(crtPoint.x, crtPoint.y, crtPoint.altY);
+      if (tv.crt.bootPhase === 4) {
+        focusTerminalInput();
+        return;
+      }
       if (handled) return;
     }
   }
@@ -510,17 +538,34 @@ window.addEventListener('click', (e) => {
     return;
   }
 
-  if (tv.crt.inputActive && !isCoarsePointer()) {
-    hiddenInput.focus();
-  }
+  if (tv.crt.inputActive && !isCoarsePointer()) focusTerminalInput();
 });
 
 const checkFocus = setInterval(() => {
   if (tv.crt.inputActive && !isCoarsePointer()) {
-    hiddenInput.focus();
+    focusTerminalInput();
     clearInterval(checkFocus);
   }
 }, 200);
+
+hiddenInput?.addEventListener('input', () => {
+  if (!tv.crt.inputActive || tv.crt.bootPhase !== 4) return;
+  tv.crt.setCurrentInputValue(hiddenInput.value);
+});
+
+hiddenInput?.addEventListener('keydown', (e) => {
+  if (!tv.crt.inputActive || tv.crt.bootPhase !== 4) return;
+  e.stopPropagation();
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  tv.crt.handleKey('Enter');
+  if (tv.crt.bootPhase === 4) {
+    focusTerminalInput();
+    return;
+  }
+  syncHiddenInputValueFromCRT();
+  hiddenInput.blur();
+});
 
 const passthroughKeys = new Set([
   'Backspace', 'Enter',
@@ -581,6 +626,10 @@ window.addEventListener('keydown', (e) => {
     tv.crt.handleKey(e.key);
   } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
     tv.crt.handleKey(e.key);
+  }
+
+  if (tv.crt.bootPhase === 4) {
+    focusTerminalInput();
   }
 });
 
