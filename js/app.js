@@ -397,7 +397,7 @@ if (!permalink && aboutToggleLink) {
   });
 }
 
-const audio = new Audio('audio/music.mp3');
+const audio = new Audio(encodeURI('audio/pat102 - electro dance.mp3'));
 audio.loop = true;
 let soundOn = false;
 const soundToggle = document.getElementById('soundToggle');
