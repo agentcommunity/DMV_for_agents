@@ -15,7 +15,7 @@ No build system. Native ES modules via browser importmap. Serve from project roo
 
 Interactive 3D web experience: a retro CRT terminal inside a Three.js TV model accepts form input and issues a holographic verification certificate (identity card) on completion.
 
-**Data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → TnC acceptance → Charter acceptance → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
+**Data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
 
 **Module graph:**
 ```
@@ -26,7 +26,7 @@ app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canv
 
 - `app.js` — Entry point. Wires TV + HoloCard + AboutPoster, events (scroll, click, keyboard, resize, gyro), sound toggle, clock, permalink routing. Top-level await, no exports.
 - `TV.js` — Three.js scene: GLTF model loading (Draco), camera, renderer, night mode toggle, raycaster, card/about zoom/unzoom, `onRender(cb)` callbacks, render loop with delta time.
-- `CRTTerminal.js` — Pure Canvas2D, no Three.js dependency. 8-phase boot state machine (off, flicker, boot text, type selector, form, TnC/charter, processing, done), conditional form fields with validation, color scheme swapping, CRT visual effects.
+- `CRTTerminal.js` — Pure Canvas2D, no Three.js dependency. 8-phase boot state machine (off, flicker, boot text, type selector, form, review/submit, processing, done), conditional form fields with validation, color scheme swapping, CRT visual effects.
 - `HoloCard.js` — Self-contained holographic card module. Custom ShaderMaterial (GLSL) with rainbow iridescence, foil lines, glare, fresnel, sparkle. Front + back faces with Canvas2D content. Rarity system, identicon, QR pattern. Bob + tilt animation. See [CARD.md](CARD.md).
 - `CardPoster.js` — **Legacy.** Original flat card, replaced by HoloCard.js.
 - `AboutPoster.js` — PlaneGeometry + CanvasTexture. UI-style about text, toggle show/hide.
@@ -83,9 +83,20 @@ In permalink mode:
 
 All in `hle_mirror/hle.io/`: 4 font files (PPSupplyMono/Sans Regular/Ultralight .otf), `logo-white.svg`, `tv1.glb` (Draco GLTF). Nothing else should be in hle_mirror.
 
+## Backend & NPM Package
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
+
+**Edge functions** (`supabase/functions/`): registration proxy, lookup API, badge SVG generator. All Deno, deployed to Supabase. Zero secrets in client code — all DB writes go through edge functions.
+
+**NPM package** (`packages/dmv-agent/`): CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, bunx for users. Only runtime dep: `@modelcontextprotocol/sdk`.
+
+**Go-live checklist**: `packages/dmv-agent/DEPLOY.md`
+
 ## Branding
 
 - DMV = Department of Machine Verification
+- Part of the [.agent community](https://agentcommunity.org) — ICANN application for `.agent` gTLD
 - Header: "DMV for agents"
 - Terminal subtitle: "Machine Identity & Registration Terminal v1.0"
 - Sound toggle wired to `audio/music.mp3` (user-provided, not in repo)
