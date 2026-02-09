@@ -15,25 +15,28 @@ Scroll to zoom into TV. CRT boots, presents form. Type fields, Enter to advance.
 
 - Three.js 0.152.2 (CDN importmap)
 - GSAP 3.12.2 + ScrollTrigger (CDN globals)
+- Inter (Google Fonts, center `.agent` wordmark only)
 - Vanilla ES modules, no build system
 
 ## Structure
 
 ```
 index.html              HTML shell — importmap, CDN scripts, CSS link, module entry
-css/styles.css          All styles — grid layout, toggle, fonts, permalink overlay (1rem = 10px base)
-js/app.js               Entry — init TV + HoloCard, events, scroll, sound, clock, permalink routing
+css/styles.css          All styles — theme tokens, header/footer typography, center `.agent` mark, permalink overlay
+js/app.js               Entry — init TV + HoloCard, events, scroll, sound, clock, permalink routing, theme/favicon sync
 js/TV.js                3D scene — GLTF model, camera, renderer, night mode, onRender callbacks
 js/CRTTerminal.js       CRT terminal — Canvas2D, boot sequence, form, color schemes
 js/HoloCard.js          Holographic card — ShaderMaterial, front+back, rarity, identicon, QR pattern
 js/CardPoster.js        [Legacy] Original flat card, replaced by HoloCard
-js/AboutPoster.js       About panel — PlaneGeometry + CanvasTexture, toggle show/hide
+js/AboutPoster.js       About panel — PlaneGeometry + CanvasTexture, toggle show/hide, theme-aware colors
 js/supabase.js          Supabase integration — registration persistence (behind feature flag)
+images/
+  favicon.ico             Light mode favicon
+  favicon_dark.ico        Dark mode favicon
 hle_mirror/             Static assets only:
   hle.io/models/tv1.glb   3D TV model (Draco GLTF)
-  hle.io/img/logo-white.svg
   hle.io/_nuxt/assets/fonts/SupplyFree/  (4 .otf files)
-audio/music.mp3         Background music (user-provided, optional)
+audio/                 Background music (user-provided, optional)
 ```
 
 ## Features
@@ -43,8 +46,11 @@ audio/music.mp3         Background music (user-provided, optional)
 - **Rarity System**: Cards get STANDARD (60%), ENHANCED (25%), RARE (10%), or LEGENDARY (5%) — determined by certificate ID hash. Affects holo intensity, accent color, and badge.
 - **Permalink Sharing**: `#/CERT-ID` URLs show the card directly. "Get Yours" + "Share on X" buttons for viral loop.
 - **Night Mode**: Click TV button. Swaps exposure, fog, CRT palette (green ↔ orange), button color
-- **Sound Toggle**: Plays/pauses `audio/music.mp3`
-- **UI**: Fixed header (brand + about/CTA + sound) and footer (tagline + scroll indicator + clock) over 3D canvas
+- **Sound Toggle**: Plays/pauses local background track from `audio/`
+- **UI Theme System**: Light/dark UI tokens drive text, controls, and About panel colors
+- **Center `.agent` Mark**: Inter-based `.a` core with hover-reveal `gent`; right-click downloads theme-colored `.agent` SVG
+- **Favicon Switching**: Auto-swaps between light/dark favicons with mode toggle
+- **UI Layout**: Fixed header (brand + about/CTA + sound) and footer (tagline + `by agentcommunity.org` + scroll + clock) over 3D canvas
 
 ## Permalink System
 
