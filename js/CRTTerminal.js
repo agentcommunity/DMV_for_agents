@@ -240,7 +240,7 @@ export class CRTTerminal {
     this._selectorStartIndex = this.lines.length;
     this.lines.push({ text: '  Select account type:', color: this.headerColor, typed: 0 });
     this.lines.push({ text: '', color: this.textColor, typed: 999 });
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 13; i++) {
       this.lines.push({ text: '', color: this.textColor, typed: 999 });
     }
   }
@@ -252,17 +252,22 @@ export class CRTTerminal {
     } else if (key === '2') {
       this.selectorIndex = 1;
       this.selectAccountType();
+    } else if (key === '3') {
+      this.selectorIndex = 2;
+      this.selectAccountType();
     } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
-      this.selectorIndex = 0;
+      this.selectorIndex = Math.max(0, this.selectorIndex - 1);
     } else if (key === 'ArrowDown' || key === 'ArrowRight') {
-      this.selectorIndex = 1;
+      this.selectorIndex = Math.min(2, this.selectorIndex + 1);
     } else if (key === 'Enter') {
       this.selectAccountType();
     }
   }
 
   selectAccountType() {
-    this.accountType = this.selectorIndex === 0 ? 'org' : 'individual';
+    this.accountType = this.selectorIndex === 0 ? 'org'
+      : this.selectorIndex === 1 ? 'individual'
+      : 'agent';
 
     if (this.accountType === 'org') {
       this.fields = [
@@ -270,6 +275,11 @@ export class CRTTerminal {
         { key: 'orgEmail',    prompt: 'Organization email',      value: '', active: false },
         { key: 'companyName', prompt: 'Company name',            value: '', active: false },
         { key: 'agentName',   prompt: 'Agent name (.agent)',     value: '', active: false },
+      ];
+    } else if (this.accountType === 'agent') {
+      this.fields = [
+        { key: 'agentName', prompt: 'Agent name (.agent)',      value: '', active: false },
+        { key: 'email',     prompt: 'Email for verification',   value: '', active: false },
       ];
     } else {
       this.fields = [
@@ -295,7 +305,9 @@ export class CRTTerminal {
       this.lines.pop();
     }
 
-    const typeLabel = this.accountType === 'org' ? 'ORGANIZATION' : 'INDIVIDUAL';
+    const typeLabel = this.accountType === 'org' ? 'ORGANIZATION'
+      : this.accountType === 'agent' ? 'AGENT'
+      : 'INDIVIDUAL';
     this.lines.push({ text: `  > Account type: ${typeLabel}`, color: this.textColor, typed: 0 });
     this.lines.push({ text: '', color: this.textColor, typed: 999 });
 
@@ -312,7 +324,13 @@ export class CRTTerminal {
     const x = this.padding + 16;
     let y = startY;
 
-    for (let i = 0; i < 2; i++) {
+    const options = [
+      { key: '1', label: 'ORGANIZATION', desc: 'Register a company or team' },
+      { key: '2', label: 'INDIVIDUAL',   desc: 'Register yourself' },
+      { key: '3', label: 'AGENT',        desc: 'Register an AI agent' },
+    ];
+
+    for (let i = 0; i < options.length; i++) {
       const isHighlighted = this.selectorIndex === i;
       const borderColor = isHighlighted ? this.headerColor : this.dimColor;
       const textColor = isHighlighted ? this.textColor : this.dimColor;
@@ -326,17 +344,10 @@ export class CRTTerminal {
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? 4 : 0;
 
-      if (i === 0) {
-        ctx.fillText('  [1]  ORGANIZATION', x + 12, y + 14);
-        ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
-        ctx.fillStyle = this.dimColor;
-        ctx.fillText('       Register a company or team', x + 12, y + 38);
-      } else {
-        ctx.fillText('  [2]  INDIVIDUAL', x + 12, y + 14);
-        ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
-        ctx.fillStyle = this.dimColor;
-        ctx.fillText('       Register yourself', x + 12, y + 38);
-      }
+      ctx.fillText(`  [${options[i].key}]  ${options[i].label}`, x + 12, y + 14);
+      ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+      ctx.fillStyle = this.dimColor;
+      ctx.fillText(`       ${options[i].desc}`, x + 12, y + 38);
       ctx.shadowBlur = 0;
 
       y += boxHeight + gap;
@@ -344,7 +355,7 @@ export class CRTTerminal {
 
     ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Press 1/2 or Arrow keys + Enter', x + 12, y + 8);
+    ctx.fillText('  Press 1/2/3 or Arrow keys + Enter', x + 12, y + 8);
   }
 
   drawDoneButtons(ctx, startY) {
@@ -679,7 +690,9 @@ export class CRTTerminal {
         this._certificateId = this.generateId();
         const agentField = this.fields.find(f => f.key === 'agentName');
         const nameField = this.fields.find(f => f.key === 'userName');
-        const typeLabel = this.accountType === 'org' ? 'ORGANIZATION' : 'INDIVIDUAL';
+        const typeLabel = this.accountType === 'org' ? 'ORGANIZATION'
+      : this.accountType === 'agent' ? 'AGENT'
+      : 'INDIVIDUAL';
 
         // Clear all previous content for a clean certificate display
         this.lines = [];
@@ -701,9 +714,11 @@ export class CRTTerminal {
         this._certLineIndex = this.lines.length;
         this.lines.push({ text: `  │  ID: ${this._certificateId}${' '.repeat(Math.max(0, idPad))}│`, color: this.textColor, typed: 0, answerStart: 8 });
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
-        // Name
-        const namePad = bw - 8 - (nameField ? nameField.value.length : 1);
-        this.lines.push({ text: `  │  NAME: ${nameField ? nameField.value : '—'}${' '.repeat(Math.max(0, namePad))}│`, color: this.textColor, typed: 0, answerStart: 10 });
+        // Name (skip for agent type — no userName collected)
+        if (nameField && nameField.value) {
+          const namePad = bw - 8 - nameField.value.length;
+          this.lines.push({ text: `  │  NAME: ${nameField.value}${' '.repeat(Math.max(0, namePad))}│`, color: this.textColor, typed: 0, answerStart: 10 });
+        }
         // Agent
         const agentVal = (agentField ? agentField.value : '—') + '.agent';
         const agentPad = bw - 9 - agentVal.length;
