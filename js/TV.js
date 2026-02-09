@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { CRTTerminal } from './CRTTerminal.js?v=6';
+import { CRTTerminal } from './CRTTerminal.js?v=7';
 
 const gsap = window.gsap;
 
@@ -73,6 +73,67 @@ export class TV {
 
     this.camera = null;
     this.cameraPosition = { x: 0, y: -0.5, z: 20 };
+    // Fit target for scroll-zoom framing (prefer CRT screen dimensions, not full model bounds).
+    this.tvFitSize = { width: 2.8, height: 2.4 };
+    this.viewportProfiles = [
+      // Tuned against common mobile widths:
+      // 320-360 (small phones), 375-390 (mid phones), 412-430 (large phones)
+      {
+        name: 'small-phone',
+        maxWidth: 360,
+        scrollMargin: 1.16,
+        scrollExtraZ: 0.25,
+        scrollY: 0.30,
+        scrollLookY: 0.32,
+        cardMargin: 1.62,
+        cardYOffset: 0.56,
+        aboutMargin: 1.16,
+      },
+      {
+        name: 'phone',
+        maxWidth: 390,
+        scrollMargin: 1.14,
+        scrollExtraZ: 0.2,
+        scrollY: 0.35,
+        scrollLookY: 0.37,
+        cardMargin: 1.54,
+        cardYOffset: 0.50,
+        aboutMargin: 1.14,
+      },
+      {
+        name: 'large-phone',
+        maxWidth: 430,
+        scrollMargin: 1.12,
+        scrollExtraZ: 0.15,
+        scrollY: 0.40,
+        scrollLookY: 0.42,
+        cardMargin: 1.48,
+        cardYOffset: 0.46,
+        aboutMargin: 1.12,
+      },
+      {
+        name: 'tablet',
+        maxWidth: 768,
+        scrollMargin: 1.10,
+        scrollExtraZ: 0.08,
+        scrollY: 0.46,
+        scrollLookY: 0.48,
+        cardMargin: 1.40,
+        cardYOffset: 0.34,
+        aboutMargin: 1.11,
+      },
+      {
+        name: 'desktop',
+        maxWidth: Infinity,
+        scrollMargin: 1.08,
+        scrollExtraZ: 0,
+        scrollY: 0.5,
+        scrollLookY: 0.5,
+        cardMargin: 1.3,
+        cardYOffset: 0.2,
+        aboutMargin: 1.1,
+      },
+    ];
 
     this.raycaster = new THREE.Raycaster();
 
@@ -88,7 +149,8 @@ export class TV {
     document.addEventListener('mouseleave', (e) => {
       if (e.clientY <= 0 || e.clientX <= 0 ||
           e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
-        this.setMousePosition(this.sizes.width / 2, this.sizes.height / 2);
+        const rect = this.parent.getBoundingClientRect();
+        this.setMousePosition(rect.left + this.sizes.width / 2, rect.top + this.sizes.height / 2);
       }
     });
   }
@@ -139,6 +201,14 @@ export class TV {
           this.triggerEl.material = new THREE.MeshBasicMaterial({ color: 0x33ff88 });
         }
         this.scene.add(gltf.scene);
+        if (this.screen) {
+          const screenBounds = new THREE.Box3().setFromObject(this.screen);
+          const screenSize = new THREE.Vector3();
+          screenBounds.getSize(screenSize);
+          if (screenSize.x > 0 && screenSize.y > 0) {
+            this.tvFitSize = { width: screenSize.x, height: screenSize.y };
+          }
+        }
         resolve();
       }, undefined, reject);
     });
@@ -191,11 +261,32 @@ export class TV {
     if (!this.camera || this.isCardZoomed || this.isAboutZoomed) return;
     this.mouseTarget.lerp(this.toNDC(), 0.05);
     this.camera.position.x = 0.5 * 14.7 * this.mouseTarget.x * (1 - this.progress);
-    // Pull back on narrow viewports so TV fits in frame
-    const endZ = this.sizes.aspect < 1 ? 3.6 + (1 - this.sizes.aspect) * 2.5 : 3.6;
+    // Fit terminal framing dynamically so narrow phones don't over-zoom.
+    const { endZ, endY, lookY } = this._getScrollEndCameraState();
     this.camera.position.z = (1 - this.progress) * 20 + this.progress * endZ;
-    this.camera.position.y = (1 - this.progress) * -0.5 + this.progress * 0.5;
-    this.camera.lookAt(0, 0.5, 0);
+    this.camera.position.y = (1 - this.progress) * -0.5 + this.progress * endY;
+    this.camera.lookAt(0, lookY, 0);
+  }
+
+  _getScrollEndCameraState() {
+    const profile = this._getViewportProfile();
+    const aspect = this.sizes.aspect;
+    const isPortrait = aspect < 1;
+    let margin = profile.scrollMargin;
+    if (isPortrait && aspect < 0.55) margin += 0.03;
+    if (isPortrait && aspect < 0.5) margin += 0.02;
+
+    // On portrait phones we intentionally allow light side cropping of the TV shell
+    // so the CRT doesn't become too tiny from strict full-width fit.
+    const fitWidth = isPortrait ? this.tvFitSize.width * 0.78 : this.tvFitSize.width;
+    let endZ = this._zoomDistanceToFit(fitWidth, this.tvFitSize.height, margin);
+    endZ += profile.scrollExtraZ;
+    endZ = Math.max(3.6, endZ);
+    if (isPortrait && aspect < 0.45) endZ += 0.1;
+
+    const endY = isPortrait ? profile.scrollY : 0.5;
+    const lookY = isPortrait ? profile.scrollLookY : 0.5;
+    return { endZ, endY, lookY };
   }
 
   // Compute camera distance so a rectangle of given world-size fits in viewport
@@ -206,6 +297,14 @@ export class TV {
     const distH = (height / 2) / halfTan;
     const distW = (width / 2) / (halfTan * aspect);
     return Math.max(distH, distW) * margin;
+  }
+
+  _getViewportProfile() {
+    const width = this.sizes.width || window.innerWidth || 1024;
+    for (const profile of this.viewportProfiles) {
+      if (width <= profile.maxWidth) return profile;
+    }
+    return this.viewportProfiles[this.viewportProfiles.length - 1];
   }
 
   // Position camera along a mesh's facing normal at the given distance
@@ -225,20 +324,33 @@ export class TV {
     this.cardMesh = mesh;
   }
 
+  _getCardZoomPose() {
+    const geo = this.cardMesh.geometry?.parameters || { width: 1.7, height: 2.4 };
+    const profile = this._getViewportProfile();
+    const aspect = this.sizes.aspect;
+    let margin = profile.cardMargin;
+    if (aspect < 0.55) margin += 0.05;
+    if (aspect < 0.48) margin += 0.04;
+    const dist = this._zoomDistanceToFit(geo.width, geo.height, margin);
+    const target = this._zoomTarget(this.cardMesh, dist);
+    target.y -= aspect < 1 ? profile.cardYOffset : 0.2;
+    const lookAt = this.cardMesh.position;
+    return { target, lookAt };
+  }
+
+  _applyCardZoomInstant() {
+    if (!this.camera || !this.cardMesh) return;
+    const { target, lookAt } = this._getCardZoomPose();
+    this.camera.position.set(target.x, target.y, target.z);
+    this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z);
+  }
+
   // Instantly position camera at card (no animation, for permalink mode)
   jumpToCard() {
     if (!this.camera || !this.cardMesh) return;
     this.isCardZoomed = true;
     this.progress = 1; // Prevent rotateCamera from overriding
-    const geo = this.cardMesh.geometry.parameters;
-    const margin = this.sizes.aspect < 1 ? 1.5 : 1.3;
-    const dist = this._zoomDistanceToFit(geo.width, geo.height, margin);
-    const target = this._zoomTarget(this.cardMesh, dist);
-    // Offset camera down so card renders in upper portion of viewport (clears overlay)
-    target.y -= this.sizes.aspect < 1 ? 0.35 : 0.2;
-    this.camera.position.set(target.x, target.y, target.z);
-    const p = this.cardMesh.position;
-    this.camera.lookAt(p.x, p.y, p.z);
+    this._applyCardZoomInstant();
     // Zoom-out goes to initial far position so new visitors see the full scene
     this.savedCameraState = {
       x: this.cameraPosition.x,
@@ -255,12 +367,7 @@ export class TV {
       y: this.camera.position.y,
       z: this.camera.position.z,
     };
-    const geo = this.cardMesh.geometry.parameters;
-    const margin = this.sizes.aspect < 1 ? 1.5 : 1.3;
-    const dist = this._zoomDistanceToFit(geo.width, geo.height, margin);
-    const target = this._zoomTarget(this.cardMesh, dist);
-    target.y -= this.sizes.aspect < 1 ? 0.35 : 0.2;
-    const lookAt = this.cardMesh.position;
+    const { target, lookAt } = this._getCardZoomPose();
 
     gsap.to(this.camera.position, {
       x: target.x, y: target.y, z: target.z,
@@ -301,6 +408,23 @@ export class TV {
     this.aboutMesh = mesh;
   }
 
+  _getAboutZoomPose() {
+    const geo = this.aboutMesh.geometry?.parameters || { width: 4, height: 3 };
+    const profile = this._getViewportProfile();
+    const margin = this.sizes.aspect < 1 ? profile.aboutMargin : 1.1;
+    const dist = this._zoomDistanceToFit(geo.width, geo.height, margin);
+    const target = this._zoomTarget(this.aboutMesh, dist);
+    const lookAt = this.aboutMesh.position;
+    return { target, lookAt };
+  }
+
+  _applyAboutZoomInstant() {
+    if (!this.camera || !this.aboutMesh) return;
+    const { target, lookAt } = this._getAboutZoomPose();
+    this.camera.position.set(target.x, target.y, target.z);
+    this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z);
+  }
+
   zoomToAbout() {
     if (!this.camera || !this.aboutMesh || this.isAboutZoomed) return;
     this.isAboutZoomed = true;
@@ -309,10 +433,7 @@ export class TV {
       y: this.camera.position.y,
       z: this.camera.position.z,
     };
-    const geo = this.aboutMesh.geometry.parameters;
-    const dist = this._zoomDistanceToFit(geo.width, geo.height);
-    const target = this._zoomTarget(this.aboutMesh, dist);
-    const lookAt = this.aboutMesh.position;
+    const { target, lookAt } = this._getAboutZoomPose();
 
     gsap.to(this.camera.position, {
       x: target.x, y: target.y, z: target.z,
@@ -391,6 +512,23 @@ export class TV {
     return results.length > 0 ? results : ['none'];
   }
 
+  getIntersectsAt(clientX, clientY) {
+    if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+      this.setMousePosition(clientX, clientY);
+    }
+    return this.getIntersects();
+  }
+
+  getMeshIntersectionAt(mesh, clientX, clientY) {
+    if (!mesh || !this.camera) return null;
+    if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+      this.setMousePosition(clientX, clientY);
+    }
+    this.raycaster.setFromCamera(this._NDC, this.camera);
+    const hits = this.raycaster.intersectObject(mesh, false);
+    return hits.length > 0 ? hits[0] : null;
+  }
+
   onRender(cb) {
     this._renderCallbacks.push(cb);
   }
@@ -414,25 +552,35 @@ export class TV {
   }
 
   setMousePosition(x, y) {
-    this.mouse.x = x;
-    this.mouse.y = y;
+    const rect = this.parent.getBoundingClientRect();
+    this.mouse.x = x - rect.left;
+    this.mouse.y = y - rect.top;
     this._NDC = this.toNDC();
   }
 
   toNDC() {
+    const width = this.sizes.width || 1;
+    const height = this.sizes.height || 1;
     return {
-      x: (this.mouse.x / this.sizes.width) * 2 - 1,
-      y: -(this.mouse.y / this.sizes.height) * 2 + 1
+      x: (this.mouse.x / width) * 2 - 1,
+      y: -(this.mouse.y / height) * 2 + 1
     };
   }
 
   resize() {
+    if (!this.camera) return;
     const box = this.parent.getBoundingClientRect();
     this.sizes.width = box.width;
     this.sizes.height = box.height;
     this._setRendererSizes();
     this.camera.aspect = this.sizes.aspect;
     this.camera.updateProjectionMatrix();
+    if (this.isCardZoomed) {
+      this._applyCardZoomInstant();
+    }
+    if (this.isAboutZoomed) {
+      this._applyAboutZoomInstant();
+    }
   }
 
   on(event, cb) {
