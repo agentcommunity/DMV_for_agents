@@ -231,7 +231,7 @@ These are noted for future work, not needed for go-live:
 - [ ] **Link/visit tracking** — Track permalink visits (`#/CERT-ID`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
 - [ ] **Email verification flow** — Supabase auth or custom email with verification link. Currently registration is "pre-registration" with no actual email sent.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
-- [ ] **Domain lookup endpoint** — dedicated edge function to check if a name is taken (currently only detected on registration attempt via 409)
+- [x] **Domain lookup endpoint** — `lookup-agent` edge function (built, deploy with others)
 - [ ] **Real OG images** — server-side card rendering for social media previews (front face of HoloCard as static PNG)
 - [ ] **Python SDK** — thin wrapper that shells out to `bunx` for cross-language support
 - [ ] **Admin dashboard** — view registrations, manage verifications, handle disputes
