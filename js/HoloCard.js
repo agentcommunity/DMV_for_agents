@@ -161,9 +161,12 @@ export class HoloCard {
    * @param {string} options.fontFamily — CSS font stack for card text
    */
   constructor(options = {}) {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const cssMono = rootStyle.getPropertyValue('--floating-ui-font-mono').trim();
     this.position = options.position || { x: 4, y: 1, z: -0.5 };
     this.rotationY = options.rotationY ?? -0.2;
     this.font = options.fontFamily ||
+      cssMono ||
       '"PPSupplyMono", "SF Mono", "Fira Code", "Courier New", monospace';
 
     // --- Canvases ---
