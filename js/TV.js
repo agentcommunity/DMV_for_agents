@@ -529,6 +529,29 @@ export class TV {
     return hits.length > 0 ? hits[0] : null;
   }
 
+  getCRTSurfacePointAt(clientX, clientY) {
+    if (!this.screen || !this.crt || !this.crtTexture) return null;
+    const hit = this.getMeshIntersectionAt(this.screen, clientX, clientY);
+    if (!hit?.uv) return null;
+
+    const uv = hit.uv.clone
+      ? hit.uv.clone()
+      : new THREE.Vector2(hit.uv.x, hit.uv.y);
+
+    this.crtTexture.updateMatrix();
+    uv.applyMatrix3(this.crtTexture.matrix);
+
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
+    const u = clamp01(uv.x);
+    const v = clamp01(uv.y);
+
+    return {
+      x: u * this.crt.w,
+      y: (1 - v) * this.crt.h,
+      altY: v * this.crt.h,
+    };
+  }
+
   onRender(cb) {
     this._renderCallbacks.push(cb);
   }
