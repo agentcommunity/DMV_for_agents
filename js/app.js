@@ -1,7 +1,7 @@
-import { TV } from './TV.js?v=7';
-import { AboutPoster } from './AboutPoster.js?v=7';
-import { HoloCard } from './HoloCard.js?v=7';
-import { insertRegistration } from './supabase.js?v=7';
+import { TV } from './TV.js?v=8';
+import { AboutPoster } from './AboutPoster.js?v=8';
+import { HoloCard } from './HoloCard.js?v=8';
+import { insertRegistration } from './supabase.js?v=8';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
@@ -58,11 +58,12 @@ const isCoarsePointer = () => coarsePointerQuery.matches;
 const isMobileViewport = () => mobileViewportQuery.matches;
 
 function syncMobileUICompact(progress = lastScrollProgress) {
+  const isSceneFocused = tv.isCardZoomed || tv.isAboutZoomed;
   const shouldCompact = isMobileViewport() && (
     progress > 0.72 ||
-    tv.isCardZoomed ||
-    tv.isAboutZoomed
+    isSceneFocused
   );
+  document.body.classList.toggle('scene-focused', isSceneFocused);
   document.body.classList.toggle('mobile-ui-compact', shouldCompact);
 }
 
@@ -99,7 +100,6 @@ function buildSharePayload(certId, data = {}) {
   const shareUrl = `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
   const text = encodeURIComponent(
     `I just registered ${agentName}.agent at the Department of Machine Verification.\n\n` +
-    `Certificate: ${certId}\n\n` +
     `Get yours -> ${shareUrl}`
   );
   return { text, shareUrl };
@@ -158,9 +158,9 @@ async function copyShareLink(certId, data = {}) {
 
 function setCardShareVisible(visible) {
   if (!cardShareBar) return;
-  if (isCardShareVisible === visible) return;
   isCardShareVisible = visible;
   cardShareBar.hidden = !visible;
+  cardShareBar.style.display = visible ? '' : 'none';
   if (!visible && cardShareTicker) {
     cardShareTicker.classList.remove('is-visible', 'card-share-bar__ticker--warn');
     cardShareTicker.hidden = true;
@@ -170,9 +170,27 @@ function setCardShareVisible(visible) {
 function syncCardShareBar() {
   if (!cardShareBar) return;
   const canShare = Boolean(latestCardData?.certificateId);
+  const cardMesh = holoCard.getMesh();
   if (cardShareBtn) cardShareBtn.disabled = !canShare;
   if (cardCopyBtn) cardCopyBtn.disabled = !canShare;
-  const shouldShow = !permalink && tv.isCardZoomed && holoCard.getMesh().visible && !tv.isAboutZoomed;
+  const cardFocusSamples = [
+    [0, 0],
+    [0.18, 0],
+    [-0.18, 0],
+    [0, 0.18],
+    [0, -0.18],
+  ];
+  let isCardInView = false;
+  if (cardMesh && tv.getMeshIntersectionAtNDC) {
+    for (const [x, y] of cardFocusSamples) {
+      if (tv.getMeshIntersectionAtNDC(cardMesh, x, y)) {
+        isCardInView = true;
+        break;
+      }
+    }
+  }
+  const isCardFocused = tv.isCardZoomed && isCardInView;
+  const shouldShow = canShare && !permalink && isCardFocused && cardMesh.visible && !tv.isAboutZoomed;
   setCardShareVisible(shouldShow);
 }
 

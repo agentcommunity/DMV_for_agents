@@ -531,25 +531,42 @@ export class CRTTerminal {
     this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
   }
 
-  drawReviewButtons(ctx, firstY, secondY) {
-    const boxWidth = 430;
-    const boxHeight = this.lineHeight + 10;
-    const x = this.padding + 8;
-    const rows = [
-      { y: firstY - 4, action: 'review_tnc' },
-      { y: secondY - 4, action: 'review_charter' },
+  drawReviewButtons(ctx, startY) {
+    const boxWidth = 212;
+    const boxHeight = 52;
+    const gap = 14;
+    const x = this.padding + 12;
+    const y = startY;
+    const buttons = [
+      { key: '1', title: 'TERMS', subtitle: 'Read conditions', action: 'review_tnc' },
+      { key: '2', title: 'CHARTER', subtitle: 'Read community', action: 'review_charter' },
     ];
 
-    for (const row of rows) {
+    for (let i = 0; i < buttons.length; i++) {
+      const btn = buttons[i];
+      const bx = x + i * (boxWidth + gap);
+
       ctx.strokeStyle = this.dimColor;
       ctx.lineWidth = 1;
-      ctx.strokeRect(x, row.y, boxWidth, boxHeight);
-      this._addTapTarget(row.action, x, row.y, boxWidth, boxHeight);
+      ctx.strokeRect(bx, y, boxWidth, boxHeight);
+
+      ctx.font = `${this.fontSize - 2}px "Courier New", monospace`;
+      ctx.fillStyle = this.textColor;
+      ctx.shadowColor = this.textColor;
+      ctx.shadowBlur = 3;
+      ctx.fillText(`  [${btn.key}] ${btn.title}`, bx + 8, y + 11);
+      ctx.shadowBlur = 0;
+
+      ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+      ctx.fillStyle = this.dimColor;
+      ctx.fillText(`  ${btn.subtitle}`, bx + 8, y + 31);
+
+      this._addTapTarget(btn.action, bx, y, boxWidth, boxHeight);
     }
   }
 
   drawReadingTouchHints(ctx) {
-    const closeW = 160;
+    const closeW = 252;
     const closeH = 34;
     const closeX = this.w - this.padding - closeW;
     const closeY = this.padding - 30;
@@ -563,7 +580,7 @@ export class CRTTerminal {
     ctx.strokeRect(closeX, closeY, closeW, closeH);
     ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  TAP TO CLOSE', closeX + 10, closeY + 10);
+    ctx.fillText('  Q / ESC / TAP = CLOSE', closeX + 10, closeY + 10);
     this._addTapTarget('review_close', closeX, closeY, closeW, closeH);
   }
 
@@ -944,8 +961,7 @@ export class CRTTerminal {
     let selectorStartLine = -1;
     let doneButtonsY = null;
     let submitButtonY = null;
-    let reviewTermsY = null;
-    let reviewCharterY = null;
+    let reviewButtonsY = null;
 
     if (this.bootPhase === 3) {
       for (let i = 0; i < this.lines.length; i++) {
@@ -964,9 +980,14 @@ export class CRTTerminal {
         selectorStartY = y;
       }
 
-      if (this.bootPhase === 5 && !this.reviewReading) {
-        if (line.text === '  [1] Terms & Conditions (read)') reviewTermsY = y;
-        if (line.text === '  [2] Community Charter  (read)') reviewCharterY = y;
+      if (
+        this.bootPhase === 5 &&
+        !this.reviewReading &&
+        (line.text === '  [1] Terms & Conditions (read)' || line.text === '  [2] Community Charter  (read)')
+      ) {
+        if (reviewButtonsY === null) reviewButtonsY = y - 2;
+        y += this.lineHeight;
+        continue;
       }
 
       // Skip placeholder lines for type selector (phase 3)
@@ -1053,8 +1074,8 @@ export class CRTTerminal {
       this.drawSubmitButton(ctx, submitButtonY);
     }
 
-    if (this.bootPhase === 5 && !this.reviewReading && reviewTermsY !== null && reviewCharterY !== null) {
-      this.drawReviewButtons(ctx, reviewTermsY, reviewCharterY);
+    if (this.bootPhase === 5 && !this.reviewReading && reviewButtonsY !== null) {
+      this.drawReviewButtons(ctx, reviewButtonsY);
     }
 
     if (this.bootPhase === 5 && this.reviewReading) {
