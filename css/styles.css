@@ -176,7 +176,13 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   pointer-events: none;
 }
 
-.footer__left { justify-self: start; opacity: 0.6; max-width: 40rem; }
+.footer__left {
+  justify-self: start;
+  opacity: 0.6;
+  max-width: 40rem;
+  font-size: 1.9rem;
+  line-height: 1.2;
+}
 .footer__center { justify-self: center; }
 .footer__right { justify-self: end; }
 
@@ -184,7 +190,7 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 
 .scroll-down {
   display: flex; flex-direction: column; align-items: center; gap: 0.8rem;
-  font-family: var(--floating-ui-font-mono); font-size: 2.4rem;
+  font-family: var(--floating-ui-font-mono); font-size: 2rem;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .scroll-down__icon {
@@ -197,7 +203,15 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   50% { opacity: 0.6; transform: scaleY(1); }
 }
 
-.clock { opacity: 0.6; }
+.clock { opacity: 0.6; font-size: 1.9rem; line-height: 1.2; }
+
+body.scene-focused .footer__center {
+  opacity: 0;
+}
+
+body.scene-focused .scroll-down {
+  pointer-events: none;
+}
 
 /* === Permalink overlay === */
 .permalink-overlay {
@@ -450,6 +464,10 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 }
 
 /* Hidden input to capture keystrokes */
+[hidden] {
+  display: none !important;
+}
+
 #hiddenInput {
   position: fixed; left: -9999px; top: -9999px;
   opacity: 0; width: 1px; height: 1px;

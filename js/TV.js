@@ -529,6 +529,15 @@ export class TV {
     return hits.length > 0 ? hits[0] : null;
   }
 
+  getMeshIntersectionAtNDC(mesh, ndcX = 0, ndcY = 0) {
+    if (!mesh || !this.camera) return null;
+    const x = Number.isFinite(ndcX) ? ndcX : 0;
+    const y = Number.isFinite(ndcY) ? ndcY : 0;
+    this.raycaster.setFromCamera({ x, y }, this.camera);
+    const hits = this.raycaster.intersectObject(mesh, false);
+    return hits.length > 0 ? hits[0] : null;
+  }
+
   getCRTSurfacePointAt(clientX, clientY) {
     if (!this.screen || !this.crt || !this.crtTexture) return null;
     const hit = this.getMeshIntersectionAt(this.screen, clientX, clientY);
