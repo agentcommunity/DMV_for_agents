@@ -57,6 +57,7 @@ export class CRTTerminal {
 
     // Review/submit state (phase 5)
     this.reviewReading = null;  // null | 'tnc' | 'charter'
+    this._certLineIndex = null;
 
     // TnC text
     this.tncText = [
@@ -162,7 +163,16 @@ export class CRTTerminal {
 
   // Content-addressed ID: hash of form data picks the word + hex, with check digit
   generateId() {
-    const content = this.fields.map(f => f.value).join('|') + '|' + this.accountType;
+    // Keep this aligned with edge-function generation:
+    // [agent_name, email] + registration_type(lowercased)
+    const agentName = (this.fields.find(f => f.key === 'agentName')?.value || '').trim();
+    const email = (this.fields.find(f => f.key === 'email')?.value
+      || this.fields.find(f => f.key === 'orgEmail')?.value
+      || '').trim();
+    const registrationType = this.accountType === 'org' ? 'organization'
+      : this.accountType === 'agent' ? 'agent'
+      : 'individual';
+    const content = `${agentName}|${email}|${registrationType}`;
     const hash = this._fnv1a(content);
     const word = this._idWords[hash & 0x1F];             // bits 0-4 → word
     const hex = ((hash >>> 5) & 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
@@ -393,6 +403,13 @@ export class CRTTerminal {
       if (val.length < 3) {
         return 'At least 3 characters';
       }
+      if (val.length > 32) {
+        return 'At most 32 characters';
+      }
+      const agentRegex = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
+      if (!agentRegex.test(val)) {
+        return 'Use lowercase letters/numbers; hyphens in middle';
+      }
     }
     // Email format
     if (field.key === 'email' || field.key === 'orgEmail') {
@@ -424,6 +441,12 @@ export class CRTTerminal {
         return;
       }
       this.validationError = null;
+      const trimmed = f.value.trim();
+      if (f.key === 'agentName' || f.key === 'email' || f.key === 'orgEmail') {
+        f.value = trimmed.toLowerCase();
+      } else {
+        f.value = trimmed;
+      }
 
       // Bake the typed value into the prompt line (dim color for the answer)
       const lastLine = this.lines[this.lines.length - 1];
@@ -463,6 +486,7 @@ export class CRTTerminal {
     this.bootPhase = 5;
     this.reviewReading = null;
     this.inputActive = true;
+    this._reviewStartIndex = this.lines.length;
     this.lines.push({ text: '', color: this.textColor, typed: 999 });
     this.lines.push({ text: '  ─────────────────────────────────', color: this.dimColor, typed: 0 });
     this.lines.push({ text: '  [1] Terms & Conditions (read)', color: this.dimColor, typed: 0 });
@@ -509,18 +533,7 @@ export class CRTTerminal {
           this.lines.splice(this._readingStartIndex);
           this._readingStartIndex = null;
         }
-        // Re-add the review prompt
-        this.lines.push({ text: '', color: this.textColor, typed: 999 });
-        this.lines.push({ text: '  ─────────────────────────────────', color: this.dimColor, typed: 999 });
-        this.lines.push({ text: '  [1] Terms & Conditions (read)', color: this.dimColor, typed: 999 });
-        this.lines.push({ text: '  [2] Community Charter  (read)', color: this.dimColor, typed: 999 });
-        this.lines.push({ text: '', color: this.textColor, typed: 999 });
-        this.lines.push({ text: '  By submitting you agree to both.', color: this.dimColor, typed: 999 });
-        this.lines.push({ text: '', color: this.textColor, typed: 999 });
-        this._submitButtonStartIndex = this.lines.length;
-        for (let i = 0; i < 3; i++) {
-          this.lines.push({ text: '', color: this.textColor, typed: 999 });
-        }
+        // Review prompt lines are still in place — no need to re-add
       } else if (key === 'ArrowUp') {
         if (this.manualScrollY !== null) {
           this.manualScrollY = Math.max(0, this.manualScrollY - this.lineHeight * 2);
@@ -605,9 +618,30 @@ export class CRTTerminal {
 
   startProcessing() {
     this.bootPhase = 6;
+    this._certLineIndex = null;
+    // Remove review/submit section — no longer needed
+    if (this._reviewStartIndex != null) {
+      this.lines.splice(this._reviewStartIndex);
+      this._reviewStartIndex = null;
+    }
+    this._submitButtonStartIndex = null;
     this.lines.push({ text: '', color: this.textColor, typed: 999 });
     this.lines.push({ text: '  Processing registration...', color: this.textColor, typed: 0 });
     this.processProgress = 0;
+  }
+
+  // Allow app.js to reconcile local cert with authoritative server cert.
+  setCertificateId(certificateId) {
+    if (!certificateId) return;
+    this._certificateId = certificateId;
+    if (this._certLineIndex == null) return;
+    const line = this.lines[this._certLineIndex];
+    if (!line) return;
+    const bw = 38;
+    const idPad = bw - 6 - certificateId.length;
+    line.text = `  │  ID: ${certificateId}${' '.repeat(Math.max(0, idPad))}│`;
+    line.typed = line.text.length;
+    line.answerStart = 8;
   }
 
   update() {
@@ -657,11 +691,14 @@ export class CRTTerminal {
         this.lines.push({ text: '', color: this.textColor, typed: 999 });
         this.lines.push({ text: `  ┌${bar}┐`, color: this.headerColor, typed: 0 });
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
-        this.lines.push({ text: `  │  ✓ MACHINE IDENTITY CERTIFICATE  │`, color: this.headerColor, typed: 0 });
+        const certTitle = '✓ MACHINE IDENTITY CERTIFICATE';
+        const certTitlePad = bw - 2 - certTitle.length;
+        this.lines.push({ text: `  │  ${certTitle}${' '.repeat(Math.max(0, certTitlePad))}│`, color: this.headerColor, typed: 0 });
         this.lines.push({ text: `  │${'  ' + '─'.repeat(bw - 4) + '  '}│`, color: this.dimColor, typed: 0 });
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
         // ID line — will be rendered with special styling by draw()
         const idPad = bw - 6 - this._certificateId.length;
+        this._certLineIndex = this.lines.length;
         this.lines.push({ text: `  │  ID: ${this._certificateId}${' '.repeat(Math.max(0, idPad))}│`, color: this.textColor, typed: 0, answerStart: 8 });
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
         // Name
@@ -676,7 +713,9 @@ export class CRTTerminal {
         this.lines.push({ text: `  │  TYPE: ${typeLabel}${' '.repeat(Math.max(0, typePad))}│`, color: this.textColor, typed: 0, answerStart: 10 });
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
         // Disclaimer
-        this.lines.push({ text: `  │  Pre-registration certificate.    │`, color: this.dimColor, typed: 0 });
+        const disclaim = 'Pre-registration certificate.';
+        const disclaimPad = bw - 2 - disclaim.length;
+        this.lines.push({ text: `  │  ${disclaim}${' '.repeat(Math.max(0, disclaimPad))}│`, color: this.dimColor, typed: 0 });
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
         this.lines.push({ text: `  └${bar}┘`, color: this.headerColor, typed: 0 });
         // Button placeholders (drawn by drawDoneButtons)
