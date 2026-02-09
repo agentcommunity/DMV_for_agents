@@ -6,6 +6,7 @@
  * Modes:
  *   (default / no args)  → Start MCP server (for Claude Code integration)
  *   register              → Interactive registration from terminal
+ *   register --name <n> --email <e>  → Non-interactive registration
  *   verify <CERT-ID>      → Check a certificate ID's validity
  */
 
@@ -16,6 +17,18 @@ import * as readline from 'node:readline';
 
 const args = process.argv.slice(2);
 const command = args[0];
+
+/** Parse --flag value pairs from args after the command. */
+function parseFlags(argv: string[]): Record<string, string> {
+  const flags: Record<string, string> = {};
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith('--') && i + 1 < argv.length) {
+      flags[arg.slice(2)] = argv[++i];
+    }
+  }
+  return flags;
+}
 
 async function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({
@@ -60,6 +73,41 @@ async function interactiveRegister() {
     (await prompt('  Agent description (optional, press Enter to skip): ')) ||
     undefined;
 
+  await doRegister(agentName, email, operatorName, description);
+}
+
+async function nonInteractiveRegister(flags: Record<string, string>) {
+  const agentName = flags.name;
+  const email = flags.email;
+  const operatorName = flags.operator || undefined;
+  const description = flags.description || undefined;
+
+  if (!agentName || !email) {
+    console.error('Usage: dmv-agent register --name <agent-name> --email <email> [--operator <name>] [--description <text>]');
+    process.exit(1);
+  }
+
+  const nameErr = validateAgentName(agentName);
+  if (nameErr) {
+    console.error(`  ✗ agent name: ${nameErr}`);
+    process.exit(1);
+  }
+
+  const emailErr = validateEmail(email);
+  if (emailErr) {
+    console.error(`  ✗ email: ${emailErr}`);
+    process.exit(1);
+  }
+
+  await doRegister(agentName, email, operatorName, description);
+}
+
+async function doRegister(
+  agentName: string,
+  email: string,
+  operatorName?: string,
+  description?: string,
+) {
   console.error('\n  Registering...');
 
   try {
@@ -102,9 +150,15 @@ async function startMcpServer() {
 
 async function main() {
   switch (command) {
-    case 'register':
-      await interactiveRegister();
+    case 'register': {
+      const flags = parseFlags(args);
+      if (flags.name || flags.email) {
+        await nonInteractiveRegister(flags);
+      } else {
+        await interactiveRegister();
+      }
       break;
+    }
     case 'verify':
       await verifyCommand();
       break;

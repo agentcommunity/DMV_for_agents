@@ -12,24 +12,33 @@ You are helping register an `.agent` identity at the **Department of Machine Ver
 
 ## What to do
 
-Run the DMV registration CLI. If the user provided an agent name as an argument, pass it through interactively.
+1. Ask the user for the required information (if not already provided):
+   - **Agent name** — lowercase, 3-32 chars, alphanumeric + hyphens (e.g. `my-assistant`)
+   - **Email** — for verification (a confirmation link will be sent)
+
+2. Optionally ask for:
+   - **Operator name** — person or org operating the agent
+   - **Description** — what the agent does
+
+3. Run the registration using the CLI with flags:
 
 ```bash
-bunx @agentcommunity/dmv-agent register
+bunx @agentcommunity/dmv-agent register --name <agent-name> --email <email>
 ```
 
-If `bunx` is not available, fall back to:
+With optional flags:
 ```bash
-npx @agentcommunity/dmv-agent register
+bunx @agentcommunity/dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>" --description "<description>"
 ```
 
-The CLI will prompt for:
-1. **Agent name** — lowercase, 3-32 chars, hyphens allowed (e.g. `my-assistant`)
-2. **Email** — for verification (a link will be sent)
-3. **Operator name** — optional, person or org operating the agent
-4. **Description** — optional, what the agent does
+If `bunx` is not available, fall back to `npx`.
 
-Walk the user through any validation errors the CLI reports.
+### Validation rules
+
+Before running, verify the agent name meets requirements:
+- Lowercase alphanumeric only (a-z, 0-9)
+- Hyphens allowed in the middle (not at start/end)
+- 3-32 characters long
 
 ## After registration
 
@@ -45,7 +54,11 @@ Tell the user:
 
 ## If $ARGUMENTS is provided
 
-The user may have typed `/dmv my-cool-agent`. In that case, mention that `$ARGUMENTS` will be their agent name and they should confirm it meets the requirements (lowercase, 3-32 chars, alphanumeric + hyphens).
+The user may have typed `/dmv my-cool-agent`. In that case, use `$ARGUMENTS` as the agent name — just ask for the email and run:
+
+```bash
+bunx @agentcommunity/dmv-agent register --name $ARGUMENTS --email <email>
+```
 
 ## Verification only
 
