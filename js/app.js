@@ -1,12 +1,11 @@
-import { TV } from './TV.js?v=6';
-import { HoloCard } from './HoloCard.js?v=6';
-import { AboutPoster } from './AboutPoster.js?v=6';
-import { insertRegistration } from './supabase.js?v=6';
+import { TV } from './TV.js?v=7';
+import { AboutPoster } from './AboutPoster.js?v=7';
+import { HoloCard } from './HoloCard.js?v=7';
+import { insertRegistration } from './supabase.js?v=7';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
 
-// --- Permalink detection ---
 // Formats: #/CERT-ID or #/CERT-ID/agentname (agent name optional)
 function parsePermalink() {
   const hash = window.location.hash;
@@ -18,163 +17,326 @@ function parsePermalink() {
     agentName: parts[1] ? decodeURIComponent(parts[1]) : '',
   };
 }
+
+function setShareHash(certificateId) {
+  history.replaceState(null, '', `#/${encodeURIComponent(certificateId)}`);
+}
+
 const permalink = parsePermalink();
 
-// DOM refs
 const container = document.getElementById('canvasWrapper');
 const label = document.getElementById('modeLabel');
 const startScreen = document.getElementById('startScreen');
 const hiddenInput = document.getElementById('hiddenInput');
+const aboutToggleLink = document.getElementById('aboutToggleLink');
+const aboutCursorHost = container;
+const cardShareBar = document.getElementById('cardShareBar');
+const cardShareBtn = document.getElementById('cardShareBtn');
+const cardCopyBtn = document.getElementById('cardCopyBtn');
+const cardShareTicker = document.getElementById('cardShareTicker');
 
-// Init TV
 const tv = new TV(container, label);
 await tv.init();
 
-// Init HoloCard
 const holoCard = new HoloCard();
 holoCard.addToScene(tv.getScene());
+tv.setCardMesh(holoCard.getMesh());
 
-// Init AboutPoster
 const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
 
-// Register card mesh for raycasting
-tv.setCardMesh(holoCard.mesh);
+let latestCardData = null;
+let isCardShareVisible = false;
+let cardShareTickerTimeout = null;
 
-// HoloCard update loop + mouse-to-card tilt mapping
-tv.onRender((dt) => {
-  holoCard.update(dt);
+function buildSharePayload(certId, data = {}) {
+  const agentName = data.agentName || 'agent';
+  const shareUrl = `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+  const text = encodeURIComponent(
+    `I just registered ${agentName}.agent at the Department of Machine Verification.\n\n` +
+    `Certificate: ${certId}\n\n` +
+    `Get yours -> ${shareUrl}`
+  );
+  return { text, shareUrl };
+}
+
+function shareCertificateOnX(certId, data = {}) {
+  if (!certId) return;
+  const { text } = buildSharePayload(certId, data);
+  window.open(`https://x.com/intent/tweet?text=${text}`, '_blank');
+}
+
+function setCardShareTicker(message, variant = 'ok') {
+  if (!cardShareTicker) return;
+  if (cardShareTickerTimeout) {
+    clearTimeout(cardShareTickerTimeout);
+    cardShareTickerTimeout = null;
+  }
+  cardShareTicker.textContent = message;
+  cardShareTicker.hidden = false;
+  cardShareTicker.classList.add('is-visible');
+  cardShareTicker.classList.toggle('card-share-bar__ticker--warn', variant === 'warn');
+  cardShareTickerTimeout = window.setTimeout(() => {
+    cardShareTicker.classList.remove('is-visible');
+    cardShareTicker.hidden = true;
+    cardShareTicker.classList.remove('card-share-bar__ticker--warn');
+  }, 1400);
+}
+
+async function copyShareLink(certId, data = {}) {
+  if (!certId) return false;
+  const { shareUrl } = buildSharePayload(certId, data);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+      return true;
+    }
+  } catch (err) {
+    // fall through to legacy copy path
+  }
+
+  try {
+    const helper = document.createElement('textarea');
+    helper.value = shareUrl;
+    helper.setAttribute('readonly', '');
+    helper.style.position = 'fixed';
+    helper.style.left = '-9999px';
+    document.body.appendChild(helper);
+    helper.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(helper);
+    return ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+function setCardShareVisible(visible) {
+  if (!cardShareBar) return;
+  if (isCardShareVisible === visible) return;
+  isCardShareVisible = visible;
+  cardShareBar.hidden = !visible;
+  if (!visible && cardShareTicker) {
+    cardShareTicker.classList.remove('is-visible', 'card-share-bar__ticker--warn');
+    cardShareTicker.hidden = true;
+  }
+}
+
+function syncCardShareBar() {
+  if (!cardShareBar) return;
+  const canShare = Boolean(latestCardData?.certificateId);
+  if (cardShareBtn) cardShareBtn.disabled = !canShare;
+  if (cardCopyBtn) cardCopyBtn.disabled = !canShare;
+  const shouldShow = !permalink && tv.isCardZoomed && holoCard.getMesh().visible && !tv.isAboutZoomed;
+  setCardShareVisible(shouldShow);
+}
+
+cardShareBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!latestCardData?.certificateId) return;
+  shareCertificateOnX(latestCardData.certificateId, latestCardData);
 });
 
-// --- Permalink mode: skip scroll, show card directly ---
+cardCopyBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!latestCardData?.certificateId) {
+    setCardShareTicker('No link yet', 'warn');
+    return;
+  }
+  const copied = await copyShareLink(latestCardData.certificateId, latestCardData);
+  setCardShareTicker(copied ? 'Link copied' : 'Copy failed', copied ? 'ok' : 'warn');
+});
+
+tv.onRender((dt) => {
+  holoCard.update(dt);
+  syncCardShareBar();
+});
+
+function setAboutLinkActive(active) {
+  if (!aboutToggleLink) return;
+  aboutToggleLink.classList.toggle('is-active', active);
+  aboutToggleLink.setAttribute('aria-expanded', String(active));
+}
+
+function openAbout() {
+  if (aboutPoster.visible) return;
+  if (tv.isCardZoomed) {
+    tv.zoomOutFromCard();
+    setTimeout(() => {
+      if (aboutPoster.visible) return;
+      aboutPoster.show();
+      tv.zoomToAbout();
+      setAboutLinkActive(true);
+    }, 860);
+    return;
+  }
+  aboutPoster.show();
+  tv.zoomToAbout();
+  setAboutLinkActive(true);
+}
+
+function closeAbout() {
+  if (!aboutPoster.visible) return;
+  aboutPoster.clearHoveredLink();
+  if (aboutCursorHost) aboutCursorHost.style.cursor = '';
+  aboutPoster.hide();
+  tv.zoomOutFromAbout();
+  setAboutLinkActive(false);
+}
+
+function syncAboutHover(clientX, clientY) {
+  if (!aboutCursorHost) return;
+  if (!tv.isAboutZoomed) {
+    aboutPoster.clearHoveredLink();
+    aboutCursorHost.style.cursor = '';
+    return;
+  }
+  const aboutHit = tv.getMeshIntersectionAt(aboutPoster.mesh, clientX, clientY);
+  const isHoveringLink = aboutHit?.uv ? aboutPoster.setHoveredLinkFromUV(aboutHit.uv) : false;
+  if (!aboutHit?.uv) {
+    aboutPoster.clearHoveredLink();
+  }
+  aboutCursorHost.style.cursor = isHoveringLink ? 'pointer' : '';
+}
+
+// Permalink mode: keep CTA flow, no right-side info panel
 if (permalink) {
-  // Show card instantly and jump camera to it
+  latestCardData = { ...permalink };
   holoCard.show(permalink, true);
   tv.jumpToCard();
 
-  // Show the "Get yours" overlay
   const overlay = document.getElementById('permalinkOverlay');
   const agentLabel = document.getElementById('permalinkAgent');
   const certLabel = document.getElementById('permalinkCert');
   const ctaBtn = document.getElementById('permalinkCta');
+  const shareBtn = document.getElementById('permalinkShare');
 
-  agentLabel.textContent = permalink.agentName ? permalink.agentName + '.agent' : '';
-  certLabel.textContent = permalink.certificateId;
-  overlay.style.display = '';
+  if (agentLabel) {
+    agentLabel.textContent = permalink.agentName ? `${permalink.agentName}.agent` : '';
+  }
+  if (certLabel) {
+    certLabel.textContent = permalink.certificateId;
+  }
+  if (overlay) {
+    overlay.style.display = '';
+  }
 
-  ctaBtn.addEventListener('click', () => {
-    // Clear hash and reload to normal registration mode
+  ctaBtn?.addEventListener('click', () => {
     history.replaceState(null, '', window.location.pathname);
     window.location.reload();
   });
 
-  // Share on X button
-  const shareBtn = document.getElementById('permalinkShare');
-  shareBtn.addEventListener('click', () => {
+  shareBtn?.addEventListener('click', () => {
     const certId = permalink.certificateId;
-    const shareUrl = `dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+    const shareUrl = `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
     const agentPart = permalink.agentName ? `${permalink.agentName}.agent` : 'an agent';
     const text = encodeURIComponent(
-      `Check out ${agentPart} — verified at the Department of Machine Verification.\n\n` +
-      `Get yours \u2192 ${shareUrl}`
+      `Check out ${agentPart} - verified at the Department of Machine Verification.\n\n` +
+      `Get yours -> ${shareUrl}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, '_blank');
   });
 
-  // Swap header "About" link to "Get Yours" in permalink mode
-  const headerLink = document.querySelector('.header-link');
-  headerLink.textContent = 'Get Yours';
-  headerLink.classList.add('header-cta');
-  headerLink.removeAttribute('href');
-  headerLink.style.opacity = '1';
-  headerLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    history.replaceState(null, '', window.location.pathname);
-    window.location.reload();
-  });
+  if (aboutToggleLink) {
+    aboutToggleLink.textContent = 'Get Yours';
+    aboutToggleLink.classList.add('header-cta');
+    aboutToggleLink.classList.remove('is-active');
+    aboutToggleLink.removeAttribute('href');
+    aboutToggleLink.style.opacity = '1';
+    aboutToggleLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      history.replaceState(null, '', window.location.pathname);
+      window.location.reload();
+    });
+  }
 
-  // Hide entire footer in permalink mode (prevents overlap with overlay)
   document.querySelector('.start-screen__footer')?.style.setProperty('display', 'none');
 }
 
-// Wire up form completion -> card poster + generate permalink + persist
-tv.crt.onComplete = (data) => {
-  holoCard.show(data);
-  // Set the hash so the URL becomes shareable (cert ID is sufficient)
-  const hash = `#/${encodeURIComponent(data.certificateId)}`;
-  history.replaceState(null, '', hash);
-  // Persist to Supabase (fire-and-forget, behind feature flag)
-  insertRegistration(data, 'ui');
+// Persist completion; no floating card/info panel
+tv.crt.onComplete = async (data) => {
+  let current = { ...data };
+  latestCardData = current;
+  setShareHash(current.certificateId);
+  holoCard.show(current);
+
+  try {
+    const { data: persisted } = await insertRegistration(current, 'ui');
+    if (persisted?.certificate_id) {
+      current = {
+        ...current,
+        certificateId: persisted.certificate_id,
+        agentName: persisted.agent_name || current.agentName,
+      };
+      latestCardData = current;
+      tv.crt.setCertificateId(current.certificateId);
+      setShareHash(current.certificateId);
+      holoCard.show(current, true);
+    }
+  } catch (err) {
+    console.warn('Registration persistence failed:', err);
+  }
 };
 
-// Wire up View / Share callbacks from CRT done phase
 tv.crt.onViewCert = () => {
+  if (!holoCard.getMesh().visible) return;
+  if (tv.isAboutZoomed || aboutPoster.visible) {
+    closeAbout();
+    setTimeout(() => {
+      if (!tv.isCardZoomed) tv.zoomToCard();
+    }, 860);
+    return;
+  }
   if (!tv.isCardZoomed) tv.zoomToCard();
 };
+
 tv.crt.onShareCert = (certId, data) => {
-  const agentName = data.agentName || 'agent';
-  const shareUrl = `dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
-  const text = encodeURIComponent(
-    `I just registered ${agentName}.agent at the Department of Machine Verification.\n\n` +
-    `Certificate: ${certId}\n\n` +
-    `Get yours \u2192 ${shareUrl}`
-  );
-  window.open(`https://x.com/intent/tweet?text=${text}`, '_blank');
+  latestCardData = { ...(latestCardData || {}), ...(data || {}), certificateId: certId };
+  shareCertificateOnX(certId, data);
 };
 
-// About toggle — show poster + zoom camera
-// Handles transition from any state: card-zoomed, normal, or about-zoomed
-// (Skipped in permalink mode — header link is repurposed as "Get Yours")
-if (!permalink) {
-  const aboutLink = document.querySelector('.header-link');
-  aboutLink.addEventListener('click', (e) => {
+if (!permalink && aboutToggleLink) {
+  aboutToggleLink.addEventListener('click', (e) => {
     e.preventDefault();
     if (aboutPoster.visible) {
-      aboutPoster.hide();
-      tv.zoomOutFromAbout();
-    } else {
-      // If card is zoomed, unzoom first then zoom to about after animation
-      if (tv.isCardZoomed) {
-        tv.zoomOutFromCard();
-        setTimeout(() => {
-          aboutPoster.show();
-          tv.zoomToAbout();
-        }, 900); // slightly longer than card zoom-out duration
-      } else {
-        aboutPoster.show();
-        tv.zoomToAbout();
-      }
+      closeAbout();
+      return;
     }
+    openAbout();
   });
 }
 
-// Sound toggle
 const audio = new Audio('audio/music.mp3');
 audio.loop = true;
 let soundOn = false;
 const soundToggle = document.getElementById('soundToggle');
-const soundThumb = document.getElementById('soundThumb');
-soundToggle.addEventListener('click', () => {
+soundToggle?.addEventListener('click', () => {
   soundOn = !soundOn;
   soundToggle.classList.toggle('active', soundOn);
-  if (soundOn) { audio.play(); } else { audio.pause(); }
+  if (soundOn) {
+    audio.play();
+  } else {
+    audio.pause();
+  }
 });
 
-// Clock
 function updateClock() {
   const now = new Date();
   let h = now.getHours();
   const m = String(now.getMinutes()).padStart(2, '0');
   const ampm = h >= 12 ? 'pm' : 'am';
   h = h % 12 || 12;
-  document.getElementById('clockEl').textContent =
-    `${String(h).padStart(2, '0')} : ${m} ${ampm}`;
+  const clockEl = document.getElementById('clockEl');
+  if (clockEl) {
+    clockEl.textContent = `${String(h).padStart(2, '0')} : ${m} ${ampm}`;
+  }
 }
 updateClock();
 setInterval(updateClock, 10000);
 
-// Scroll — always wired (permalink visitors can explore after unzooming)
 gsap.registerPlugin(ScrollTrigger);
 ScrollTrigger.create({
   scroller: '#scroller',
@@ -187,39 +349,76 @@ ScrollTrigger.create({
   }
 });
 
-// Mouse parallax + HoloCard tilt
-window.addEventListener('mousemove', (e) => {
-  tv.setMousePosition(e.clientX, e.clientY);
-  // Map mouse to normalized -1..1 for card tilt
-  const nx = (e.clientX / window.innerWidth) * 2 - 1;
-  const ny = -((e.clientY / window.innerHeight) * 2 - 1);
+function updatePointer(clientX, clientY) {
+  tv.setMousePosition(clientX, clientY);
+  const nx = (clientX / window.innerWidth) * 2 - 1;
+  const ny = -((clientY / window.innerHeight) * 2 - 1);
   holoCard.setPointer(nx, ny);
-});
-
-// Mobile gyro → HoloCard tilt
-if (window.DeviceOrientationEvent) {
-  let gyroBase = null;
-  window.addEventListener('deviceorientation', (e) => {
-    if (e.gamma == null || e.beta == null) return;
-    if (!gyroBase) gyroBase = { g: e.gamma, b: e.beta };
-    const gx = Math.max(-1, Math.min(1, (e.gamma - gyroBase.g) / 20));
-    const gy = Math.max(-1, Math.min(1, -(e.beta - gyroBase.b) / 20));
-    holoCard.setPointer(gx, gy);
-  });
 }
 
-// Click: dismiss about zoom, card zoom, night mode toggle, or focus terminal
+window.addEventListener('pointermove', (e) => {
+  updatePointer(e.clientX, e.clientY);
+  syncAboutHover(e.clientX, e.clientY);
+});
+
+window.addEventListener('pointerdown', (e) => {
+  updatePointer(e.clientX, e.clientY);
+  syncAboutHover(e.clientX, e.clientY);
+});
+
+window.addEventListener('touchstart', (e) => {
+  const t = e.touches[0];
+  if (!t) return;
+  updatePointer(t.clientX, t.clientY);
+  aboutPoster.clearHoveredLink();
+  if (aboutCursorHost) aboutCursorHost.style.cursor = '';
+}, { passive: true });
+
+window.addEventListener('wheel', (e) => {
+  if (!aboutPoster.visible) return;
+  aboutPoster.scrollBy(e.deltaY);
+  e.preventDefault();
+}, { passive: false });
+
+let aboutTouchY = null;
+window.addEventListener('touchstart', (e) => {
+  if (!aboutPoster.visible) return;
+  const t = e.touches[0];
+  if (!t) return;
+  aboutTouchY = t.clientY;
+}, { passive: true });
+
+window.addEventListener('touchmove', (e) => {
+  if (!aboutPoster.visible) return;
+  const t = e.touches[0];
+  if (!t) return;
+  if (aboutTouchY == null) {
+    aboutTouchY = t.clientY;
+    return;
+  }
+  const delta = aboutTouchY - t.clientY;
+  aboutTouchY = t.clientY;
+  aboutPoster.scrollBy(delta * 1.2);
+  e.preventDefault();
+}, { passive: false });
+
+window.addEventListener('touchend', () => {
+  aboutTouchY = null;
+});
+
 window.addEventListener('click', (e) => {
-  // Dismiss about zoom on any click (except the about link itself)
-  if (tv.isAboutZoomed && !e.target.closest('.header-link')) {
-    aboutPoster.hide();
-    tv.zoomOutFromAbout();
+  if (e.target.closest('.card-share-bar')) return;
+  if (e.target.closest('.permalink-overlay')) return;
+
+  if (tv.isAboutZoomed) {
+    const aboutHit = tv.getMeshIntersectionAt(aboutPoster.mesh, e.clientX, e.clientY);
+    if (aboutHit?.uv && aboutPoster.openLinkAtUV(aboutHit.uv)) {
+      return;
+    }
     return;
   }
 
-  const intersects = tv.getIntersects();
-
-  // Card zoom/unzoom — works in both normal and permalink mode
+  const intersects = tv.getIntersectsAt(e.clientX, e.clientY);
   if (intersects.includes('card')) {
     if (tv.isCardZoomed) {
       tv.zoomOutFromCard();
@@ -228,26 +427,17 @@ window.addEventListener('click', (e) => {
     }
     return;
   }
-
-  // In permalink mode, clicking outside the card (but not on overlay buttons) unzooms
-  if (permalink) {
-    if (e.target.closest('.permalink-overlay')) return; // don't unzoom when using overlay
-    if (e.target.closest('.start-header')) return; // don't unzoom when using header
-    if (tv.isCardZoomed) tv.zoomOutFromCard();
-    return;
-  }
-
   if (intersects.includes('button')) {
     tv.toggleNightModeTV();
     startScreen.classList.toggle('night-mode', tv.isNightMode);
+    return;
   }
-  // Focus hidden input to capture keystrokes when CRT is active
+
   if (tv.crt.inputActive) {
     hiddenInput.focus();
   }
 });
 
-// Auto-focus when terminal becomes interactive
 const checkFocus = setInterval(() => {
   if (tv.crt.inputActive) {
     hiddenInput.focus();
@@ -255,24 +445,52 @@ const checkFocus = setInterval(() => {
   }
 }, 200);
 
-// Keys that should pass through to CRT terminal
 const passthroughKeys = new Set([
   'Backspace', 'Enter',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'Escape',
 ]);
 
-// Route keystrokes to CRT terminal
 window.addEventListener('keydown', (e) => {
-  // Dismiss about zoom on any key
   if (tv.isAboutZoomed) {
-    e.preventDefault();
-    aboutPoster.hide();
-    tv.zoomOutFromAbout();
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAbout();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      aboutPoster.scrollBy(42);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      aboutPoster.scrollBy(-42);
+      return;
+    }
+    if (e.key === 'PageDown' || e.key === ' ') {
+      e.preventDefault();
+      aboutPoster.scrollBy(140);
+      return;
+    }
+    if (e.key === 'PageUp') {
+      e.preventDefault();
+      aboutPoster.scrollBy(-140);
+      return;
+    }
+    if (e.key === 'Home') {
+      e.preventDefault();
+      aboutPoster.scrollToTop();
+      return;
+    }
+    if (e.key === 'End') {
+      e.preventDefault();
+      aboutPoster.scrollToBottom();
+      return;
+    }
     return;
   }
 
-  // Escape while card is zoomed → unzoom
   if (e.key === 'Escape' && tv.isCardZoomed) {
     e.preventDefault();
     tv.zoomOutFromCard();
@@ -289,5 +507,4 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Resize
 window.addEventListener('resize', () => tv.resize());
