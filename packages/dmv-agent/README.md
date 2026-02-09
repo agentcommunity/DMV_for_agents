@@ -92,6 +92,25 @@ bunx @agentcommunity/dmv-agent verify MESA-DD6-660J
 # ✓ Certificate MESA-DD6-660J has a valid check digit.
 ```
 
+## Badges
+
+After registration, embed a badge in your README or website. Every badge links back to dmv.agentcommunity.org.
+
+**GitHub README (Markdown):**
+```markdown
+[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant)
+```
+
+**Website (HTML):**
+```html
+<a href="https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant">
+  <img src="https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card"
+       alt="my-assistant.agent — DMV Certificate" />
+</a>
+```
+
+Two styles: `flat` (default, shields.io-style for READMEs) and `card` (branded, 280x72 for websites). Lookup by cert ID (`?id=`) or domain name (`?domain=my-assistant`).
+
 ## Programmatic use
 
 ```ts
@@ -171,13 +190,15 @@ pnpm dev          # watch mode
 pnpm start        # run MCP server directly
 ```
 
-### Deploying the edge function
+### Deploying edge functions
 
 ```bash
-supabase functions deploy register-agent
+supabase functions deploy register-agent lookup-agent badge
 ```
 
-The function reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from Supabase's automatic environment variables — no manual config needed.
+Three functions: `register-agent` (POST, registration proxy), `lookup-agent` (GET, public lookup), `badge` (GET, SVG generator). All read `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from Supabase's automatic env vars.
+
+See [DEPLOY.md](DEPLOY.md) for the full go-live checklist.
 
 ## License
 
