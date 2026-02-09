@@ -23,6 +23,10 @@
 :root {
   --font-mono-regular: "PPSupplyMonoRegular";
   --font-sans-regular: "PPSupplySansRegular";
+  --font-mono-light: "PPSupplyMonoUltralight";
+  --floating-ui-font-sans: var(--font-sans-regular), var(--font-mono-regular), sans-serif;
+  --floating-ui-font-mono: var(--font-mono-regular), monospace;
+  --floating-ui-font-mono-light: var(--font-mono-light), var(--font-mono-regular), monospace;
   --color-light: #ffffff;
   --color-dark: #101011;
   --color-gray: #CBCBCB;
@@ -53,7 +57,7 @@ a { all: unset; cursor: pointer; }
 ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 
 .p2 {
-  font-family: var(--font-mono-regular);
+  font-family: var(--floating-ui-font-mono);
   font-size: 2.4rem; font-weight: 400; line-height: 1.3;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
@@ -119,7 +123,7 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   display: flex; flex-direction: column; gap: 0.4rem;
 }
 .header-brand__title {
-  font-family: var(--font-mono-regular);
+  font-family: var(--floating-ui-font-sans);
   font-size: 3.2rem; font-weight: 400; line-height: 1;
   text-transform: uppercase; letter-spacing: 0.08em;
 }
@@ -129,6 +133,10 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   padding: 0.4rem 0;
   transition: opacity 0.3s ease;
   opacity: 0.5;
+}
+.header-link.is-active {
+  opacity: 1;
+  color: #88ffcc;
 }
 @media (hover: hover) { .header-link:hover { opacity: 1; } }
 
@@ -176,7 +184,7 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 
 .scroll-down {
   display: flex; flex-direction: column; align-items: center; gap: 0.8rem;
-  font-family: var(--font-mono-regular); font-size: 2.4rem;
+  font-family: var(--floating-ui-font-mono); font-size: 2.4rem;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .scroll-down__icon {
@@ -238,14 +246,14 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   font-size: 2.4rem; letter-spacing: 0.1em; text-transform: uppercase;
 }
 .permalink-overlay__cta-sub {
-  font-family: var(--font-mono-regular);
+  font-family: var(--floating-ui-font-mono);
   font-size: 1.2rem; opacity: 0.4; margin-top: 0.4rem;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 
 /* === Header CTA (permalink mode) === */
 .header-cta {
-  font-family: var(--font-mono-regular);
+  font-family: var(--floating-ui-font-mono);
   font-size: 2.4rem; font-weight: 400; line-height: 1.3;
   text-transform: uppercase; letter-spacing: 0.05em;
   padding: 0.4rem 0;
@@ -254,8 +262,94 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 }
 @media (hover: hover) { .header-cta:hover { opacity: 0.7; } }
 
+/* === In-scene card share CTA === */
+.card-share-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 11.2rem;
+  transform: translateX(-50%);
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.card-share-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.card-share-bar__btn {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2rem 2.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 4px;
+  background: rgba(16, 16, 17, 0.62);
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.card-share-bar__btn--secondary {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(16, 16, 17, 0.54);
+}
+
+.card-share-bar__btn:hover {
+  border-color: rgba(255, 255, 255, 0.74);
+  background: rgba(16, 16, 17, 0.76);
+  transform: translateY(-2px);
+}
+
+.card-share-bar__btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.card-share-bar__btn-text {
+  font-size: 1.9rem;
+}
+
+.card-share-bar__ticker {
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.2rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(136, 255, 204, 0.88);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.card-share-bar__ticker.is-visible {
+  opacity: 1;
+}
+
+.card-share-bar__ticker--warn {
+  color: rgba(255, 179, 102, 0.9);
+}
+
 /* === Permalink overlay — mobile === */
 @media (max-width: 767px) {
+  .card-share-bar {
+    bottom: 8.8rem;
+  }
+
+  .card-share-bar__actions {
+    gap: 0.8rem;
+  }
+
+  .card-share-bar__btn {
+    padding: 1rem 2rem;
+  }
+
+  .card-share-bar__btn-text {
+    font-size: 1.6rem;
+  }
+
   .permalink-overlay {
     padding: 1.6rem var(--container-padding) 2.4rem;
     gap: 1.2rem;
