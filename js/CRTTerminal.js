@@ -487,6 +487,16 @@ export class CRTTerminal {
     return '';
   }
 
+  setCurrentInputValue(value) {
+    if (this.bootPhase !== 4 || this.currentField < 0 || this.currentField >= this.fields.length) {
+      return false;
+    }
+    const normalizedValue = typeof value === 'string' ? value : String(value ?? '');
+    this.fields[this.currentField].value = normalizedValue;
+    this.validationError = null;
+    return true;
+  }
+
   // --- Phase 5: Review & Submit ---
 
   startReview() {
@@ -648,22 +658,11 @@ export class CRTTerminal {
     return false;
   }
 
-  _promptForActiveField() {
-    if (this.bootPhase !== 4) return false;
-    if (this.currentField < 0 || this.currentField >= this.fields.length) return false;
-    const field = this.fields[this.currentField];
-    const value = window.prompt(field.prompt, field.value || '');
-    if (value === null) return true;
-    field.value = value;
-    this.handleFormInput('Enter');
-    return true;
-  }
-
   handlePointerTap(x, y, altY = null) {
     if (!this.inputActive) return false;
 
     if (this.bootPhase === 4) {
-      return this._promptForActiveField();
+      return false;
     }
 
     const candidates = [{ x, y }];
