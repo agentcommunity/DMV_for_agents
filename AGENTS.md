@@ -93,15 +93,14 @@ Pure Canvas2D — no Three.js dependency. Creates an offscreen canvas used as te
 2 = booting (typing boot lines one by one)
 3 = type selector (ORG/INDIVIDUAL choice)
 4 = form active (conditional input fields, validation, cursor)
-5 = TnC acceptance (Y/R/N prompt, scrollable reading mode)
-6 = charter acceptance (same pattern as TnC)
-7 = processing (progress bar 0→100%)
-8 = done (certificate issued, onComplete fires)
+5 = review/submit (TnC + Charter links, scrollable reading mode, submit button)
+6 = processing (progress bar 0→100%, review lines cleaned up)
+7 = done (certificate card displayed, onComplete fires)
 ```
 
 ### Signup flow
 ```
-boot → ASCII art → type selector → conditional form → TnC → Charter → processing → certificate
+boot → ASCII art → type selector → conditional form → review/submit → processing → certificate
 ```
 
 **Type selector (phase 3):** Two styled boxes (ORG/INDIVIDUAL). Keys: 1/2 direct select, arrows toggle, Enter confirms. Sets `accountType`, assigns conditional fields.
@@ -112,7 +111,7 @@ boot → ASCII art → type selector → conditional form → TnC → Charter �
 
 **Validation:** Non-empty check on all fields. Email regex for email/orgEmail. Consumer domain blocking for orgEmail (gmail, yahoo, hotmail, etc.).
 
-**TnC/Charter (phases 5-6):** Y accepts, R enters reading mode (manual scroll with arrows, Q/Esc exits), N shows error.
+**Review/Submit (phase 5):** [1]/[2] open TnC/Charter in scrollable reading mode (arrows scroll, Q/Esc exits). Enter submits. `startProcessing()` splices out review lines to keep progress bar visible.
 
 ### Key methods
 
@@ -120,13 +119,13 @@ boot → ASCII art → type selector → conditional form → TnC → Charter �
 |--------|-------------|
 | `turnOn()` | Sets bootPhase=1, starts flicker |
 | `setColorScheme(name)` | Swaps colors, remaps existing lines |
-| `handleKey(key)` | Dispatcher → `handleTypeSelector` / `handleFormInput` / `handleTncInput` / `handleCharterInput` based on bootPhase |
+| `handleKey(key)` | Dispatcher → `handleTypeSelector` / `handleFormInput` / `handleReviewInput` / `handleDoneInput` based on bootPhase |
 | `getFormData()` | Returns object with `accountType` + all field values |
 | `startTypeSelector()` | Enters phase 3, adds placeholder lines |
 | `selectAccountType()` | Sets fields array, transitions to phase 4 |
 | `validateField(field)` | Returns error string or null |
-| `startTnc()` / `startCharter()` | Enter phases 5/6 |
-| `startProcessing()` | Sets bootPhase=7, starts progress bar |
+| `startReview()` | Enter phase 5 (TnC/Charter links + submit button). Stores `_reviewStartIndex` |
+| `startProcessing()` | Splices review lines, sets bootPhase=6, starts progress bar |
 | `update()` | Frame update: state machine, typing, draw |
 | `draw()` | Full CRT render: text, selector overlay, input+cursor, validation errors, progress bar, scanlines, vignette |
 | `getCurrentInputValue()` | Returns active input string for current phase |
