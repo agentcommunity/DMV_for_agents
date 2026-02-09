@@ -48,6 +48,51 @@ tv.setAboutMesh(aboutPoster.mesh);
 let latestCardData = null;
 let isCardShareVisible = false;
 let cardShareTickerTimeout = null;
+let lastScrollProgress = 0;
+let gyroEnabled = false;
+let gyroAttempted = false;
+const coarsePointerQuery = window.matchMedia('(pointer: coarse)');
+const mobileViewportQuery = window.matchMedia('(max-width: 767px)');
+
+const isCoarsePointer = () => coarsePointerQuery.matches;
+const isMobileViewport = () => mobileViewportQuery.matches;
+
+function syncMobileUICompact(progress = lastScrollProgress) {
+  const shouldCompact = isMobileViewport() && (
+    progress > 0.72 ||
+    tv.isCardZoomed ||
+    tv.isAboutZoomed
+  );
+  document.body.classList.toggle('mobile-ui-compact', shouldCompact);
+}
+
+function handleDeviceOrientation(event) {
+  const gamma = Number(event.gamma);
+  const beta = Number(event.beta);
+  if (!Number.isFinite(gamma) || !Number.isFinite(beta)) return;
+
+  const nx = Math.max(-1, Math.min(1, gamma / 35));
+  const ny = Math.max(-1, Math.min(1, (beta - 42) / 42));
+  holoCard.setPointer(nx, -ny);
+}
+
+async function maybeEnableGyro() {
+  if (gyroEnabled || gyroAttempted || !isCoarsePointer()) return;
+  const orientationApi = window.DeviceOrientationEvent;
+  if (!orientationApi) return;
+  gyroAttempted = true;
+
+  try {
+    if (typeof orientationApi.requestPermission === 'function') {
+      const permission = await orientationApi.requestPermission();
+      if (permission !== 'granted') return;
+    }
+    window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
+    gyroEnabled = true;
+  } catch (err) {
+    // Permission denied or unsupported context.
+  }
+}
 
 function buildSharePayload(certId, data = {}) {
   const agentName = data.agentName || 'agent';
@@ -152,6 +197,7 @@ cardCopyBtn?.addEventListener('click', async (e) => {
 tv.onRender((dt) => {
   holoCard.update(dt);
   syncCardShareBar();
+  syncMobileUICompact();
 });
 
 function setAboutLinkActive(active) {
@@ -345,9 +391,12 @@ ScrollTrigger.create({
   end: 'bottom bottom',
   onUpdate: ({ progress }) => {
     if (window.innerWidth < 768) label.classList.add('hidden');
-    tv.animateCameraPosition(Math.min(progress, 0.95));
+    lastScrollProgress = Math.min(progress, 0.95);
+    tv.animateCameraPosition(lastScrollProgress);
+    syncMobileUICompact(lastScrollProgress);
   }
 });
+syncMobileUICompact();
 
 function updatePointer(clientX, clientY) {
   tv.setMousePosition(clientX, clientY);
@@ -369,6 +418,7 @@ window.addEventListener('pointerdown', (e) => {
 window.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
   if (!t) return;
+  maybeEnableGyro();
   updatePointer(t.clientX, t.clientY);
   aboutPoster.clearHoveredLink();
   if (aboutCursorHost) aboutCursorHost.style.cursor = '';
@@ -407,6 +457,7 @@ window.addEventListener('touchend', () => {
 });
 
 window.addEventListener('click', (e) => {
+  maybeEnableGyro();
   if (e.target.closest('.card-share-bar')) return;
   if (e.target.closest('.permalink-overlay')) return;
 
@@ -416,6 +467,14 @@ window.addEventListener('click', (e) => {
       return;
     }
     return;
+  }
+
+  if (tv.crt.inputActive && isCoarsePointer() && !tv.isCardZoomed) {
+    const crtPoint = tv.getCRTSurfacePointAt(e.clientX, e.clientY);
+    if (crtPoint) {
+      const handled = tv.crt.handlePointerTap(crtPoint.x, crtPoint.y, crtPoint.altY);
+      if (handled) return;
+    }
   }
 
   const intersects = tv.getIntersectsAt(e.clientX, e.clientY);
@@ -433,13 +492,13 @@ window.addEventListener('click', (e) => {
     return;
   }
 
-  if (tv.crt.inputActive) {
+  if (tv.crt.inputActive && !isCoarsePointer()) {
     hiddenInput.focus();
   }
 });
 
 const checkFocus = setInterval(() => {
-  if (tv.crt.inputActive) {
+  if (tv.crt.inputActive && !isCoarsePointer()) {
     hiddenInput.focus();
     clearInterval(checkFocus);
   }
@@ -507,4 +566,7 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-window.addEventListener('resize', () => tv.resize());
+window.addEventListener('resize', () => {
+  tv.resize();
+  syncMobileUICompact();
+});

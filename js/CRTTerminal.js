@@ -149,6 +149,9 @@ export class CRTTerminal {
 
     // Scanline + noise
     this.time = 0;
+
+    // Interactive hit targets rebuilt every frame by draw().
+    this.tapTargets = [];
   }
 
   // FNV-1a 32-bit hash
@@ -331,11 +334,13 @@ export class CRTTerminal {
         ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
         ctx.fillStyle = this.dimColor;
         ctx.fillText('       Register a company or team', x + 12, y + 38);
+        this._addTapTarget('type_org', x, y, boxWidth, boxHeight);
       } else {
         ctx.fillText('  [2]  INDIVIDUAL', x + 12, y + 14);
         ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
         ctx.fillStyle = this.dimColor;
         ctx.fillText('       Register yourself', x + 12, y + 38);
+        this._addTapTarget('type_individual', x, y, boxWidth, boxHeight);
       }
       ctx.shadowBlur = 0;
 
@@ -344,7 +349,7 @@ export class CRTTerminal {
 
     ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Press 1/2 or Arrow keys + Enter', x + 12, y + 8);
+    ctx.fillText('  Tap a box or use 1/2 + Enter', x + 12, y + 8);
   }
 
   drawDoneButtons(ctx, startY) {
@@ -374,6 +379,8 @@ export class CRTTerminal {
       ctx.shadowBlur = isHighlighted ? 4 : 0;
       ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
       ctx.shadowBlur = 0;
+
+      this._addTapTarget(i === 0 ? 'done_view' : 'done_share', x, y, boxWidth, boxHeight);
 
       y += boxHeight + gap;
     }
@@ -519,7 +526,146 @@ export class CRTTerminal {
 
     ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Press Enter', x + 12, startY + 34);
+    ctx.fillText('  Tap or press Enter', x + 12, startY + 34);
+
+    this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
+  }
+
+  drawReviewButtons(ctx, firstY, secondY) {
+    const boxWidth = 430;
+    const boxHeight = this.lineHeight + 10;
+    const x = this.padding + 8;
+    const rows = [
+      { y: firstY - 4, action: 'review_tnc' },
+      { y: secondY - 4, action: 'review_charter' },
+    ];
+
+    for (const row of rows) {
+      ctx.strokeStyle = this.dimColor;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, row.y, boxWidth, boxHeight);
+      this._addTapTarget(row.action, x, row.y, boxWidth, boxHeight);
+    }
+  }
+
+  drawReadingTouchHints(ctx) {
+    const closeW = 160;
+    const closeH = 34;
+    const closeX = this.w - this.padding - closeW;
+    const closeY = this.padding - 30;
+
+    // Top and bottom zones for touch scrolling while reading.
+    this._addTapTarget('review_scroll_up', 0, 0, this.w, this.h * 0.28);
+    this._addTapTarget('review_scroll_down', 0, this.h * 0.72, this.w, this.h * 0.28);
+
+    ctx.strokeStyle = this.dimColor;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(closeX, closeY, closeW, closeH);
+    ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+    ctx.fillStyle = this.dimColor;
+    ctx.fillText('  TAP TO CLOSE', closeX + 10, closeY + 10);
+    this._addTapTarget('review_close', closeX, closeY, closeW, closeH);
+  }
+
+  _addTapTarget(action, x, y, w, h) {
+    if (!action) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) return;
+    this.tapTargets.push({ action, x, y, w, h });
+  }
+
+  _findTapAction(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    for (let i = this.tapTargets.length - 1; i >= 0; i--) {
+      const t = this.tapTargets[i];
+      if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h) {
+        return t.action;
+      }
+    }
+    return null;
+  }
+
+  _runTapAction(action) {
+    if (!action) return false;
+    if (action === 'type_org') {
+      this.selectorIndex = 0;
+      this.selectAccountType();
+      return true;
+    }
+    if (action === 'type_individual') {
+      this.selectorIndex = 1;
+      this.selectAccountType();
+      return true;
+    }
+    if (action === 'review_tnc') {
+      this.handleReviewInput('1');
+      return true;
+    }
+    if (action === 'review_charter') {
+      this.handleReviewInput('2');
+      return true;
+    }
+    if (action === 'review_submit') {
+      this.handleReviewInput('Enter');
+      return true;
+    }
+    if (action === 'review_scroll_up') {
+      this.handleReviewInput('ArrowUp');
+      return true;
+    }
+    if (action === 'review_scroll_down') {
+      this.handleReviewInput('ArrowDown');
+      return true;
+    }
+    if (action === 'review_close') {
+      this.handleReviewInput('Escape');
+      return true;
+    }
+    if (action === 'done_view') {
+      this.handleDoneInput('1');
+      return true;
+    }
+    if (action === 'done_share') {
+      this.handleDoneInput('2');
+      return true;
+    }
+    return false;
+  }
+
+  _promptForActiveField() {
+    if (this.bootPhase !== 4) return false;
+    if (this.currentField < 0 || this.currentField >= this.fields.length) return false;
+    const field = this.fields[this.currentField];
+    const value = window.prompt(field.prompt, field.value || '');
+    if (value === null) return true;
+    field.value = value;
+    this.handleFormInput('Enter');
+    return true;
+  }
+
+  handlePointerTap(x, y, altY = null) {
+    if (!this.inputActive) return false;
+
+    if (this.bootPhase === 4) {
+      return this._promptForActiveField();
+    }
+
+    const candidates = [{ x, y }];
+    if (Number.isFinite(altY) && Math.abs(altY - y) > 0.5) {
+      candidates.push({ x, y: altY });
+    }
+
+    for (const point of candidates) {
+      const action = this._findTapAction(point.x, point.y);
+      if (this._runTapAction(action)) return true;
+    }
+
+    // Fallback for meshes/materials where UV X may be mirrored.
+    for (const point of candidates) {
+      const action = this._findTapAction(this.w - point.x, point.y);
+      if (this._runTapAction(action)) return true;
+    }
+
+    return false;
   }
 
   handleReviewInput(key) {
@@ -750,6 +896,7 @@ export class CRTTerminal {
     const ctx = this.ctx;
     const w = this.w;
     const h = this.h;
+    this.tapTargets = [];
 
     ctx.fillStyle = this.bgColor;
     ctx.fillRect(0, 0, w, h);
@@ -797,6 +944,8 @@ export class CRTTerminal {
     let selectorStartLine = -1;
     let doneButtonsY = null;
     let submitButtonY = null;
+    let reviewTermsY = null;
+    let reviewCharterY = null;
 
     if (this.bootPhase === 3) {
       for (let i = 0; i < this.lines.length; i++) {
@@ -813,6 +962,11 @@ export class CRTTerminal {
 
       if (i === selectorStartLine) {
         selectorStartY = y;
+      }
+
+      if (this.bootPhase === 5 && !this.reviewReading) {
+        if (line.text === '  [1] Terms & Conditions (read)') reviewTermsY = y;
+        if (line.text === '  [2] Community Charter  (read)') reviewCharterY = y;
       }
 
       // Skip placeholder lines for type selector (phase 3)
@@ -897,6 +1051,14 @@ export class CRTTerminal {
     // Submit button overlay
     if (this.bootPhase === 5 && !this.reviewReading && submitButtonY !== null) {
       this.drawSubmitButton(ctx, submitButtonY);
+    }
+
+    if (this.bootPhase === 5 && !this.reviewReading && reviewTermsY !== null && reviewCharterY !== null) {
+      this.drawReviewButtons(ctx, reviewTermsY, reviewCharterY);
+    }
+
+    if (this.bootPhase === 5 && this.reviewReading) {
+      this.drawReadingTouchHints(ctx);
     }
 
     // Done buttons overlay
