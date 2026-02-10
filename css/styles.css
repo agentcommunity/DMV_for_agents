@@ -336,15 +336,22 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--ui-text-secondary);
+  animation: scrollColorCycle 4s ease-in-out infinite;
 }
 .scroll-down__icon {
   display: block; width: 1px; height: 2.8rem;
-  background: var(--ui-text-primary); opacity: 0.4;
-  animation: scrollPulse 2s ease-in-out infinite;
+  background: currentColor;
+  animation: scrollBounce 2s ease-in-out infinite;
 }
-@keyframes scrollPulse {
-  0%, 100% { opacity: 0.2; transform: scaleY(0.6); }
-  50% { opacity: 0.6; transform: scaleY(1); }
+@keyframes scrollBounce {
+  0%, 100% { opacity: 0.3; transform: scaleY(0.6) translateY(0); }
+  50% { opacity: 0.8; transform: scaleY(1) translateY(4px); }
+}
+@keyframes scrollColorCycle {
+  0%, 100% { color: var(--ui-text-secondary); }
+  30% { color: #33ff88; }
+  60% { color: #ffaa33; }
+  85% { color: var(--ui-text-secondary); }
 }
 
 .clock {
@@ -358,6 +365,8 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 
 body.scene-focused .footer__center { opacity: 0; }
 body.scene-focused .scroll-down { pointer-events: none; }
+.scroll-down { transition: opacity 0.6s ease; }
+body.scrolled .scroll-down { opacity: 0; pointer-events: none; }
 
 /* === Permalink overlay === */
 .permalink-overlay {
