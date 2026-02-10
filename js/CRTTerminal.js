@@ -19,10 +19,12 @@ export class CRTTerminal {
       green: {
         bg: '#0a0d0a', text: '#33ff88', dim: '#1a5a3a',
         cursor: '#33ff88', header: '#88ffcc', flickerRGB: '51, 255, 136',
+        glowBlur: 2, rollAlpha: 0.03, burnAlpha: 0.03,
       },
       orange: {
         bg: '#0d0908', text: '#ffaa33', dim: '#cc8844',
         cursor: '#ffaa33', header: '#ffdd88', flickerRGB: '255, 170, 51',
+        glowBlur: 5, rollAlpha: 0.18, burnAlpha: 0.07,
       },
     };
 
@@ -33,6 +35,9 @@ export class CRTTerminal {
     this.cursorColor = '#33ff88';
     this.headerColor = '#88ffcc';
     this.flickerRGB = '51, 255, 136';
+    this.glowBlur = 2;
+    this.rollAlpha = 0.03;
+    this.burnAlpha = 0.03;
 
     // Text state
     this.lines = [];           // { text, color, typed (chars revealed so far) }
@@ -202,6 +207,9 @@ export class CRTTerminal {
     this.cursorColor = p.cursor;
     this.headerColor = p.header;
     this.flickerRGB = p.flickerRGB;
+    this.glowBlur = p.glowBlur;
+    this.rollAlpha = p.rollAlpha;
+    this.burnAlpha = p.burnAlpha;
     // Remap colors on existing lines
     const remap = { [oldText]: p.text, [oldDim]: p.dim, [oldHeader]: p.header };
     for (const line of this.lines) {
@@ -327,7 +335,7 @@ export class CRTTerminal {
       ctx.font = `${this.fontSize}px "Courier New", monospace`;
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
-      ctx.shadowBlur = isHighlighted ? 4 : 0;
+      ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
 
       if (i === 0) {
         ctx.fillText('  [1]  ORGANIZATION', x + 12, y + 14);
@@ -376,7 +384,7 @@ export class CRTTerminal {
       ctx.font = `${this.fontSize}px "Courier New", monospace`;
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
-      ctx.shadowBlur = isHighlighted ? 4 : 0;
+      ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
       ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
       ctx.shadowBlur = 0;
 
@@ -530,7 +538,7 @@ export class CRTTerminal {
     ctx.font = `${this.fontSize}px "Courier New", monospace`;
     ctx.fillStyle = this.headerColor;
     ctx.shadowColor = this.headerColor;
-    ctx.shadowBlur = 4;
+    ctx.shadowBlur = this.glowBlur;
     ctx.fillText('  SUBMIT REGISTRATION', x + 12, startY + 16);
     ctx.shadowBlur = 0;
 
@@ -563,7 +571,7 @@ export class CRTTerminal {
       ctx.font = `${this.fontSize - 2}px "Courier New", monospace`;
       ctx.fillStyle = this.textColor;
       ctx.shadowColor = this.textColor;
-      ctx.shadowBlur = 3;
+      ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
       ctx.fillText(`  [${btn.key}] ${btn.title}`, bx + 8, y + 11);
       ctx.shadowBlur = 0;
 
@@ -935,7 +943,7 @@ export class CRTTerminal {
 
     // Subtle background glow
     const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.7);
-    grad.addColorStop(0, `rgba(${this.flickerRGB}, 0.03)`);
+    grad.addColorStop(0, `rgba(${this.flickerRGB}, ${this.burnAlpha})`);
     grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
@@ -1014,18 +1022,18 @@ export class CRTTerminal {
           const promptPart = line.text.substring(0, line.answerStart);
           const answerPart = line.text.substring(line.answerStart);
           ctx.shadowColor = line.color;
-          ctx.shadowBlur = 4;
+          ctx.shadowBlur = this.glowBlur;
           ctx.fillStyle = line.color;
           ctx.fillText(promptPart, this.padding, y);
           const promptW = ctx.measureText(promptPart).width;
           ctx.shadowColor = this.dimColor;
-          ctx.shadowBlur = 2;
+          ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
           ctx.fillStyle = this.dimColor;
           ctx.fillText(answerPart, this.padding + promptW, y);
           ctx.shadowBlur = 0;
         } else {
           ctx.shadowColor = line.color;
-          ctx.shadowBlur = 4;
+          ctx.shadowBlur = this.glowBlur;
           ctx.fillStyle = line.color;
           ctx.fillText(displayText, this.padding, y);
           ctx.shadowBlur = 0;
@@ -1039,7 +1047,7 @@ export class CRTTerminal {
         const promptWidth = ctx.measureText(displayText).width;
         ctx.fillStyle = this.textColor;
         ctx.shadowColor = this.textColor;
-        ctx.shadowBlur = 4;
+        ctx.shadowBlur = this.glowBlur;
         ctx.fillText(inputText, this.padding + promptWidth, y);
         ctx.shadowBlur = 0;
 
@@ -1053,7 +1061,7 @@ export class CRTTerminal {
           ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
           ctx.fillStyle = this.headerColor;
           ctx.shadowColor = this.headerColor;
-          ctx.shadowBlur = 3;
+          ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
           ctx.fillText(`    ✗ ${this.validationError}`, this.padding, y + this.lineHeight);
           ctx.shadowBlur = 0;
           ctx.font = `${this.fontSize}px "Courier New", monospace`;
@@ -1117,7 +1125,7 @@ export class CRTTerminal {
       ctx.fillRect(0, y, w, 1);
     }
     const rollY = (this.time * 1.5) % (h + 100) - 50;
-    ctx.fillStyle = `rgba(${this.flickerRGB}, 0.03)`;
+    ctx.fillStyle = `rgba(${this.flickerRGB}, ${this.rollAlpha})`;
     ctx.fillRect(0, rollY, w, 40);
   }
 

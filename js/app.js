@@ -475,6 +475,7 @@ ScrollTrigger.create({
   onUpdate: ({ progress }) => {
     if (window.innerWidth < 768) label.classList.add('hidden');
     lastScrollProgress = Math.min(progress, 0.95);
+    document.body.classList.toggle('scrolled', lastScrollProgress > 0.02);
     tv.animateCameraPosition(lastScrollProgress);
     syncMobileUICompact(lastScrollProgress);
   }
