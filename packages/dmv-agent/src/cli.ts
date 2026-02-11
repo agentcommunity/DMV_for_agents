@@ -65,7 +65,7 @@ async function interactiveRegister() {
   try {
     const result = await registerAgent(
       { agentName, email, operatorName, description },
-      'api',
+      'cli',
     );
     console.error(`\n  ✓ ${result.message}`);
     console.error(`  Certificate: ${result.certificateId}`);

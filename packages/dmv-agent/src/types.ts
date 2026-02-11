@@ -1,5 +1,5 @@
 export type RegistrationType = 'INDIVIDUAL' | 'ORGANIZATION' | 'AGENT';
-export type SignupSource = 'ui' | 'mcp' | 'api';
+export type SignupSource = 'ui' | 'cli' | 'mcp' | 'api';
 
 export interface AgentRegistration {
   agentName: string;

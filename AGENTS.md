@@ -16,7 +16,8 @@ js/CardPoster.js    → [LEGACY] Original flat card. Replaced by HoloCard.js
 js/HoloCard.js      → Holographic 3D card. ShaderMaterial holo effects, front+back, rarity system, identicon, QR
 js/AboutPoster.js   → 3D plane with CanvasTexture. Theme-aware about text, toggle show/hide, camera zoom
 images/             → Favicon assets (`favicon.ico`, `favicon_dark.ico`)
-hle_mirror/         → Static assets only (fonts, tv1.glb model). Nothing executable.
+fonts/              → PPSupply font files (4 .otf files)
+models/             → 3D models (tv1.glb)
 ```
 
 ---
@@ -246,8 +247,8 @@ External deps: Three.js 0.152.2 importmap, GSAP 3.12.2 + ScrollTrigger globals, 
 
 | Path | Used by | Purpose |
 |------|---------|---------|
-| `hle.io/models/tv1.glb` | TV.js | GLTF model (Glass screen, Cube001 button) |
-| `hle.io/_nuxt/assets/fonts/SupplyFree/*.otf` | styles.css | 4 font files |
+| `models/tv1.glb` | TV.js | GLTF model (Glass screen, Cube001 button) |
+| `fonts/*.otf` | styles.css | 4 PPSupply font files |
 | `images/favicon.ico` | index.html/app.js | Light mode favicon |
 | `images/favicon_dark.ico` | app.js | Dark mode favicon |
 

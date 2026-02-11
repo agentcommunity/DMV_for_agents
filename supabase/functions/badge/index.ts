@@ -5,7 +5,9 @@
 //   /badge?id=MESA-DD6-660J              → flat badge (default)
 //   /badge?id=MESA-DD6-660J&style=flat   → shields.io-style for READMEs
 //   /badge?id=MESA-DD6-660J&style=card   → larger branded badge for websites
-//   /badge?domain=my-assistant            → lookup by domain name
+//
+// Note: ?domain= is deprecated (ambiguous with multiple pre-registrations per domain).
+// Use ?id=CERT-ID instead.
 //
 // Badge always links back to dmv.agentcommunity.org for SEO.
 
@@ -160,8 +162,15 @@ Deno.serve(async (req) => {
   const domain = url.searchParams.get('domain')
   const style = url.searchParams.get('style') || 'flat'
 
-  if (!certId && !domain) {
-    return new Response('Provide ?id=CERT-ID or ?domain=name', { status: 400 })
+  if (domain && !certId) {
+    return new Response(
+      'badge?domain= is deprecated (ambiguous with multiple pre-registrations). Use ?id=CERT-ID instead.',
+      { status: 400, headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' } },
+    )
+  }
+
+  if (!certId) {
+    return new Response('Provide ?id=CERT-ID', { status: 400 })
   }
 
   // If cert ID provided, verify check digit
@@ -183,7 +192,6 @@ Deno.serve(async (req) => {
   // Try to look up in DB for agent name
   let agentName: string | null = null
   let status: 'registered' | 'valid' = 'valid'
-  let resolvedCertId = certId || ''
 
   try {
     const supabase = createClient(
@@ -191,22 +199,14 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     )
 
-    let query = supabase
+    const { data } = await supabase
       .from('registrations')
       .select('certificate_id, domain_requested')
-
-    if (certId) {
-      query = query.eq('certificate_id', certId)
-    } else {
-      const normalized = domain!.endsWith('.agent') ? domain! : domain + '.agent'
-      query = query.eq('domain_requested', normalized)
-    }
-
-    const { data } = await query.maybeSingle()
+      .eq('certificate_id', certId)
+      .maybeSingle()
 
     if (data) {
       agentName = data.domain_requested.replace(/\.agent$/, '')
-      resolvedCertId = data.certificate_id
       status = 'registered'
     }
   } catch {
@@ -214,8 +214,8 @@ Deno.serve(async (req) => {
   }
 
   const svg = style === 'card'
-    ? cardBadge(agentName, resolvedCertId, status)
-    : flatBadge(agentName, resolvedCertId, status)
+    ? cardBadge(agentName, certId, status)
+    : flatBadge(agentName, certId, status)
 
   return new Response(svg, {
     status: 200,

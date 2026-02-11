@@ -66,19 +66,53 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  let query = supabase
-    .from('registrations')
-    .select('certificate_id, domain_requested, registration_type, signup_source, created_at, metadata')
+  const selectCols = 'certificate_id, domain_requested, registration_type, signup_source, created_at, metadata'
 
+  // Cert ID lookup — single result (cert IDs are unique)
   if (certId) {
-    query = query.eq('certificate_id', certId)
-  } else {
-    // Normalize: accept "name" or "name.agent"
-    const normalized = domain!.endsWith('.agent') ? domain! : domain + '.agent'
-    query = query.eq('domain_requested', normalized)
+    const { data, error } = await supabase
+      .from('registrations')
+      .select(selectCols)
+      .eq('certificate_id', certId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Lookup error:', error.message)
+      return new Response(
+        JSON.stringify({ error: 'Lookup failed' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
+
+    if (!data) {
+      return new Response(
+        JSON.stringify({ error: 'Not found', valid: true }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
+
+    const agentName = data.domain_requested.replace(/\.agent$/, '')
+    return new Response(
+      JSON.stringify({
+        certificate_id: data.certificate_id,
+        agent_name: agentName,
+        domain: data.domain_requested,
+        type: data.registration_type,
+        source: data.signup_source,
+        registered_at: data.created_at,
+        description: data.metadata?.agent_description || null,
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    )
   }
 
-  const { data, error } = await query.maybeSingle()
+  // Domain lookup — multiple results (pre-registration: many users can claim the same domain)
+  const normalized = domain!.endsWith('.agent') ? domain! : domain + '.agent'
+  const { data: rows, error } = await supabase
+    .from('registrations')
+    .select(selectCols)
+    .eq('domain_requested', normalized)
+    .order('created_at', { ascending: true })
 
   if (error) {
     console.error('Lookup error:', error.message)
@@ -88,29 +122,25 @@ Deno.serve(async (req) => {
     )
   }
 
-  if (!data) {
+  if (!rows || rows.length === 0) {
     return new Response(
-      JSON.stringify({
-        error: 'Not found',
-        valid: certId ? true : undefined, // check digit was valid, just not registered
-      }),
+      JSON.stringify({ error: 'Not found', domain: normalized }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     )
   }
 
-  // Strip internal fields, return public info only
-  const agentName = data.domain_requested.replace(/\.agent$/, '')
-
   return new Response(
     JSON.stringify({
-      certificate_id: data.certificate_id,
-      agent_name: agentName,
-      domain: data.domain_requested,
-      type: data.registration_type,
-      source: data.signup_source,
-      registered_at: data.created_at,
-      description: data.metadata?.agent_description || null,
-      // No email, no IP, no operator name — public API only shows public info
+      domain: normalized,
+      count: rows.length,
+      registrations: rows.map((r) => ({
+        certificate_id: r.certificate_id,
+        agent_name: r.domain_requested.replace(/\.agent$/, ''),
+        type: r.registration_type,
+        source: r.signup_source,
+        registered_at: r.created_at,
+        description: r.metadata?.agent_description || null,
+      })),
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   )

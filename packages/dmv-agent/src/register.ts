@@ -13,7 +13,7 @@ const REGISTER_ENDPOINT =
  * No database credentials are used client-side.
  *
  * @param data - Agent registration fields
- * @param source - Where the signup came from ('mcp' | 'api' | 'ui')
+ * @param source - Where the signup came from ('mcp' | 'cli' | 'api' | 'ui')
  * @returns Registration result with certificate ID
  */
 export async function registerAgent(

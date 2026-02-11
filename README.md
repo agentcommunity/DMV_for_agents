@@ -33,9 +33,8 @@ js/supabase.js          Supabase integration — registration persistence (behin
 images/
   favicon.ico             Light mode favicon
   favicon_dark.ico        Dark mode favicon
-hle_mirror/             Static assets only:
-  hle.io/models/tv1.glb   3D TV model (Draco GLTF)
-  hle.io/_nuxt/assets/fonts/SupplyFree/  (4 .otf files)
+fonts/                  PPSupply font files (4 .otf)
+models/                 3D models: tv1.glb (Draco GLTF)
 audio/                 Background music (user-provided, optional)
 ```
 
@@ -75,10 +74,18 @@ Visitors arriving via permalink see the holographic card zoomed in. They can:
 | Exposure | 3.0 | 0.6 |
 | Fog | #7a7a7a | #454546 |
 
+## Backend
+
+Registration goes through the `register-agent` edge function (Supabase). On INSERT, a database trigger on the shared agentcommunity.org project handles auth user creation, magic link emails, and certificate emails automatically. DMV only INSERTs — everything else is reactive.
+
+Pre-registration model: multiple users can register interest in the same `.agent` domain. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map and [DEPLOY.md](packages/dmv-agent/DEPLOY.md) for the go-live checklist.
+
 ## Docs
 
 - [CARD.md](CARD.md) — Holographic card implementation, shader effects, rarity system, reuse guide
 - [AGENTS.md](AGENTS.md) — File-by-file function reference for agents
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Full system architecture, security model, badge system
+- [DEPLOY.md](packages/dmv-agent/DEPLOY.md) — Go-live checklist and deployment guide
 
 ## Browser Support
 

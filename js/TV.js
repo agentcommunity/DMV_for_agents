@@ -188,7 +188,7 @@ export class TV {
     }
 
     return new Promise((resolve, reject) => {
-      this.gltfLoader.load('hle_mirror/hle.io/models/tv1.glb', (gltf) => {
+      this.gltfLoader.load('models/tv1.glb', (gltf) => {
         this.model = gltf.scene;
         this.triggerEl = this.model.getObjectByName('Cube001');
         this.screen = this.model.getObjectByName('Glass');
