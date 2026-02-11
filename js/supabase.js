@@ -5,7 +5,7 @@ const REGISTER_ENDPOINT =
   'https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent';
 
 // Feature flag — set to true when ready to persist registrations
-export const SUPABASE_ENABLED = false;
+export const SUPABASE_ENABLED = true;
 
 /**
  * Insert a registration via the edge function proxy.

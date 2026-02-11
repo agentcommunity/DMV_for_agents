@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/badge/:path*",
+      "destination": "https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/badge/:path*"
+    }
+  ]
+}

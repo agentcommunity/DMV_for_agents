@@ -1,7 +1,7 @@
 import { TV } from './TV.js?v=12';
 import { AboutPoster } from './AboutPoster.js?v=12';
 import { HoloCard } from './HoloCard.js?v=12';
-import { insertRegistration } from './supabase.js?v=12';
+import { insertRegistration } from './supabase.js?v=13';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;

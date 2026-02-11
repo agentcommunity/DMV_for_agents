@@ -1,22 +1,22 @@
 /* === Fonts === */
 @font-face {
   font-family: "PPSupplyMonoRegular";
-  src: url(../hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplyMono-Regular.otf);
+  src: url(../fonts/PPSupplyMono-Regular.otf);
   font-weight: 400; font-style: normal; font-display: swap;
 }
 @font-face {
   font-family: "PPSupplyMonoUltralight";
-  src: url(../hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplyMono-Ultralight.otf);
+  src: url(../fonts/PPSupplyMono-Ultralight.otf);
   font-weight: 300; font-style: normal; font-display: swap;
 }
 @font-face {
   font-family: "PPSupplySansRegular";
-  src: url(../hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplySans-Regular.otf);
+  src: url(../fonts/PPSupplySans-Regular.otf);
   font-weight: 400; font-style: normal; font-display: swap;
 }
 @font-face {
   font-family: "PPSupplySansUltralight";
-  src: url(../hle_mirror/hle.io/_nuxt/assets/fonts/SupplyFree/PPSupplySans-Ultralight.otf);
+  src: url(../fonts/PPSupplySans-Ultralight.otf);
   font-weight: 300; font-style: normal; font-display: swap;
 }
 
