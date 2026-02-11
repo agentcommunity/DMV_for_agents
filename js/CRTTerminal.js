@@ -157,6 +157,13 @@ export class CRTTerminal {
 
     // Interactive hit targets rebuilt every frame by draw().
     this.tapTargets = [];
+
+    // Device detection
+    this.isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+
+    // Enter-to-begin gate (between boot text and type selector)
+    this._waitingForEnter = false;
+    this._enterPromptIndex = null;
   }
 
   // FNV-1a 32-bit hash
@@ -245,6 +252,13 @@ export class CRTTerminal {
   // --- Phase 3: Type Selector ---
 
   startTypeSelector() {
+    // Remove "Press ENTER" prompt if present
+    if (this._enterPromptIndex != null) {
+      this.lines.splice(this._enterPromptIndex);
+      this._enterPromptIndex = null;
+    }
+    this._waitingForEnter = false;
+
     this.bootPhase = 3;
     this.selectorIndex = 0;
     this.inputActive = true;
@@ -317,7 +331,7 @@ export class CRTTerminal {
   }
 
   drawTypeSelector(ctx, startY) {
-    const boxWidth = 340;
+    const boxWidth = 400;
     const boxHeight = 60;
     const gap = 16;
     const x = this.padding + 16;
@@ -331,6 +345,16 @@ export class CRTTerminal {
       ctx.strokeStyle = borderColor;
       ctx.lineWidth = isHighlighted ? 2 : 1;
       ctx.strokeRect(x, y, boxWidth, boxHeight);
+
+      // Arrow indicator for highlighted option
+      if (isHighlighted) {
+        ctx.font = `${this.fontSize}px "Courier New", monospace`;
+        ctx.fillStyle = textColor;
+        ctx.shadowColor = textColor;
+        ctx.shadowBlur = this.glowBlur;
+        ctx.fillText('▶', x - 18, y + 14);
+        ctx.shadowBlur = 0;
+      }
 
       ctx.font = `${this.fontSize}px "Courier New", monospace`;
       ctx.fillStyle = textColor;
@@ -357,7 +381,8 @@ export class CRTTerminal {
 
     ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Tap a box or use 1/2 + Enter', x + 12, y + 8);
+    const hintText = this.isMobile ? '  Tap to select' : '  ↑/↓ Navigate  ·  Enter to select';
+    ctx.fillText(hintText, x + 12, y + 8);
   }
 
   drawDoneButtons(ctx, startY) {
@@ -621,6 +646,12 @@ export class CRTTerminal {
 
   _runTapAction(action) {
     if (!action) return false;
+    if (action === 'enter_begin') {
+      if (this._waitingForEnter) {
+        this.startTypeSelector();
+      }
+      return true;
+    }
     if (action === 'type_org') {
       this.selectorIndex = 0;
       this.selectAccountType();
@@ -777,6 +808,11 @@ export class CRTTerminal {
     if (!this.inputActive) return;
 
     switch (this.bootPhase) {
+      case 2:
+        if (this._waitingForEnter && key === 'Enter') {
+          this.startTypeSelector();
+        }
+        break;
       case 3: this.handleTypeSelector(key); break;
       case 4: this.handleFormInput(key); break;
       case 5: this.handleReviewInput(key); break;
@@ -838,8 +874,12 @@ export class CRTTerminal {
       }
       const allTyped = this.lines.length >= this.bootLines.length &&
         this.lines.every(l => l.typed >= l.text.length);
-      if (allTyped) {
-        this.startTypeSelector();
+      if (allTyped && !this._waitingForEnter) {
+        this._waitingForEnter = true;
+        this.inputActive = true;
+        this._enterPromptIndex = this.lines.length;
+        const promptText = this.isMobile ? '  ▶ Tap to begin' : '  ▶ Press [ENTER] to begin';
+        this.lines.push({ text: promptText, color: this.headerColor, typed: 0 });
       }
     } else if (this.bootPhase === 6) {
       // Processing animation
@@ -1017,6 +1057,13 @@ export class CRTTerminal {
         continue;
       }
 
+      // Enter prompt: pulsing blink + full-screen tap target
+      const isEnterPrompt = this.bootPhase === 2 && this._waitingForEnter && i === this._enterPromptIndex;
+      if (isEnterPrompt && line.typed >= line.text.length) {
+        this._addTapTarget('enter_begin', 0, 0, w, h);
+        ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 0.06));
+      }
+
       if (y > -this.lineHeight && y < h) {
         if (line.answerStart != null && line.typed >= line.text.length) {
           const promptPart = line.text.substring(0, line.answerStart);
@@ -1039,6 +1086,8 @@ export class CRTTerminal {
           ctx.shadowBlur = 0;
         }
       }
+
+      if (isEnterPrompt) ctx.globalAlpha = 1;
 
       // Active input line (form phase)
       if (this.bootPhase === 4 && this.inputActive && i === this.lines.length - 1 &&

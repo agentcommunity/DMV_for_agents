@@ -1,7 +1,7 @@
-import { TV } from './TV.js?v=14';
-import { AboutPoster } from './AboutPoster.js?v=14';
-import { HoloCard } from './HoloCard.js?v=14';
-import { insertRegistration } from './supabase.js?v=14';
+import { TV } from './TV.js?v=15';
+import { AboutPoster } from './AboutPoster.js?v=15';
+import { HoloCard } from './HoloCard.js?v=15';
+import { insertRegistration } from './supabase.js?v=15';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
@@ -78,7 +78,6 @@ if (agentMark) {
     e.stopPropagation();
   });
   agentMark.addEventListener('click', (e) => {
-    e.preventDefault();
     e.stopPropagation();
   });
   agentMark.addEventListener('contextmenu', (e) => {
