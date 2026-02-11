@@ -127,7 +127,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               `  A verification email will be sent to ${email}.`,
               `  Click the link in the email to complete verification.`,
               ``,
-              `  View: dmv.agentcommunity.org/#/${encodeURIComponent(result.certificateId)}/${encodeURIComponent(result.agentName)}`,
+              `  View: dmv.agentcommunity.org/c/${encodeURIComponent(result.certificateId)}/${encodeURIComponent(result.agentName)}`,
             ].join('\n'),
           },
         ],

@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "name": "dmv-vercel",
+  "description": "Root deps for Vercel Edge Functions (OG image generation)",
+  "dependencies": {
+    "@vercel/og": "^0.6.0"
+  }
+}

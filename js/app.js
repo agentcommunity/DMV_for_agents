@@ -1,25 +1,24 @@
-import { TV } from './TV.js?v=12';
-import { AboutPoster } from './AboutPoster.js?v=12';
-import { HoloCard } from './HoloCard.js?v=12';
-import { insertRegistration } from './supabase.js?v=13';
+import { TV } from './TV.js?v=14';
+import { AboutPoster } from './AboutPoster.js?v=14';
+import { HoloCard } from './HoloCard.js?v=14';
+import { insertRegistration } from './supabase.js?v=14';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
 
-// Formats: #/CERT-ID or #/CERT-ID/agentname (agent name optional)
+// Permalink format: /c/CERT-ID/agentname
 function parsePermalink() {
-  const hash = window.location.hash;
-  if (!hash || !hash.startsWith('#/')) return null;
-  const parts = hash.slice(2).split('/').filter(Boolean);
-  if (parts.length < 1) return null;
+  const pathMatch = window.location.pathname.match(/^\/c\/([^/]+)(?:\/([^/]+))?\/?$/);
+  if (!pathMatch) return null;
   return {
-    certificateId: decodeURIComponent(parts[0]),
-    agentName: parts[1] ? decodeURIComponent(parts[1]) : '',
+    certificateId: decodeURIComponent(pathMatch[1]),
+    agentName: pathMatch[2] ? decodeURIComponent(pathMatch[2]) : '',
   };
 }
 
-function setShareHash(certificateId) {
-  history.replaceState(null, '', `#/${encodeURIComponent(certificateId)}`);
+function setShareHash(certificateId, agentName = '') {
+  const name = encodeURIComponent(agentName || 'agent');
+  history.replaceState(null, '', `/c/${encodeURIComponent(certificateId)}/${name}`);
 }
 
 const permalink = parsePermalink();
@@ -165,13 +164,14 @@ async function maybeEnableGyro() {
   }
 }
 
-function buildPermalinkUrl(certId) {
-  return `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+function buildPermalinkUrl(certId, agentName = '') {
+  const name = encodeURIComponent(agentName || 'agent');
+  return `https://dmv.agentcommunity.org/c/${encodeURIComponent(certId)}/${name}`;
 }
 
 function buildSharePayload(certId, data = {}) {
   const agentName = data.agentName || 'agent';
-  const shareUrl = buildPermalinkUrl(certId);
+  const shareUrl = buildPermalinkUrl(certId, agentName);
   const text = encodeURIComponent(
     `I just registered ${agentName}.agent at the Department of Machine Verification.\n\n` +
     `Get yours -> ${shareUrl}`
@@ -353,13 +353,12 @@ if (permalink) {
   }
 
   ctaBtn?.addEventListener('click', () => {
-    history.replaceState(null, '', window.location.pathname);
-    window.location.reload();
+    window.location.href = '/';
   });
 
   shareBtn?.addEventListener('click', () => {
     const certId = permalink.certificateId;
-    const shareUrl = buildPermalinkUrl(certId);
+    const shareUrl = buildPermalinkUrl(certId, permalink.agentName);
     const agentPart = permalink.agentName ? `${permalink.agentName}.agent` : 'an agent';
     const text = encodeURIComponent(
       `Check out ${agentPart} - verified at the Department of Machine Verification.\n\n` +
@@ -389,7 +388,7 @@ if (permalink) {
 tv.crt.onComplete = async (data) => {
   let current = { ...data };
   latestCardData = current;
-  setShareHash(current.certificateId);
+  setShareHash(current.certificateId, current.agentName);
   holoCard.show(current);
 
   try {
@@ -402,7 +401,7 @@ tv.crt.onComplete = async (data) => {
       };
       latestCardData = current;
       tv.crt.setCertificateId(current.certificateId);
-      setShareHash(current.certificateId);
+      setShareHash(current.certificateId, current.agentName);
       holoCard.show(current, true);
     }
   } catch (err) {

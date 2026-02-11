@@ -18,7 +18,7 @@ The Department of Machine Verification is the identity registration system for t
  │  │               │                                │                   │
  │  │               └─► supabase.js ─── fetch() ─────┼──┐               │
  │  │                                                │  │               │
- │  │  Permalink: /#/CERT-ID/agent-name              │  │               │
+ │  │  Permalink: /c/CERT-ID/agent-name               │  │               │
  │  │  Overlay: "Get Yours" + "Share on X"           │  │               │
  │  └──────────────────────────────────────────────┘  │               │
  │                                                      │               │
@@ -224,7 +224,7 @@ Note: `?domain=` is deprecated (ambiguous with multiple pre-registrations per do
 
 Embed code:
 ```markdown
-[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant)
+[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant)
 ```
 
 ## Relationship to .agent community

@@ -43,7 +43,7 @@ audio/                 Background music (user-provided, optional)
 - **CRT Terminal**: 8-phase boot (off → flicker → type → form → TnC → charter → process → done), scanlines, vignette, glow
 - **Holographic Card**: Custom GLSL shader with rainbow iridescence, foil lines, glare spotlight, fresnel edge glow, sparkle noise. Front + back faces. Gentle bob + mouse/gyro tilt tracking. See [CARD.md](CARD.md).
 - **Rarity System**: Cards get STANDARD (60%), ENHANCED (25%), RARE (10%), or LEGENDARY (5%) — determined by certificate ID hash. Affects holo intensity, accent color, and badge.
-- **Permalink Sharing**: `#/CERT-ID` URLs show the card directly. "Get Yours" + "Share on X" buttons for viral loop.
+- **Permalink Sharing**: `/c/CERT-ID/agent-name` URLs show the card directly with rich social previews. "Get Yours" + "Share on X" buttons for viral loop.
 - **Night Mode**: Click TV button. Swaps exposure, fog, CRT palette (green ↔ orange), button color
 - **Sound Toggle**: Plays/pauses local background track from `audio/`
 - **UI Theme System**: Light/dark UI tokens drive text, controls, and About panel colors
@@ -54,8 +54,8 @@ audio/                 Background music (user-provided, optional)
 ## Permalink System
 
 ```
-Normal:    localhost:8080                   → scroll to TV, fill form, get card
-Permalink: localhost:8080/#/NEON-80C-898X   → card shown instantly, "Get Yours" overlay
+Normal:    localhost:8080                              → scroll to TV, fill form, get card
+Permalink: localhost:8080/c/NEON-80C-898X/agent-name   → card shown instantly, "Get Yours" overlay
 ```
 
 Visitors arriving via permalink see the holographic card zoomed in. They can:
