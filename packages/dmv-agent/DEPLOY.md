@@ -139,12 +139,12 @@ After registration, users get these snippets:
 
 **GitHub README (Markdown):**
 ```markdown
-[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant)
+[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant)
 ```
 
 **Website (HTML):**
 ```html
-<a href="https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant">
+<a href="https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant">
   <img src="https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card" alt="my-assistant.agent — DMV Certificate" />
 </a>
 ```
@@ -238,7 +238,7 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 
 These are noted for future work, not needed for go-live:
 
-- [ ] **Link/visit tracking** — Track permalink visits (`#/CERT-ID`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
+- [ ] **Link/visit tracking** — Track permalink visits (`/c/CERT-ID/agent-name`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
 - [x] **Email verification flow** — Magic link sent by agentcommunity.org trigger (on_dmv_registration). New users get magic link + certificate email. Existing users get certificate email only.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
 - [x] **Domain lookup endpoint** — `lookup-agent` edge function (built, deploy with others)

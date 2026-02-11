@@ -68,7 +68,7 @@ function flatBadge(agentName: string | null, certId: string, status: 'registered
   const totalWidth = labelWidth + valueWidth
   const height = 20
   const permalink = agentName
-    ? `${DMV_BASE}/#/${encodeURIComponent(certId)}/${encodeURIComponent(agentName)}`
+    ? `${DMV_BASE}/c/${encodeURIComponent(certId)}/${encodeURIComponent(agentName)}`
     : DMV_BASE
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${height}" role="img" aria-label="${escapeXml(label)}: ${escapeXml(value)}">
@@ -103,7 +103,7 @@ function cardBadge(agentName: string | null, certId: string, status: 'registered
   const width = 280
   const height = 72
   const permalink = agentName
-    ? `${DMV_BASE}/#/${encodeURIComponent(certId)}/${encodeURIComponent(agentName)}`
+    ? `${DMV_BASE}/c/${encodeURIComponent(certId)}/${encodeURIComponent(agentName)}`
     : DMV_BASE
 
   const statusColor = status === 'invalid' ? '#e05d44' : '#33ff88'

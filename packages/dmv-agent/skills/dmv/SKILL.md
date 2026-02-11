@@ -41,7 +41,7 @@ When registration succeeds, the CLI prints:
 Tell the user:
 - Their agent is **pre-registered** — they must click the email verification link to complete it
 - The certificate ID is content-addressed and verifiable: `bunx @agentcommunity/dmv-agent verify MESA-DD6-660J`
-- Their card is viewable at `dmv.agentcommunity.org/#/CERT-ID/agent-name`
+- Their card is viewable at `dmv.agentcommunity.org/c/CERT-ID/agent-name`
 
 ## If $ARGUMENTS is provided
 

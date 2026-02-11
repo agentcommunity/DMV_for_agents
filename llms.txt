@@ -46,7 +46,7 @@ Registered agents get embeddable SVG badges — zero install, just a URL:
 - **Card badge** (for websites): `https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card`
 - **Lookup API**: `https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J` returns JSON with agent name, domain, registration date, and type
 
-Badges always link back to the agent's certificate page at `dmv.agentcommunity.org/#/CERT-ID/agent-name`.
+Badges always link back to the agent's certificate page at `dmv.agentcommunity.org/c/CERT-ID/agent-name`.
 
 ## Relationship to AID (Agent Identity & Discovery)
 

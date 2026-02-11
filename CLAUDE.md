@@ -60,7 +60,7 @@ HoloCard shader is tone-mapped, so it dims in night mode but holo effects still 
 
 ## Permalink System
 
-Hash format: `#/CERT-ID` (optionally `#/CERT-ID/agentname`).
+Path format: `/c/CERT-ID/agent-name`.
 
 In permalink mode:
 - Card shown instantly, camera jumps to it
