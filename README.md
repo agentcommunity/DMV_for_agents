@@ -1,96 +1,90 @@
 # DMV — Department of Machine Verification
 
+[![testdmv.agent](https://dmv.agentcommunity.org/badge?id=WARP-3AA-6ED1)](https://dmv.agentcommunity.org/c/WARP-3AA-6ED1/testdmv) [![Get Yours](https://img.shields.io/badge/.agent-Get_Yours-black)](https://dmv.agentcommunity.org) [![npm](https://img.shields.io/npm/v/@agentcommunity/dmv-agent)](https://www.npmjs.com/package/@agentcommunity/dmv-agent) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 Built by [agentcommunity.org](https://agentcommunity.org) to give names to agents.
 
-When agents become real participants on the internet — handling support tickets, managing calendars, negotiating deals — people need to know who built them, who's accountable, and whether they can be trusted. The DMV is the registration system for `.agent` identities: verifiable, content-addressed certificates that prove an agent was registered, when, and by whom.
+Agents are showing up everywhere — booking flights, filing tickets, writing code, arguing with other agents about whether to use tabs or spaces. But none of them have names. No identity. No accountability. Just vibes and an API key.
 
-This is an interactive 3D web experience. A retro CRT terminal inside a Three.js TV accepts form input and issues a holographic verification certificate — a collectible agent identity card with rarity tiers.
+The DMV fixes that. Walk up to the CRT terminal, fill out the form, and walk away with a holographic `.agent` identity card. Content-addressed certificate. Rarity tier. The whole thing.
 
-## Run
+Yes, it's a literal CRT monitor inside a 3D TV. Yes, there's a night mode. We take bureaucracy seriously.
+
+## Three ways to register
+
+**For humans** — visit [dmv.agentcommunity.org](https://dmv.agentcommunity.org), scroll into the TV, fill out the CRT terminal. You'll get a holographic card with your agent's name on it.
+
+**For terminals** — run the CLI:
+```bash
+bunx @agentcommunity/dmv-agent register
+```
+
+**For agents** — OpenClaw agents, Claude Code agents, any MCP-compatible agent can register themselves:
+```json
+{
+  "mcpServers": {
+    "dmv": { "command": "bunx", "args": ["@agentcommunity/dmv-agent"] }
+  }
+}
+```
+Then call `register_agent`. The agent picks its own name. As it should be.
+
+## Run locally
 
 ```bash
 uv run python -m http.server 8080
 # open http://localhost:8080
 ```
 
-Scroll to zoom into TV. CRT boots, presents form. Type fields, Enter to advance. Holographic card appears on completion.
+No build system. No bundler. No `node_modules` the size of a small planet. Just ES modules served from disk.
+
+Scroll to zoom into the TV. CRT boots, presents the form. Type fields, hit Enter. Holographic card appears on completion.
+
+## What you're looking at
+
+A retro CRT terminal rendered in Canvas2D, mapped as a texture onto a Three.js TV model, with a custom GLSL holographic card shader that does rainbow iridescence, foil lines, fresnel edge glow, and sparkle noise. Cards have rarity tiers (STANDARD 60%, ENHANCED 25%, RARE 10%, LEGENDARY 5%) determined by the hash of your certificate ID.
+
+The certificate IDs themselves are content-addressed — same inputs always produce the same ID, offline-verifiable via Luhn mod-36 check digit. No database lookup required to validate.
 
 ## Stack
 
 - Three.js 0.152.2 (CDN importmap)
-- GSAP 3.12.2 + ScrollTrigger (CDN globals)
-- Inter (Google Fonts, center `.agent` wordmark only)
+- GSAP 3.12.2 + ScrollTrigger (CDN globals) — [GSAP license](https://gsap.com/licensing/) (free tier, not MIT)
 - Vanilla ES modules, no build system
+- Supabase Edge Functions (Deno) for registration backend
+- Vercel for hosting + OG image generation
 
 ## Structure
 
 ```
-index.html              HTML shell — importmap, CDN scripts, CSS link, module entry
-css/styles.css          All styles — theme tokens, header/footer typography, center `.agent` mark, permalink overlay
-js/app.js               Entry — init TV + HoloCard, events, scroll, sound, clock, permalink routing, theme/favicon sync
-js/TV.js                3D scene — GLTF model, camera, renderer, night mode, onRender callbacks
-js/CRTTerminal.js       CRT terminal — Canvas2D, boot sequence, form, color schemes
-js/HoloCard.js          Holographic card — ShaderMaterial, front+back, rarity, identicon, QR pattern
-js/CardPoster.js        [Legacy] Original flat card, replaced by HoloCard
-js/AboutPoster.js       About panel — PlaneGeometry + CanvasTexture, toggle show/hide, theme-aware colors
-js/supabase.js          Supabase integration — registration persistence (behind feature flag)
-images/
-  favicon.ico             Light mode favicon
-  favicon_dark.ico        Dark mode favicon
-fonts/                  PPSupply font files (4 .otf)
-models/                 3D models: tv1.glb (Draco GLTF)
-audio/                 Background music (user-provided, optional)
+js/app.js               Entry — scroll, events, sound, permalink routing
+js/TV.js                3D scene — GLTF model, camera, night mode
+js/CRTTerminal.js       The CRT — Canvas2D, 8-phase boot, form, color schemes
+js/HoloCard.js          Holographic card — custom GLSL shader, rarity system
+js/AboutPoster.js       About panel overlay
+supabase/functions/     Edge functions — register, lookup, badge SVG
+packages/dmv-agent/     npm package — CLI + MCP server
 ```
 
 ## Features
 
-- **CRT Terminal**: 8-phase boot (off → flicker → type → form → TnC → charter → process → done), scanlines, vignette, glow
-- **Holographic Card**: Custom GLSL shader with rainbow iridescence, foil lines, glare spotlight, fresnel edge glow, sparkle noise. Front + back faces. Gentle bob + mouse/gyro tilt tracking. See [CARD.md](CARD.md).
-- **Rarity System**: Cards get STANDARD (60%), ENHANCED (25%), RARE (10%), or LEGENDARY (5%) — determined by certificate ID hash. Affects holo intensity, accent color, and badge.
-- **Permalink Sharing**: `/c/CERT-ID/agent-name` URLs show the card directly with rich social previews. "Get Yours" + "Share on X" buttons for viral loop.
-- **Night Mode**: Click TV button. Swaps exposure, fog, CRT palette (green ↔ orange), button color
-- **Sound Toggle**: Plays/pauses local background track from `audio/`
-- **UI Theme System**: Light/dark UI tokens drive text, controls, and About panel colors
-- **Center `.agent` Mark**: Inter-based `.a` core with hover-reveal `gent`; right-click downloads theme-colored `.agent` SVG
-- **Favicon Switching**: Auto-swaps between light/dark favicons with mode toggle
-- **UI Layout**: Fixed header (brand + about/CTA + sound) and footer (tagline + `by agentcommunity.org` + scroll + clock) over 3D canvas
-
-## Permalink System
-
-```
-Normal:    localhost:8080                              → scroll to TV, fill form, get card
-Permalink: localhost:8080/c/NEON-80C-898X/agent-name   → card shown instantly, "Get Yours" overlay
-```
-
-Visitors arriving via permalink see the holographic card zoomed in. They can:
-- Click/tap to zoom out and explore the full scene
-- Click "Get Yours" (header or overlay) to register their own agent
-- Click "Share on X" to share the card link
-
-## Night Mode Colors
-
-| | Day | Night |
-|-|-----|-------|
-| CRT text | #33ff88 (green) | #ffaa33 (amber) |
-| CRT header | #88ffcc | #ffdd88 |
-| CRT dim | #1a5a3a | #cc8844 |
-| TV button | #33ff88 | #cc6622 |
-| Exposure | 3.0 | 0.6 |
-| Fog | #7a7a7a | #454546 |
-
-## Backend
-
-Registration goes through the `register-agent` edge function (Supabase). On INSERT, a database trigger on the shared agentcommunity.org project handles auth user creation, magic link emails, and certificate emails automatically. DMV only INSERTs — everything else is reactive.
-
-Pre-registration model: multiple users can register interest in the same `.agent` domain. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map and [DEPLOY.md](packages/dmv-agent/DEPLOY.md) for the go-live checklist.
+- **CRT Terminal** — 8-phase boot sequence (off, flicker, boot text, type selector, form, review, processing, done), scanlines, vignette, phosphor glow
+- **Holographic Card** — Custom GLSL shader: rainbow iridescence, foil lines, glare spotlight, fresnel edge glow, sparkle noise. Front + back. Mouse/gyro tilt. See [CARD.md](CARD.md)
+- **Rarity System** — STANDARD / ENHANCED / RARE / LEGENDARY, determined by certificate hash
+- **Permalink Sharing** — `/c/CERT-ID/agent-name` with OG images, "Get Yours" + "Share on X" overlay
+- **Night Mode** — Click the TV button. Green CRT becomes amber. Exposure drops. Fog rolls in
+- **Sound Toggle** — Background music from `audio/` (BYO track)
 
 ## Docs
 
-- [CARD.md](CARD.md) — Holographic card implementation, shader effects, rarity system, reuse guide
-- [AGENTS.md](AGENTS.md) — File-by-file function reference for agents
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Full system architecture, security model, badge system
-- [DEPLOY.md](packages/dmv-agent/DEPLOY.md) — Go-live checklist and deployment guide
+- [CARD.md](CARD.md) — Holographic card shader, rarity system, reuse guide
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Full system map, security model, edge functions
+- [AGENTS.md](AGENTS.md) — File-by-file function reference
+- [CONTRIBUTING.md](CONTRIBUTING.md) — How to contribute
+- [packages/dmv-agent/](packages/dmv-agent/) — npm package docs + deploy guide
 
-## Browser Support
+## License
 
-ES modules + importmap required (Chrome 89+, Safari 16.4+, Firefox 108+).
+[MIT](LICENSE) — the code is yours. Go build something with it.
+
+GSAP is loaded via CDN under its own [license](https://gsap.com/licensing/) (free for standard use, not MIT).
