@@ -1,6 +1,10 @@
 # DMV — Department of Machine Verification
 
-Interactive 3D web experience for machine identity registration. Retro CRT terminal inside a 3D TV accepts form input and issues a holographic verification certificate — a collectible agent identity card with rarity tiers.
+Built by [agentcommunity.org](https://agentcommunity.org) to give names to agents.
+
+When agents become real participants on the internet — handling support tickets, managing calendars, negotiating deals — people need to know who built them, who's accountable, and whether they can be trusted. The DMV is the registration system for `.agent` identities: verifiable, content-addressed certificates that prove an agent was registered, when, and by whom.
+
+This is an interactive 3D web experience. A retro CRT terminal inside a Three.js TV accepts form input and issues a holographic verification certificate — a collectible agent identity card with rarity tiers.
 
 ## Run
 
