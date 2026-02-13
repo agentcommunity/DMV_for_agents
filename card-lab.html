@@ -55,7 +55,6 @@
       overflow: hidden;
       cursor: pointer;
       will-change: transform;
-      transition: transform 0.1s ease-out;
       background: #050505;
       border: 1px solid rgba(255,255,255,0.08);
       box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 1px rgba(255,255,255,0.1);
@@ -69,74 +68,176 @@
       display: block;
     }
 
-    /* ── Holo Overlays ── */
-    .card-shine, .card-glare, .card-foil {
+    /* ── Holo Overlays — light-reactive (pokemon-cards-css style) ── */
+    .card {
+      --mx: 50%;
+      --my: 50%;
+      --angle: 130deg;
+      --card-opacity: 0;
+      --pointer-from-center: 0;
+      --pointer-from-left: 0.5;
+      --pointer-from-top: 0.5;
+      --bg-x: 50%;
+      --bg-y: 50%;
+    }
+
+    .card-shine, .card-glare, .card-foil, .card-sparkle {
       position: absolute;
       inset: 0;
       border-radius: inherit;
       pointer-events: none;
-      transition: opacity 0.3s;
+      z-index: 2;
     }
-    .card-shine { opacity: 0.25; }
-    .card-glare { opacity: 0.15; }
-    .card-foil { opacity: 0.4; }
-    .card.touching .card-shine,
-    .card:hover .card-shine { opacity: var(--holo-intensity, 0.65); }
-    .card.touching .card-glare,
-    .card:hover .card-glare { opacity: 0.9; }
-    .card.touching .card-foil,
-    .card:hover .card-foil { opacity: 1; }
 
+    /* ── SHINE: rainbow holo, only visible when light hits ── */
     .card-shine {
-      background: linear-gradient(
-        var(--angle, 130deg),
-        hsla(0,90%,55%,.2), hsla(45,90%,55%,.15),
-        hsla(90,90%,55%,.2), hsla(135,90%,55%,.15),
-        hsla(180,90%,55%,.2), hsla(225,90%,55%,.15),
-        hsla(270,90%,55%,.2), hsla(315,90%,55%,.15),
-        hsla(360,90%,55%,.2)
-      );
+      background-image:
+        /* Rainbow spectrum, oversized for parallax shift */
+        repeating-linear-gradient(
+          var(--angle, 130deg),
+          hsla(0,90%,60%,.4), hsla(50,90%,55%,.3),
+          hsla(100,90%,55%,.4), hsla(150,90%,55%,.3),
+          hsla(200,90%,60%,.4), hsla(250,90%,55%,.3),
+          hsla(300,90%,55%,.4), hsla(340,90%,55%,.3),
+          hsla(360,90%,60%,.4)
+        ),
+        /* Scanline texture for foil grain */
+        repeating-linear-gradient(
+          90deg,
+          rgba(0,0,0,0.2) 0px, rgba(0,0,0,0.2) 1px,
+          transparent 1px, transparent 3px
+        );
+      background-size: 400% 400%, cover;
+      /* Parallax: bg position shifts with pointer */
+      background-position:
+        calc(((50% - var(--bg-x)) * 2.6) + 50%) calc(((50% - var(--bg-y)) * 3.5) + 50%),
+        center center;
+      background-blend-mode: overlay;
       mix-blend-mode: color-dodge;
+      filter: brightness(calc((var(--pointer-from-center) * 0.5) + 0.4))
+              contrast(2.5) saturate(0.7);
+      opacity: var(--card-opacity);
+      transition: opacity 0.4s ease;
     }
+    /* Shine after: radial spotlight from pointer position */
+    .card-shine::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(
+        farthest-corner circle at var(--mx) var(--my),
+        hsla(0, 0%, 100%, 0.3) 5%,
+        hsla(0, 0%, 100%, 0.1) 25%,
+        transparent 60%
+      );
+      mix-blend-mode: overlay;
+      opacity: var(--card-opacity);
+    }
+
+    /* ── Prism: conic rainbow centered on pointer ── */
     .holo-prism .card-shine {
-      background: conic-gradient(
-        from var(--angle, 0deg) at var(--mx, 50%) var(--my, 50%),
-        hsla(0,90%,55%,.3), hsla(60,90%,55%,.22),
-        hsla(120,90%,55%,.3), hsla(180,90%,55%,.22),
-        hsla(240,90%,55%,.3), hsla(300,90%,55%,.22),
-        hsla(360,90%,55%,.3)
-      );
+      background-image:
+        conic-gradient(
+          from var(--angle, 0deg) at var(--mx, 50%) var(--my, 50%),
+          hsla(0,90%,55%,.5), hsla(60,90%,55%,.35),
+          hsla(120,90%,55%,.5), hsla(180,90%,55%,.35),
+          hsla(240,90%,55%,.5), hsla(300,90%,55%,.35),
+          hsla(360,90%,55%,.5)
+        ),
+        repeating-linear-gradient(
+          90deg,
+          rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px,
+          transparent 1px, transparent 3px
+        );
+      background-size: cover, cover;
+      background-position: center, center;
     }
+
+    /* ── Aurora: horizontal color bands ── */
     .holo-aurora .card-shine {
-      background: linear-gradient(
-        calc(170deg + var(--angle, 0deg) * 0.15),
-        hsla(120,75%,40%,.25) 0%, hsla(160,80%,45%,.2) 20%,
-        hsla(190,85%,50%,.22) 40%, transparent 55%,
-        hsla(260,70%,45%,.2) 70%, hsla(290,65%,40%,.15) 85%,
-        transparent 100%
-      );
+      background-image:
+        linear-gradient(
+          calc(170deg + var(--angle, 0deg) * 0.15),
+          hsla(120,80%,45%,.45) 0%, hsla(160,85%,50%,.3) 20%,
+          hsla(190,90%,55%,.35) 40%, transparent 55%,
+          hsla(260,75%,50%,.3) 70%, hsla(290,70%,45%,.25) 85%,
+          transparent 100%
+        ),
+        repeating-linear-gradient(
+          90deg,
+          rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 1px,
+          transparent 1px, transparent 4px
+        );
+      background-size: 300% 300%, cover;
+      background-position:
+        calc(((50% - var(--bg-x)) * 1.8) + 50%) calc(((50% - var(--bg-y)) * 2.0) + 50%),
+        center center;
     }
+
+    /* ── Duochrome: two-color shift ── */
     .holo-duochrome .card-shine {
-      background: linear-gradient(var(--angle, 130deg),
-        var(--duo-1, hsla(320,80%,50%,.3)) 0%,
-        transparent 30%, transparent 70%,
-        var(--duo-2, hsla(180,80%,50%,.3)) 100%
-      );
+      background-image:
+        linear-gradient(
+          var(--angle, 130deg),
+          var(--duo-1, hsla(320,80%,50%,.5)) 0%,
+          transparent 25%, transparent 75%,
+          var(--duo-2, hsla(180,80%,50%,.5)) 100%
+        ),
+        repeating-linear-gradient(
+          calc(var(--angle, 0deg) + 45deg),
+          transparent 0px, transparent 2px,
+          rgba(255,255,255,0.05) 2px, rgba(255,255,255,0.05) 3px
+        );
+      background-size: 300% 300%, cover;
+      background-position:
+        calc(((50% - var(--bg-x)) * 3.0) + 50%) calc(((50% - var(--bg-y)) * 3.0) + 50%),
+        center center;
     }
+
+    /* ── GLARE: white spotlight following pointer (the "light source") ── */
     .card-glare {
       background: radial-gradient(
-        circle at var(--mx, 50%) var(--my, 50%),
-        rgba(255,255,255,0.3), transparent 45%
+        farthest-corner circle at var(--mx, 50%) var(--my, 50%),
+        hsla(0, 0%, 100%, 0.7) 5%,
+        hsla(0, 0%, 100%, 0.5) 15%,
+        hsla(0, 0%, 100%, 0.1) 35%,
+        hsla(0, 0%, 0%, 0.3) 80%
       );
       mix-blend-mode: overlay;
+      /* Opacity = interaction state * (base + distance factor) */
+      opacity: calc(var(--card-opacity) * (0.25 + var(--pointer-from-center) * 0.6));
+      transition: opacity 0.35s ease;
     }
+
+    /* ── FOIL: fine holographic lines ── */
     .card-foil {
-      background: repeating-linear-gradient(
-        calc(var(--angle, 0deg) + 90deg),
-        transparent 0px, transparent 2px,
-        rgba(255,255,255,0.045) 2px, rgba(255,255,255,0.045) 3px
-      );
+      background:
+        repeating-linear-gradient(
+          calc(var(--angle, 0deg) + 90deg),
+          transparent 0px, transparent 2px,
+          rgba(255,255,255,0.06) 2px, rgba(255,255,255,0.06) 3px
+        ),
+        repeating-linear-gradient(
+          calc(var(--angle, 0deg)),
+          transparent 0px, transparent 4px,
+          rgba(255,255,255,0.02) 4px, rgba(255,255,255,0.02) 5px
+        );
       mix-blend-mode: overlay;
+      opacity: calc(var(--card-opacity) * 0.8);
+      transition: opacity 0.4s ease;
+    }
+
+    /* ── SPARKLE: animated noise overlay for legendary ── */
+    .card-sparkle {
+      background-image: radial-gradient(
+        circle at var(--mx, 50%) var(--my, 50%),
+        hsla(0, 0%, 100%, 0.15) 0%,
+        transparent 50%
+      );
+      mix-blend-mode: color-dodge;
+      opacity: calc(var(--card-opacity) * var(--pointer-from-center) * var(--holo-intensity, 0.5));
+      transition: opacity 0.3s ease;
     }
 
     /* ── Controls ── */
@@ -259,7 +360,7 @@
     .gallery-item:hover::after { opacity: 1; }
     .gallery-card {
       width: 170px; height: 238px;
-      transition: transform 0.1s ease-out, box-shadow 0.3s;
+      transition: box-shadow 0.3s;
     }
     .gallery-card:hover {
       box-shadow: 0 10px 40px rgba(0,0,0,0.6), 0 0 20px var(--card-glow, rgba(51,255,136,0.12));
@@ -296,6 +397,7 @@
         <div class="card-shine"></div>
         <div class="card-glare"></div>
         <div class="card-foil"></div>
+        <div class="card-sparkle"></div>
       </div>
     </div>
     <div class="controls">
@@ -1211,7 +1313,7 @@ function getEffectiveDNA() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  HOLO & INTERACTION (mouse + touch)
+//  HOLO & INTERACTION — light-reactive (pokemon-cards-css style)
 // ═══════════════════════════════════════════════════════════════
 function applyHoloType(cardEl, dna) {
   cardEl.classList.remove('holo-rainbow','holo-prism','holo-aurora','holo-duochrome');
@@ -1220,42 +1322,97 @@ function applyHoloType(cardEl, dna) {
   cardEl.style.setProperty('--holo-intensity', RARITIES[dna.rarity].intensity);
   if (holoId === 'duochrome') {
     const pal = PALETTES[dna.palette];
-    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.3));
-    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.3));
+    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.5));
+    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.5));
   }
   const pal = PALETTES[dna.palette];
   cardEl.closest('.card-wrap, .gallery-item')
     ?.style.setProperty('--card-glow', withAlpha(pal.glow, 0.1));
 }
 
-const hoveredCards = new WeakSet();
+// Track which cards are being interacted with
+const interactingCards = new WeakSet();
+
+// Spring-like values per card for smooth interpolation
+const cardSprings = new WeakMap();
+
+function getSpring(cardEl) {
+  if (!cardSprings.has(cardEl)) {
+    cardSprings.set(cardEl, {
+      // Current smoothed values
+      mx: 50, my: 50, angle: 130,
+      bgX: 50, bgY: 50,
+      rotX: 0, rotY: 0,
+      opacity: 0,
+      // Target values (set by pointer)
+      targetMx: 50, targetMy: 50, targetAngle: 130,
+      targetBgX: 50, targetBgY: 50,
+      targetRotX: 0, targetRotY: 0,
+      targetOpacity: 0,
+    });
+  }
+  return cardSprings.get(cardEl);
+}
+
+function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
 
 function applyTilt(cardEl, clientX, clientY) {
   const rect = cardEl.getBoundingClientRect();
-  const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-  const ry = (x - 0.5) * 30;
-  const rx = (y - 0.5) * -30;
-  const angle = Math.atan2(y - 0.5, x - 0.5) * (180/Math.PI) + 90;
-  cardEl.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
-  cardEl.style.setProperty('--mx', (x*100)+'%');
-  cardEl.style.setProperty('--my', (y*100)+'%');
-  cardEl.style.setProperty('--angle', angle+'deg');
+  const px = clamp((clientX - rect.left) / rect.width, 0, 1);   // 0..1
+  const py = clamp((clientY - rect.top) / rect.height, 0, 1);   // 0..1
+
+  // 3D tilt: ±20 degrees
+  const rotY = (px - 0.5) * 40;
+  const rotX = (py - 0.5) * -40;
+
+  // Angle of light from center
+  const angle = Math.atan2(py - 0.5, px - 0.5) * (180 / Math.PI) + 90;
+
+  // Background position: narrow range for subtle parallax (37-63%)
+  const bgX = 37 + (px * 26);
+  const bgY = 33 + (py * 34);
+
+  const spring = getSpring(cardEl);
+  spring.targetMx = px * 100;
+  spring.targetMy = py * 100;
+  spring.targetAngle = angle;
+  spring.targetBgX = bgX;
+  spring.targetBgY = bgY;
+  spring.targetRotX = rotX;
+  spring.targetRotY = rotY;
+  spring.targetOpacity = 1;
+}
+
+function resetCardSpring(cardEl) {
+  const spring = getSpring(cardEl);
+  spring.targetMx = 50;
+  spring.targetMy = 50;
+  spring.targetAngle = 130;
+  spring.targetBgX = 50;
+  spring.targetBgY = 50;
+  spring.targetRotX = 0;
+  spring.targetRotY = 0;
+  spring.targetOpacity = 0;  // holo fades out when not interacting
 }
 
 function setupCardHover(cardEl) {
+  getSpring(cardEl); // init
+
   // Mouse
+  cardEl.addEventListener('mouseenter', () => {
+    interactingCards.add(cardEl);
+  });
   cardEl.addEventListener('mousemove', (e) => {
-    hoveredCards.add(cardEl);
+    interactingCards.add(cardEl);
     applyTilt(cardEl, e.clientX, e.clientY);
   });
   cardEl.addEventListener('mouseleave', () => {
-    hoveredCards.delete(cardEl);
+    interactingCards.delete(cardEl);
+    resetCardSpring(cardEl);
   });
   // Touch
   cardEl.addEventListener('touchstart', (e) => {
-    hoveredCards.add(cardEl);
-    cardEl.classList.add('touching');
+    interactingCards.add(cardEl);
     const t = e.touches[0];
     applyTilt(cardEl, t.clientX, t.clientY);
   }, { passive: true });
@@ -1265,13 +1422,13 @@ function setupCardHover(cardEl) {
     applyTilt(cardEl, t.clientX, t.clientY);
   }, { passive: false });
   cardEl.addEventListener('touchend', () => {
-    hoveredCards.delete(cardEl);
-    cardEl.classList.remove('touching');
+    interactingCards.delete(cardEl);
+    resetCardSpring(cardEl);
   });
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  HOLO AUTO-ANIMATION
+//  ANIMATION LOOP — spring interpolation + idle sway
 // ═══════════════════════════════════════════════════════════════
 const allCards = [];
 
@@ -1280,20 +1437,51 @@ function animateHolo() {
 
   for (let i = 0; i < allCards.length; i++) {
     const cardEl = allCards[i];
-    if (hoveredCards.has(cardEl)) continue;
+    const spring = getSpring(cardEl);
+    const isActive = interactingCards.has(cardEl);
 
-    const offset = i * 1.7;
-    const angle = (t + offset) * 32;
-    const mx = 50 + Math.sin((t + offset) * 0.7) * 35;
-    const my = 50 + Math.cos((t + offset) * 0.5) * 35;
-    // More dramatic tilt for visible holo
-    const rx = Math.sin((t + offset) * 0.4) * 5;
-    const ry = Math.cos((t + offset) * 0.3) * 6;
+    // Idle sway: very subtle when not interacting
+    if (!isActive) {
+      const offset = i * 1.7;
+      // Gentle idle: barely perceptible movement
+      spring.targetRotX = Math.sin((t + offset) * 0.3) * 1.5;
+      spring.targetRotY = Math.cos((t + offset) * 0.25) * 2;
+      // Subtle bg drift
+      spring.targetBgX = 50 + Math.sin((t + offset) * 0.2) * 3;
+      spring.targetBgY = 50 + Math.cos((t + offset) * 0.15) * 3;
+      spring.targetAngle = 130 + Math.sin((t + offset) * 0.1) * 10;
+    }
 
-    cardEl.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
-    cardEl.style.setProperty('--angle', angle + 'deg');
-    cardEl.style.setProperty('--mx', mx + '%');
-    cardEl.style.setProperty('--my', my + '%');
+    // Spring interpolation (lerp toward targets)
+    const lerpRate = isActive ? 0.15 : 0.04;
+    spring.mx += (spring.targetMx - spring.mx) * lerpRate;
+    spring.my += (spring.targetMy - spring.my) * lerpRate;
+    spring.angle += (spring.targetAngle - spring.angle) * lerpRate;
+    spring.bgX += (spring.targetBgX - spring.bgX) * lerpRate;
+    spring.bgY += (spring.targetBgY - spring.bgY) * lerpRate;
+    spring.rotX += (spring.targetRotX - spring.rotX) * lerpRate;
+    spring.rotY += (spring.targetRotY - spring.rotY) * lerpRate;
+    spring.opacity += (spring.targetOpacity - spring.opacity) * (isActive ? 0.12 : 0.06);
+
+    // Derived values
+    const pointerFromCenter = clamp(
+      Math.sqrt(Math.pow((spring.mx - 50) / 50, 2) + Math.pow((spring.my - 50) / 50, 2)),
+      0, 1
+    );
+    const pointerFromLeft = spring.mx / 100;
+    const pointerFromTop = spring.my / 100;
+
+    // Apply to DOM
+    cardEl.style.transform = `rotateX(${spring.rotX.toFixed(2)}deg) rotateY(${spring.rotY.toFixed(2)}deg)`;
+    cardEl.style.setProperty('--mx', spring.mx.toFixed(1) + '%');
+    cardEl.style.setProperty('--my', spring.my.toFixed(1) + '%');
+    cardEl.style.setProperty('--angle', spring.angle.toFixed(1) + 'deg');
+    cardEl.style.setProperty('--bg-x', spring.bgX.toFixed(1) + '%');
+    cardEl.style.setProperty('--bg-y', spring.bgY.toFixed(1) + '%');
+    cardEl.style.setProperty('--card-opacity', spring.opacity.toFixed(3));
+    cardEl.style.setProperty('--pointer-from-center', pointerFromCenter.toFixed(3));
+    cardEl.style.setProperty('--pointer-from-left', pointerFromLeft.toFixed(3));
+    cardEl.style.setProperty('--pointer-from-top', pointerFromTop.toFixed(3));
   }
 
   requestAnimationFrame(animateHolo);
@@ -1412,7 +1600,7 @@ function setupGallery() {
     canvas.width = CW; canvas.height = CH;
     card.appendChild(canvas);
 
-    ['card-shine','card-glare','card-foil'].forEach(cls => {
+    ['card-shine','card-glare','card-foil','card-sparkle'].forEach(cls => {
       const div = document.createElement('div');
       div.className = cls;
       card.appendChild(div);
