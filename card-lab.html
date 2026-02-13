@@ -24,7 +24,6 @@
     header h1 { font-size: 24px; color: #fff; letter-spacing: 8px; }
     header p { font-size: 11px; color: #444; margin-top: 8px; }
 
-    /* ── Preview Section ── */
     .preview {
       display: flex;
       gap: 40px;
@@ -41,13 +40,12 @@
     .card-wrap::after {
       content: '';
       position: absolute;
-      inset: -60px;
-      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.08)), transparent 70%);
+      inset: -80px;
+      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.1)), transparent 70%);
       pointer-events: none;
       z-index: -1;
     }
 
-    /* ── Card ── */
     .card {
       width: 315px;
       height: 440px;
@@ -59,8 +57,11 @@
       will-change: transform;
       transition: transform 0.1s ease-out;
       background: #050505;
-      border: 1px solid rgba(255,255,255,0.06);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 1px rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 1px rgba(255,255,255,0.1);
+      touch-action: none; /* enable touch tilt on mobile */
+      -webkit-user-select: none;
+      user-select: none;
     }
     .card canvas {
       width: 100%;
@@ -68,7 +69,7 @@
       display: block;
     }
 
-    /* ── Holo Overlays (always partially visible, enhanced on hover) ── */
+    /* ── Holo Overlays ── */
     .card-shine, .card-glare, .card-foil {
       position: absolute;
       inset: 0;
@@ -76,68 +77,64 @@
       pointer-events: none;
       transition: opacity 0.3s;
     }
-    .card-shine { opacity: 0.2; }
-    .card-glare { opacity: 0.12; }
-    .card-foil { opacity: 0.35; }
-    .card:hover .card-shine { opacity: var(--holo-intensity, 0.6); }
-    .card:hover .card-glare { opacity: 0.85; }
+    .card-shine { opacity: 0.25; }
+    .card-glare { opacity: 0.15; }
+    .card-foil { opacity: 0.4; }
+    .card.touching .card-shine,
+    .card:hover .card-shine { opacity: var(--holo-intensity, 0.65); }
+    .card.touching .card-glare,
+    .card:hover .card-glare { opacity: 0.9; }
+    .card.touching .card-foil,
     .card:hover .card-foil { opacity: 1; }
 
-    /* Holo: Rainbow (default) */
     .card-shine {
       background: linear-gradient(
         var(--angle, 130deg),
-        hsla(0,90%,55%,.18), hsla(45,90%,55%,.14),
-        hsla(90,90%,55%,.18), hsla(135,90%,55%,.14),
-        hsla(180,90%,55%,.18), hsla(225,90%,55%,.14),
-        hsla(270,90%,55%,.18), hsla(315,90%,55%,.14),
-        hsla(360,90%,55%,.18)
+        hsla(0,90%,55%,.2), hsla(45,90%,55%,.15),
+        hsla(90,90%,55%,.2), hsla(135,90%,55%,.15),
+        hsla(180,90%,55%,.2), hsla(225,90%,55%,.15),
+        hsla(270,90%,55%,.2), hsla(315,90%,55%,.15),
+        hsla(360,90%,55%,.2)
       );
       mix-blend-mode: color-dodge;
     }
-
-    /* Holo: Prism — conic gradient emanating from cursor position */
     .holo-prism .card-shine {
       background: conic-gradient(
         from var(--angle, 0deg) at var(--mx, 50%) var(--my, 50%),
-        hsla(0,90%,55%,.28), hsla(60,90%,55%,.20),
-        hsla(120,90%,55%,.28), hsla(180,90%,55%,.20),
-        hsla(240,90%,55%,.28), hsla(300,90%,55%,.20),
-        hsla(360,90%,55%,.28)
+        hsla(0,90%,55%,.3), hsla(60,90%,55%,.22),
+        hsla(120,90%,55%,.3), hsla(180,90%,55%,.22),
+        hsla(240,90%,55%,.3), hsla(300,90%,55%,.22),
+        hsla(360,90%,55%,.3)
       );
     }
-    /* Holo: Aurora — vertical flowing green/cyan/purple */
     .holo-aurora .card-shine {
       background: linear-gradient(
         calc(170deg + var(--angle, 0deg) * 0.15),
-        hsla(120,75%,40%,.22) 0%, hsla(160,80%,45%,.17) 20%,
-        hsla(190,85%,50%,.20) 40%, transparent 55%,
-        hsla(260,70%,45%,.17) 70%, hsla(290,65%,40%,.12) 85%,
+        hsla(120,75%,40%,.25) 0%, hsla(160,80%,45%,.2) 20%,
+        hsla(190,85%,50%,.22) 40%, transparent 55%,
+        hsla(260,70%,45%,.2) 70%, hsla(290,65%,40%,.15) 85%,
         transparent 100%
       );
     }
-    /* Holo: Duochrome — two-color shift from palette pri + acc */
     .holo-duochrome .card-shine {
       background: linear-gradient(var(--angle, 130deg),
-        var(--duo-1, hsla(320,80%,50%,.28)) 0%,
+        var(--duo-1, hsla(320,80%,50%,.3)) 0%,
         transparent 30%, transparent 70%,
-        var(--duo-2, hsla(180,80%,50%,.28)) 100%
+        var(--duo-2, hsla(180,80%,50%,.3)) 100%
       );
     }
-
     .card-glare {
       background: radial-gradient(
         circle at var(--mx, 50%) var(--my, 50%),
-        rgba(255,255,255,0.28), transparent 45%
+        rgba(255,255,255,0.3), transparent 45%
       );
       mix-blend-mode: overlay;
     }
-
     .card-foil {
       background: repeating-linear-gradient(
         calc(var(--angle, 0deg) + 90deg),
         transparent 0px, transparent 2px,
-        rgba(255,255,255,0.04) 2px, rgba(255,255,255,0.04) 3px
+        rgba(255,255,255,0.045) 2px, rgba(255,255,255,0.045) 3px
       );
       mix-blend-mode: overlay;
     }
@@ -163,10 +160,7 @@
       letter-spacing: 3px;
       margin-bottom: 6px;
     }
-    .input-row {
-      display: flex;
-      gap: 6px;
-    }
+    .input-row { display: flex; gap: 6px; }
     .input-row input {
       flex: 1;
       background: #0a0a0a;
@@ -189,15 +183,9 @@
       cursor: pointer;
     }
     .btn-icon:hover { background: #252525; color: #fff; }
-
-    .pal-grid {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
+    .pal-grid { display: flex; gap: 6px; flex-wrap: wrap; }
     .pal-btn {
-      width: 28px;
-      height: 28px;
+      width: 28px; height: 28px;
       border-radius: 50%;
       border: 2px solid transparent;
       cursor: pointer;
@@ -205,12 +193,7 @@
     }
     .pal-btn:hover { transform: scale(1.15); }
     .pal-btn.active { border-color: #fff; transform: scale(1.15); }
-
-    .opt-row {
-      display: flex;
-      gap: 4px;
-      flex-wrap: wrap;
-    }
+    .opt-row { display: flex; gap: 4px; flex-wrap: wrap; }
     .opt-btn {
       background: #1a1a1a;
       border: 1px solid #2a2a2a;
@@ -224,7 +207,6 @@
     }
     .opt-btn:hover { background: #252525; color: #ccc; }
     .opt-btn.active { background: #222; border-color: #555; color: #fff; }
-
     .btn-randomize {
       background: #1a1a1a;
       border: 1px solid #333;
@@ -238,7 +220,6 @@
       transition: all 0.15s;
     }
     .btn-randomize:hover { background: #252525; color: #fff; border-color: #555; }
-
     .dna-readout {
       background: #0a0a0a;
       border: 1px solid #1a1a1a;
@@ -256,34 +237,20 @@
       margin: 60px auto;
       padding: 0 20px 60px;
     }
-    .gallery h2 {
-      font-size: 14px;
-      color: #fff;
-      letter-spacing: 6px;
-      text-align: center;
-    }
-    .gallery-sub {
-      font-size: 10px;
-      color: #444;
-      text-align: center;
-      margin: 8px 0 30px;
-    }
+    .gallery h2 { font-size: 14px; color: #fff; letter-spacing: 6px; text-align: center; }
+    .gallery-sub { font-size: 10px; color: #444; text-align: center; margin: 8px 0 30px; }
     .gallery-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
       gap: 24px;
       justify-items: center;
     }
-    .gallery-item {
-      perspective: 600px;
-      cursor: pointer;
-      position: relative;
-    }
+    .gallery-item { perspective: 600px; cursor: pointer; position: relative; }
     .gallery-item::after {
       content: '';
       position: absolute;
       inset: -30px;
-      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.05)), transparent 70%);
+      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.06)), transparent 70%);
       pointer-events: none;
       z-index: -1;
       transition: opacity 0.3s;
@@ -291,30 +258,23 @@
     }
     .gallery-item:hover::after { opacity: 1; }
     .gallery-card {
-      width: 170px;
-      height: 238px;
+      width: 170px; height: 238px;
       transition: transform 0.1s ease-out, box-shadow 0.3s;
     }
     .gallery-card:hover {
-      box-shadow: 0 10px 40px rgba(0,0,0,0.6), 0 0 20px var(--card-glow, rgba(51,255,136,0.1));
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6), 0 0 20px var(--card-glow, rgba(51,255,136,0.12));
     }
     .gallery-label {
-      font-size: 9px;
-      color: #555;
-      text-align: center;
-      margin-top: 8px;
-      letter-spacing: 1px;
-      transition: color 0.3s;
+      font-size: 9px; color: #555; text-align: center;
+      margin-top: 8px; letter-spacing: 1px; transition: color 0.3s;
     }
     .gallery-item:hover .gallery-label { color: #888; }
-
     @keyframes cardFlip {
       0% { transform: rotateY(0); }
       50% { transform: rotateY(90deg) scale(0.95); }
       100% { transform: rotateY(0); }
     }
     .card.flipping { animation: cardFlip 0.5s ease-in-out; }
-
     @media (max-width: 720px) {
       .preview { flex-direction: column; align-items: center; }
       .controls { width: 100%; max-width: 400px; }
@@ -430,8 +390,8 @@ function generateCertId(name) {
 // ═══════════════════════════════════════════════════════════════
 //  DRAWING HELPERS
 // ═══════════════════════════════════════════════════════════════
-function drawCorners(ctx, x, y, w, h, color) {
-  const L = 25, T = 2;
+function drawCorners(ctx, x, y, w, h, color, size) {
+  const L = size || 25, T = 2;
   ctx.fillStyle = color;
   ctx.fillRect(x, y, L, T);           ctx.fillRect(x, y, T, L);
   ctx.fillRect(x+w-L, y, L, T);       ctx.fillRect(x+w-T, y, T, L);
@@ -439,26 +399,31 @@ function drawCorners(ctx, x, y, w, h, color) {
   ctx.fillRect(x+w-L, y+h-T, L, T);   ctx.fillRect(x+w-T, y+h-L, T, L);
 }
 
-function drawIdenticon(ctx, x, y, size, seed, color) {
+function drawIdenticon(ctx, x, y, size, seed, color1, color2) {
   const rand = seededRand(seed);
   const grid = 9, cell = size / grid, half = Math.ceil(grid / 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
   ctx.fillRect(x, y, size, size);
   const cells = [];
   for (let gy = 0; gy < half; gy++) {
     cells[gy] = [];
     for (let gx = 0; gx < half; gx++) cells[gy][gx] = rand() > 0.42;
   }
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.85;
+  // Dual-color gradient identicon
   for (let gy = 0; gy < grid; gy++) {
     for (let gx = 0; gx < grid; gx++) {
       const sy = gy < half ? gy : grid-1-gy;
       const sx = gx < half ? gx : grid-1-gx;
-      if (cells[sy]?.[sx]) ctx.fillRect(x+gx*cell+1, y+gy*cell+1, cell-2, cell-2);
+      if (cells[sy]?.[sx]) {
+        const t = gy / grid;
+        const [r1,g1,b1] = hexToRgb(color1);
+        const [r2,g2,b2] = hexToRgb(color2);
+        const r = r1 + (r2-r1)*t, g = g1 + (g2-g1)*t, b = b1 + (b2-b1)*t;
+        ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},0.9)`;
+        ctx.fillRect(x+gx*cell+1, y+gy*cell+1, cell-2, cell-2);
+      }
     }
   }
-  ctx.globalAlpha = 1;
 }
 
 function drawQR(ctx, x, y, size, seed, color) {
@@ -483,45 +448,170 @@ function drawQR(ctx, x, y, size, seed, color) {
   ctx.globalAlpha = 1;
 }
 
-function drawMicroDots(ctx, x, y, w, count, color) {
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.25;
-  const spacing = w / (count + 1);
-  for (let i = 1; i <= count; i++) {
+function drawStarField(ctx, w, h, seed, color1, color2, count) {
+  const rand = seededRand(seed);
+  for (let i = 0; i < count; i++) {
+    const x = rand() * w, y = rand() * h;
+    const size = 0.3 + rand() * 1.5;
+    const alpha = 0.08 + rand() * 0.35;
+    const c = rand() > 0.5 ? color1 : color2;
+    ctx.fillStyle = c;
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.arc(x + i * spacing, y, 1, 0, Math.PI * 2);
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+    // Bright stars get a glow halo
+    if (rand() > 0.88) {
+      ctx.globalAlpha = alpha * 0.2;
+      ctx.beginPath();
+      ctx.arc(x, y, size * 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawConstellation(ctx, x, y, w, h, seed, color) {
+  const rand = seededRand(seed);
+  const pts = [];
+  const n = 7 + (rand() * 6) | 0;
+  for (let i = 0; i < n; i++) {
+    pts.push({ x: x + rand() * w, y: y + rand() * h });
+  }
+  // Connect nearby points
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.6;
+  ctx.globalAlpha = 0.12;
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+      if (Math.sqrt(dx*dx + dy*dy) < Math.min(w, h) * 0.45) {
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.lineTo(pts[j].x, pts[j].y);
+        ctx.stroke();
+      }
+    }
+  }
+  // Star dots
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.5;
+  for (const p of pts) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.5 + rand(), 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
 }
 
-function drawDiamond(ctx, x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(x, y - size);
-  ctx.lineTo(x + size, y);
-  ctx.lineTo(x, y + size);
-  ctx.lineTo(x - size, y);
-  ctx.closePath();
+function drawChip(ctx, x, y, w, h, color1, color2) {
+  // Chip body
+  const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+  grad.addColorStop(0, withAlpha(color1, 0.2));
+  grad.addColorStop(1, withAlpha(color2, 0.1));
+  roundRect(ctx, x, y, w, h, 4);
+  ctx.fillStyle = grad;
   ctx.fill();
+  // Chip border
+  ctx.strokeStyle = withAlpha(color1, 0.5);
+  ctx.lineWidth = 1;
+  roundRect(ctx, x, y, w, h, 4);
+  ctx.stroke();
+  // Internal lines
+  ctx.strokeStyle = withAlpha(color1, 0.25);
+  ctx.lineWidth = 0.5;
+  const mx = x + w/2, my = y + h/2;
+  ctx.beginPath(); ctx.moveTo(x + 4, my); ctx.lineTo(x + w - 4, my); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(mx, y + 4); ctx.lineTo(mx, y + h - 4); ctx.stroke();
+  // Contact pads
+  ctx.fillStyle = withAlpha(color1, 0.15);
+  ctx.fillRect(x + 3, y + 3, w/2 - 5, h/2 - 5);
+  ctx.fillRect(mx + 2, my + 2, w/2 - 5, h/2 - 5);
+}
+
+function drawBarcode(ctx, x, y, w, h, seed, color) {
+  const rand = seededRand(seed);
+  ctx.fillStyle = color;
+  let cx = x;
+  while (cx < x + w) {
+    const barW = 1 + (rand() * 2.5) | 0;
+    const gap = 1 + (rand() * 2) | 0;
+    ctx.globalAlpha = 0.3 + rand() * 0.5;
+    ctx.fillRect(cx, y, barW, h);
+    cx += barW + gap;
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawSecurityStrip(ctx, w, h, pal) {
+  ctx.save();
+  ctx.translate(w * 0.75, 0);
+  ctx.rotate(Math.PI / 4);
+  const grad = ctx.createLinearGradient(0, -40, 0, 40);
+  grad.addColorStop(0, withAlpha(pal.pri, 0.03));
+  grad.addColorStop(0.2, withAlpha(pal.acc, 0.06));
+  grad.addColorStop(0.4, withAlpha(pal.acc2, 0.04));
+  grad.addColorStop(0.6, withAlpha(pal.pri, 0.06));
+  grad.addColorStop(0.8, withAlpha(pal.acc2, 0.03));
+  grad.addColorStop(1, withAlpha(pal.acc, 0.05));
+  ctx.fillStyle = grad;
+  ctx.fillRect(-w, -14, w * 3, 28);
+  // Thin bright edge lines
+  ctx.fillStyle = withAlpha(pal.acc, 0.08);
+  ctx.fillRect(-w, -14, w * 3, 1);
+  ctx.fillRect(-w, 13, w * 3, 1);
+  ctx.restore();
+}
+
+function drawMicroText(ctx, x, y, w, text, color) {
+  ctx.font = '5px monospace';
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.1;
+  ctx.textAlign = 'left';
+  let cx = x;
+  const tw = ctx.measureText(text + '   ').width;
+  while (cx < x + w) {
+    ctx.fillText(text, cx, y);
+    cx += tw;
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawGradientDivider(ctx, x, y, w, color1, color2) {
+  const grad = ctx.createLinearGradient(x, 0, x + w, 0);
+  grad.addColorStop(0, 'transparent');
+  grad.addColorStop(0.15, withAlpha(color1, 0.6));
+  grad.addColorStop(0.5, withAlpha(color2, 0.9));
+  grad.addColorStop(0.85, withAlpha(color1, 0.6));
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, w, 1);
+  // Subtle second line
+  const grad2 = ctx.createLinearGradient(x, 0, x + w, 0);
+  grad2.addColorStop(0, 'transparent');
+  grad2.addColorStop(0.3, withAlpha(color1, 0.2));
+  grad2.addColorStop(0.7, withAlpha(color1, 0.2));
+  grad2.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad2;
+  ctx.fillRect(x, y + 3, w, 0.5);
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  DATA: PALETTES
+//  PALETTES — Multi-color, not monochrome
 // ═══════════════════════════════════════════════════════════════
 const PALETTES = [
-  { name:'Terminal',  bg:'#0a0d0a', bgL:'#0f130f', pri:'#33ff88', sec:'#88ffcc', dim:'#1a5a3a', acc:'#33ff88', glow:'#33ff88' },
-  { name:'Cyberpunk', bg:'#0d0610', bgL:'#140a18', pri:'#ff2d95', sec:'#ff88cc', dim:'#5a1a45', acc:'#00ffff', glow:'#ff2d95' },
-  { name:'Golden',    bg:'#100d06', bgL:'#1a1508', pri:'#ffd700', sec:'#ffe566', dim:'#5a4a1a', acc:'#ffa500', glow:'#ffd700' },
-  { name:'Ocean',     bg:'#060a10', bgL:'#081018', pri:'#00bbff', sec:'#88ddff', dim:'#1a3a5a', acc:'#00ffcc', glow:'#00bbff' },
-  { name:'Volcanic',  bg:'#100606', bgL:'#1a0808', pri:'#ff4422', sec:'#ff8866', dim:'#5a1a1a', acc:'#ffaa00', glow:'#ff4422' },
-  { name:'Arctic',    bg:'#080a10', bgL:'#0e1220', pri:'#aaddff', sec:'#ddeeff', dim:'#2a3a55', acc:'#ffffff', glow:'#aaddff' },
-  { name:'Void',      bg:'#0a0610', bgL:'#10081a', pri:'#aa44ff', sec:'#cc88ff', dim:'#3a1a55', acc:'#ff44ff', glow:'#aa44ff' },
-  { name:'Ember',     bg:'#100a06', bgL:'#1a1008', pri:'#ff8833', sec:'#ffbb66', dim:'#5a3a1a', acc:'#ff4466', glow:'#ff8833' },
+  { name:'Terminal',  bg:'#060d08', bg2:'#040810', pri:'#33ff88', sec:'#66ffaa', dim:'#1a5a3a', acc:'#00eeff', acc2:'#ff44cc', glow:'#33ff88', bgL:'#112211' },
+  { name:'Cyberpunk', bg:'#0d0610', bg2:'#06041a', pri:'#ff2d95', sec:'#ff77bb', dim:'#5a1a45', acc:'#00ffff', acc2:'#ffee00', glow:'#ff2d95', bgL:'#1c0e28' },
+  { name:'Golden',    bg:'#0e0b04', bg2:'#0a0806', pri:'#ffd700', sec:'#ffec66', dim:'#5a4a1a', acc:'#ff8c00', acc2:'#e8e8e8', glow:'#ffd700', bgL:'#221c0a' },
+  { name:'Ocean',     bg:'#040810', bg2:'#060414', pri:'#00bbff', sec:'#66ddff', dim:'#1a3a5a', acc:'#00ffcc', acc2:'#ff6644', glow:'#00bbff', bgL:'#0c1828' },
+  { name:'Volcanic',  bg:'#0e0404', bg2:'#100806', pri:'#ff4422', sec:'#ff7755', dim:'#5a1a1a', acc:'#ffaa00', acc2:'#ff0066', glow:'#ff4422', bgL:'#221010' },
+  { name:'Arctic',    bg:'#060810', bg2:'#080a18', pri:'#aaddff', sec:'#ddeeff', dim:'#2a3a55', acc:'#ffffff', acc2:'#cc88ff', glow:'#aaddff', bgL:'#121e30' },
+  { name:'Void',      bg:'#08041a', bg2:'#0c0814', pri:'#aa44ff', sec:'#cc88ff', dim:'#3a1a55', acc:'#ff44ff', acc2:'#44aaff', glow:'#aa44ff', bgL:'#180e30' },
+  { name:'Ember',     bg:'#0e0804', bg2:'#100604', pri:'#ff8833', sec:'#ffbb66', dim:'#5a3a1a', acc:'#ff4466', acc2:'#ffdd44', glow:'#ff8833', bgL:'#22180a' },
 ];
 
 // ═══════════════════════════════════════════════════════════════
-//  DATA: BORDERS
+//  BORDERS
 // ═══════════════════════════════════════════════════════════════
 const BORDERS = [
   {
@@ -542,40 +632,36 @@ const BORDERS = [
       ctx.strokeRect(x, y, w, h);
       ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.5;
       ctx.strokeRect(x+4, y+4, w-8, h-8);
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 50; i++) {
         const side = (rand()*4)|0;
         let sx, sy, dx, dy;
         if (side===0)      { sx=x+rand()*w; sy=y;   dx=0;  dy=1;  }
         else if (side===1) { sx=x+w; sy=y+rand()*h;  dx=-1; dy=0;  }
         else if (side===2) { sx=x+rand()*w; sy=y+h;  dx=0;  dy=-1; }
         else               { sx=x;   sy=y+rand()*h;  dx=1;  dy=0;  }
-        const len = 10 + rand()*30;
+        const len = 10 + rand()*35;
         const mx2 = sx+dx*len, my2 = sy+dy*len;
-        ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
+        ctx.strokeStyle = rand() > 0.3 ? pal.dim : pal.acc2;
+        ctx.lineWidth = 0.8 + rand() * 0.5;
+        ctx.globalAlpha = 0.4 + rand() * 0.4;
         ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(mx2, my2);
-        const turn1 = (rand()>0.5?1:-1)*(8+rand()*18);
+        const turn1 = (rand()>0.5?1:-1)*(8+rand()*20);
         let tx1, ty1;
         if (dx===0) { tx1=mx2+turn1; ty1=my2; } else { tx1=mx2; ty1=my2+turn1; }
         ctx.lineTo(tx1, ty1);
         if (rand() > 0.4) {
-          const len2 = 5 + rand()*12;
-          if (dx===0) { ctx.lineTo(tx1, ty1+dy*len2); }
-          else        { ctx.lineTo(tx1+dx*len2, ty1); }
+          const len2 = 5 + rand()*15;
+          if (dx===0) ctx.lineTo(tx1, ty1+dy*len2);
+          else ctx.lineTo(tx1+dx*len2, ty1);
         }
         ctx.stroke();
-        ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.6;
-        ctx.beginPath(); ctx.arc(mx2, my2, 2, 0, Math.PI*2); ctx.fill();
-        if (rand() > 0.5) {
-          ctx.fillStyle = pal.pri; ctx.globalAlpha = 0.3;
-          ctx.beginPath(); ctx.arc(tx1, ty1, 1.5, 0, Math.PI*2); ctx.fill();
-        }
+        ctx.globalAlpha = 1;
+        // Solder dots — alternating colors
+        ctx.fillStyle = rand() > 0.5 ? pal.acc : pal.acc2;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.arc(mx2, my2, 1.5 + rand(), 0, Math.PI*2); ctx.fill();
         ctx.globalAlpha = 1;
       }
-      ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.4;
-      [[x+3,y+3],[x+w-7,y+3],[x+3,y+h-7],[x+w-7,y+h-7]].forEach(([px,py]) => {
-        ctx.fillRect(px, py, 4, 4);
-      });
-      ctx.globalAlpha = 1;
     }
   },
   {
@@ -585,7 +671,7 @@ const BORDERS = [
       ctx.strokeRect(x+2, y+2, w-4, h-4);
       ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
       ctx.strokeRect(x, y, w, h);
-      const s = 40;
+      const s = 45;
       ctx.lineWidth = 1.5;
       [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([cx,cy,ddx,ddy]) => {
         ctx.strokeStyle = pal.acc;
@@ -596,37 +682,33 @@ const BORDERS = [
         ctx.moveTo(cx+ddx*6, cy+ddy*s*0.75);
         ctx.quadraticCurveTo(cx+ddx*6, cy+ddy*6, cx+ddx*s*0.75, cy+ddy*6);
         ctx.stroke();
-        ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.8;
+        ctx.strokeStyle = pal.acc2; ctx.lineWidth = 0.8;
         ctx.beginPath();
         ctx.moveTo(cx+ddx*12, cy+ddy*s*0.55);
         ctx.quadraticCurveTo(cx+ddx*12, cy+ddy*12, cx+ddx*s*0.55, cy+ddy*12);
         ctx.stroke();
         ctx.lineWidth = 1.5;
-        ctx.fillStyle = pal.acc;
+        // Corner diamond with acc2 color
+        ctx.fillStyle = pal.acc2;
         const dx2 = cx+ddx*8, dy2 = cy+ddy*8;
         ctx.beginPath();
-        ctx.moveTo(dx2, dy2-3); ctx.lineTo(dx2+3, dy2);
-        ctx.lineTo(dx2, dy2+3); ctx.lineTo(dx2-3, dy2);
+        ctx.moveTo(dx2, dy2-4); ctx.lineTo(dx2+4, dy2);
+        ctx.lineTo(dx2, dy2+4); ctx.lineTo(dx2-4, dy2);
         ctx.closePath(); ctx.fill();
+        ctx.fillStyle = pal.acc;
         ctx.globalAlpha = 0.5;
-        ctx.beginPath(); ctx.arc(cx+ddx*s*0.5, cy+ddy*3, 1, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(cx+ddx*3, cy+ddy*s*0.5, 1, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+ddx*s*0.5, cy+ddy*3, 1.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+ddx*3, cy+ddy*s*0.5, 1.5, 0, Math.PI*2); ctx.fill();
         ctx.globalAlpha = 1;
       });
-      const dc = 7;
-      ctx.strokeStyle = pal.acc; ctx.lineWidth = 1;
-      [[x+w/2,y],[x+w/2,y+h],[x,y+h/2],[x+w,y+h/2]].forEach(([cx2,cy2]) => {
+      const dc = 8;
+      [[x+w/2,y],[x+w/2,y+h],[x,y+h/2],[x+w,y+h/2]].forEach(([cx2,cy2], idx) => {
+        ctx.strokeStyle = idx % 2 === 0 ? pal.acc : pal.acc2;
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(cx2,cy2-dc); ctx.lineTo(cx2+dc,cy2);
         ctx.lineTo(cx2,cy2+dc); ctx.lineTo(cx2-dc,cy2);
         ctx.closePath(); ctx.stroke();
-        ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.6;
-        const di = 3.5;
-        ctx.beginPath();
-        ctx.moveTo(cx2,cy2-di); ctx.lineTo(cx2+di,cy2);
-        ctx.lineTo(cx2,cy2+di); ctx.lineTo(cx2-di,cy2);
-        ctx.closePath(); ctx.stroke();
-        ctx.strokeStyle = pal.acc; ctx.lineWidth = 1;
       });
     }
   },
@@ -634,7 +716,7 @@ const BORDERS = [
     name: 'Glitch',
     draw(ctx, x, y, w, h, pal, seed) {
       const rand = seededRand(seed);
-      ctx.globalAlpha = 0.15;
+      ctx.globalAlpha = 0.18;
       ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1.5;
       ctx.strokeRect(x+3, y+2, w, h);
       ctx.strokeStyle = '#0000ff'; ctx.lineWidth = 1.5;
@@ -651,45 +733,35 @@ const BORDERS = [
         while ((dir>0 ? c<end : c>end)) {
           const seg = 12 + rand()*40;
           c = dir>0 ? Math.min(c+seg,end) : Math.max(c-seg,end);
-          const shift = rand()>0.6 ? (rand()-0.5)*10 : 0;
+          const shift = rand()>0.6 ? (rand()-0.5)*12 : 0;
           if (horiz) ctx.lineTo(c, y1+shift); else ctx.lineTo(x1+shift, c);
         }
         ctx.stroke();
       };
-      drawEdge(x,y,x+w,y,true);     drawEdge(x+w,y,x+w,y+h,false);
+      drawEdge(x,y,x+w,y,true); drawEdge(x+w,y,x+w,y+h,false);
       drawEdge(x+w,y+h,x,y+h,true); drawEdge(x,y+h,x,y,false);
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 12; i++) {
         const gy2 = y + rand()*h;
-        const gw2 = 40+rand()*120;
+        const gw2 = 40+rand()*140;
         const gx2 = x + (rand()-0.3)*(w-gw2*0.5);
         const gh2 = 1 + rand()*3;
-        ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.03 + rand()*0.04;
+        ctx.fillStyle = rand() > 0.5 ? pal.acc : pal.acc2;
+        ctx.globalAlpha = 0.03 + rand()*0.06;
         ctx.fillRect(gx2, gy2, gw2, gh2);
-        if (rand() > 0.6) {
-          ctx.fillStyle = pal.pri; ctx.globalAlpha = 0.08;
-          ctx.fillRect(gx2+rand()*gw2, gy2-1, 6+rand()*10, 1);
-        }
         ctx.globalAlpha = 1;
       }
-      ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.2;
-      [[x,y],[x+w-8,y],[x,y+h-8],[x+w-8,y+h-8]].forEach(([px,py]) => {
-        for (let j = 0; j < 3; j++) {
-          ctx.fillRect(px+rand()*8, py+rand()*8, 2+rand()*4, 1);
-        }
-      });
-      ctx.globalAlpha = 1;
     }
   },
 ];
 
 // ═══════════════════════════════════════════════════════════════
-//  DATA: PATTERNS
+//  PATTERNS — more visible
 // ═══════════════════════════════════════════════════════════════
 const PATTERNS = [
   {
     name: 'Grid',
-    draw(ctx, w, h, color) {
-      ctx.strokeStyle = color; ctx.lineWidth = 0.5;
+    draw(ctx, w, h, color, _seed, pal) {
+      ctx.strokeStyle = color; ctx.lineWidth = 0.7;
       const sp = 28;
       for (let x2 = PAD; x2 < w-PAD; x2 += sp) {
         ctx.beginPath(); ctx.moveTo(x2, PAD); ctx.lineTo(x2, h-PAD); ctx.stroke();
@@ -697,20 +769,23 @@ const PATTERNS = [
       for (let y2 = PAD; y2 < h-PAD; y2 += sp) {
         ctx.beginPath(); ctx.moveTo(PAD, y2); ctx.lineTo(w-PAD, y2); ctx.stroke();
       }
-      ctx.fillStyle = color; ctx.globalAlpha = 0.3;
-      for (let x2 = PAD; x2 < w-PAD; x2 += sp*4) {
-        for (let y2 = PAD; y2 < h-PAD; y2 += sp*4) {
-          ctx.beginPath(); ctx.arc(x2, y2, 1.5, 0, Math.PI*2); ctx.fill();
+      // Intersection dots in acc2 color
+      if (pal) {
+        ctx.fillStyle = pal.acc2; ctx.globalAlpha = 0.15;
+        for (let x2 = PAD; x2 < w-PAD; x2 += sp*3) {
+          for (let y2 = PAD; y2 < h-PAD; y2 += sp*3) {
+            ctx.beginPath(); ctx.arc(x2, y2, 2, 0, Math.PI*2); ctx.fill();
+          }
         }
+        ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = 1;
     }
   },
   {
     name: 'Hex',
     draw(ctx, w, h, color) {
       const sz = 20, hh = sz * Math.sqrt(3) / 2;
-      ctx.strokeStyle = color; ctx.lineWidth = 0.4;
+      ctx.strokeStyle = color; ctx.lineWidth = 0.5;
       for (let row = -1; row < h/hh+1; row++) {
         for (let col = -1; col < w/(sz*1.5)+1; col++) {
           const cx = col * sz * 1.5, cy = row * hh * 2 + (col%2 ? hh : 0);
@@ -723,30 +798,22 @@ const PATTERNS = [
           ctx.closePath(); ctx.stroke();
         }
       }
-      ctx.fillStyle = color; ctx.globalAlpha = 0.15;
-      for (let row = 0; row < h/hh; row += 3) {
-        for (let col = 0; col < w/(sz*1.5); col += 3) {
-          const cx = col * sz * 1.5, cy = row * hh * 2 + (col%2 ? hh : 0);
-          ctx.beginPath(); ctx.arc(cx, cy, 1.5, 0, Math.PI*2); ctx.fill();
-        }
-      }
-      ctx.globalAlpha = 1;
     }
   },
   {
     name: 'Topo',
     draw(ctx, w, h, color, seed) {
       const rand = seededRand(seed);
-      ctx.strokeStyle = color; ctx.lineWidth = 0.5;
-      for (let ci = 0; ci < 4; ci++) {
-        const ccx = w*(0.15+rand()*0.7), ccy = h*(0.15+rand()*0.7);
-        const aspect = 0.5 + rand()*0.3;
-        for (let r = 25; r < Math.max(w,h)*0.7; r += 16+rand()*14) {
+      ctx.strokeStyle = color; ctx.lineWidth = 0.6;
+      for (let ci = 0; ci < 5; ci++) {
+        const ccx = w*(0.1+rand()*0.8), ccy = h*(0.1+rand()*0.8);
+        const aspect = 0.4 + rand()*0.4;
+        for (let r = 20; r < Math.max(w,h)*0.8; r += 14+rand()*12) {
           ctx.beginPath();
-          for (let a2 = 0; a2 < Math.PI*2; a2 += 0.06) {
-            const noise = Math.sin(a2*3+r*0.04)*r*0.1
-                        + Math.sin(a2*5+ci)*r*0.04
-                        + Math.sin(a2*11)*r*0.02;
+          for (let a2 = 0; a2 < Math.PI*2; a2 += 0.05) {
+            const noise = Math.sin(a2*3+r*0.04)*r*0.12
+                        + Math.sin(a2*5+ci)*r*0.05
+                        + Math.sin(a2*11)*r*0.03;
             const px = ccx + Math.cos(a2)*(r+noise);
             const py = ccy + Math.sin(a2)*(r*aspect+noise*aspect);
             if (a2===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
@@ -760,11 +827,11 @@ const PATTERNS = [
     name: 'Crosshatch',
     draw(ctx, w, h, color) {
       const sp = 14;
-      ctx.strokeStyle = color; ctx.lineWidth = 0.3;
+      ctx.strokeStyle = color; ctx.lineWidth = 0.4;
       for (let i = -h; i < w+h; i += sp) {
         ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i+h,h); ctx.stroke();
       }
-      ctx.lineWidth = 0.25;
+      ctx.lineWidth = 0.3;
       for (let i = -h; i < w+h; i += sp) {
         ctx.beginPath(); ctx.moveTo(i,h); ctx.lineTo(i+h,0); ctx.stroke();
       }
@@ -773,7 +840,7 @@ const PATTERNS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════
-//  DATA: HOLOS & RARITIES
+//  HOLOS & RARITIES
 // ═══════════════════════════════════════════════════════════════
 const HOLOS = [
   { name: 'Rainbow', id: 'rainbow' },
@@ -783,10 +850,10 @@ const HOLOS = [
 ];
 
 const RARITIES = [
-  { name:'STANDARD',  label:'STANDARD',           sym:'',  pct:50,  intensity:0.35, glow:4  },
-  { name:'ENHANCED',  label:'\u25C7 ENHANCED \u25C7', sym:'\u25C7', pct:80,  intensity:0.55, glow:8  },
-  { name:'RARE',      label:'\u2605 RARE \u2605',     sym:'\u2605', pct:95,  intensity:0.75, glow:12 },
-  { name:'LEGENDARY', label:'\u2726 LEGENDARY \u2726',sym:'\u2726', pct:100, intensity:0.95, glow:16 },
+  { name:'STANDARD',  label:'STANDARD',             sym:'',   intensity:0.35, glow:4,  stars:40  },
+  { name:'ENHANCED',  label:'\u25C7 ENHANCED \u25C7', sym:'\u25C7', intensity:0.55, glow:8,  stars:70  },
+  { name:'RARE',      label:'\u2605 RARE \u2605',     sym:'\u2605', intensity:0.75, glow:14, stars:100 },
+  { name:'LEGENDARY', label:'\u2726 LEGENDARY \u2726',sym:'\u2726', intensity:0.95, glow:20, stars:150 },
 ];
 
 const AGENT_NAMES = [
@@ -817,13 +884,15 @@ class CardDNA {
     this.patternSeed = mixHash(h, 0x85ebca6b);
     this.borderSeed  = mixHash(h, 0xc2b2ae35);
     this.identiconSeed = h;
+    this.starSeed    = mixHash(h, 0x3c6ef372);
+    this.constellSeed = mixHash(h, 0x14057b7e);
     const roll = mixHash(h, 0x27d4eb2f) % 100;
     this.rarity = roll < 50 ? 0 : roll < 80 ? 1 : roll < 95 ? 2 : 3;
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  CARD RENDERING
+//  CARD RENDERING — the main event
 // ═══════════════════════════════════════════════════════════════
 function renderCard(canvas, name, dna) {
   const ctx = canvas.getContext('2d');
@@ -832,243 +901,287 @@ function renderCard(canvas, name, dna) {
   const rarity = RARITIES[dna.rarity];
   const certId = generateCertId(name);
   const font = "'PPSupplyMono', 'SF Mono', monospace";
-  const L = PAD + 20;  // left content edge
-  const R = w - PAD - 20;  // right content edge
-  const cw = R - L;  // content width
+  const L = PAD + 20, R = w - PAD - 20, cw = R - L;
 
   ctx.clearRect(0, 0, w, h);
   ctx.save();
 
-  // ── Opaque base fill (prevent see-through) ──
-  ctx.fillStyle = '#000000';
+  // ── Opaque base ──
+  ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, w, h);
 
   // ── Rounded clip ──
   roundRect(ctx, 0, 0, w, h, 16);
   ctx.clip();
 
-  // ── Background ──
-  ctx.fillStyle = pal.bg;
+  // ── DIAGONAL GRADIENT BACKGROUND ──
+  const bgGrad = ctx.createLinearGradient(0, 0, w, h);
+  bgGrad.addColorStop(0, pal.bg);
+  bgGrad.addColorStop(0.5, pal.bg2);
+  bgGrad.addColorStop(1, pal.bg);
+  ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, w, h);
 
-  // Subtle ambient glow
-  const amb = ctx.createRadialGradient(w/2, h*0.25, 0, w/2, h*0.25, h*0.5);
-  amb.addColorStop(0, withAlpha(pal.glow, 0.05));
-  amb.addColorStop(1, 'transparent');
-  ctx.fillStyle = amb;
+  // ── Ambient glow (multi-color) ──
+  const amb1 = ctx.createRadialGradient(w*0.3, h*0.2, 0, w*0.3, h*0.2, h*0.4);
+  amb1.addColorStop(0, withAlpha(pal.glow, 0.06));
+  amb1.addColorStop(1, 'transparent');
+  ctx.fillStyle = amb1;
+  ctx.fillRect(0, 0, w, h);
+  const amb2 = ctx.createRadialGradient(w*0.7, h*0.7, 0, w*0.7, h*0.7, h*0.4);
+  amb2.addColorStop(0, withAlpha(pal.acc2, 0.04));
+  amb2.addColorStop(1, 'transparent');
+  ctx.fillStyle = amb2;
   ctx.fillRect(0, 0, w, h);
 
-  // Background pattern (subtle)
-  ctx.globalAlpha = 0.35;
-  PATTERNS[dna.pattern].draw(ctx, w, h, pal.bgL, dna.patternSeed);
+  // ── STAR FIELD ──
+  drawStarField(ctx, w, h, dna.starSeed, pal.pri, pal.acc2, rarity.stars);
+
+  // ── Background pattern (more visible) ──
+  ctx.globalAlpha = 0.55;
+  PATTERNS[dna.pattern].draw(ctx, w, h, pal.bgL, dna.patternSeed, pal);
   ctx.globalAlpha = 1;
 
-  // Border
+  // ── Security holographic strip ──
+  drawSecurityStrip(ctx, w, h, pal);
+
+  // ── Border ──
   BORDERS[dna.border].draw(ctx, PAD, PAD, w-PAD*2, h-PAD*2, pal, dna.borderSeed, font);
+
+  // ── CHIP (top-left, like a credit card) ──
+  drawChip(ctx, L, PAD + 14, 42, 30, pal.acc, pal.acc2);
 
   // ═══ HEADER ═══
   const hy = PAD + 20;
-  ctx.font = `bold 14px ${font}`;
+  ctx.font = `bold 13px ${font}`;
   ctx.fillStyle = pal.sec;
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
-  ctx.globalAlpha = 0.7;
-  ctx.fillText('DEPT. OF MACHINE VERIFICATION', w/2, hy);
+  ctx.globalAlpha = 0.6;
+  ctx.fillText('DEPT. OF MACHINE VERIFICATION', w/2 + 14, hy + 6);
   ctx.globalAlpha = 1;
 
-  // Header dividers
-  const dv1 = hy + 24;
-  ctx.fillStyle = pal.acc;
-  ctx.fillRect(L, dv1, cw, 1);
-  ctx.fillStyle = pal.dim;
-  ctx.fillRect(L, dv1 + 3, cw, 0.5);
+  // Header gradient divider
+  const dv1 = hy + 30;
+  drawGradientDivider(ctx, L, dv1, cw, pal.acc, pal.acc2);
 
-  // Decorative micro-dots under header
-  drawMicroDots(ctx, L, dv1 + 10, cw, 12, pal.dim);
-
-  // ═══ AGENT NAME (big, above identicon) ═══
-  const ny = dv1 + 24;
+  // ═══ AGENT NAME (gradient text, big) ═══
+  const ny = dv1 + 22;
   const displayName = name + '.agent';
   let nameSize = 34;
   ctx.font = `bold ${nameSize}px ${font}`;
-  while (ctx.measureText(displayName).width > cw && nameSize > 16) {
+  while (ctx.measureText(displayName).width > cw && nameSize > 14) {
     nameSize -= 2;
     ctx.font = `bold ${nameSize}px ${font}`;
   }
-  ctx.fillStyle = pal.pri;
+  // Gradient fill for name text
+  const nameGrad = ctx.createLinearGradient(w/2 - 150, ny, w/2 + 150, ny);
+  nameGrad.addColorStop(0, pal.pri);
+  nameGrad.addColorStop(0.5, pal.acc);
+  nameGrad.addColorStop(1, pal.acc2);
+  ctx.fillStyle = nameGrad;
   ctx.textAlign = 'center';
   ctx.shadowColor = pal.glow;
-  ctx.shadowBlur = rarity.glow + 4;
+  ctx.shadowBlur = rarity.glow + 6;
   ctx.fillText(displayName, w/2, ny);
+  // Second pass for intensity
+  ctx.globalAlpha = 0.3;
+  ctx.fillText(displayName, w/2, ny);
+  ctx.globalAlpha = 1;
   ctx.shadowBlur = 0;
 
-  // Rarity tag under name
+  // ── Rarity badge ──
   const rtag = ny + nameSize + 6;
   if (dna.rarity > 0) {
+    // Badge background pill
     ctx.font = `bold 10px ${font}`;
-    ctx.fillStyle = pal.acc;
-    ctx.globalAlpha = 0.7;
-    ctx.shadowColor = pal.glow;
-    ctx.shadowBlur = rarity.glow * 0.5;
+    const badgeW = ctx.measureText(rarity.label).width + 16;
+    const badgeX = w/2 - badgeW/2;
+    roundRect(ctx, badgeX, rtag - 3, badgeW, 16, 8);
+    ctx.fillStyle = withAlpha(pal.acc2, 0.15);
+    ctx.fill();
+    ctx.strokeStyle = withAlpha(pal.acc2, 0.3);
+    ctx.lineWidth = 0.5;
+    roundRect(ctx, badgeX, rtag - 3, badgeW, 16, 8);
+    ctx.stroke();
+    // Badge text
+    ctx.fillStyle = pal.acc2;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = pal.acc2;
+    ctx.shadowBlur = rarity.glow * 0.4;
     ctx.fillText(rarity.label, w/2, rtag);
     ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
   }
 
-  // Thin divider
-  const dv2 = rtag + 16;
+  // ── Thin divider ──
+  const dv2 = rtag + 18;
   ctx.fillStyle = pal.dim;
-  ctx.globalAlpha = 0.5;
-  ctx.fillRect(L + 60, dv2, cw - 120, 0.5);
+  ctx.globalAlpha = 0.4;
+  ctx.fillRect(L + 50, dv2, cw - 100, 0.5);
   ctx.globalAlpha = 1;
 
-  // ═══ IDENTICON ═══
-  const icoS = 200, icoX = (w - icoS) / 2, icoY = dv2 + 14;
+  // ═══ IDENTICON with constellation behind ═══
+  const icoS = 195, icoX = (w - icoS) / 2, icoY = dv2 + 12;
 
-  // Glow behind identicon
-  const icoGlow = ctx.createRadialGradient(w/2, icoY+icoS/2, icoS*0.2, w/2, icoY+icoS/2, icoS*0.65);
-  icoGlow.addColorStop(0, withAlpha(pal.glow, 0.06));
+  // Constellation behind identicon
+  drawConstellation(ctx, icoX - 30, icoY - 20, icoS + 60, icoS + 40, dna.constellSeed, pal.acc);
+
+  // Identicon glow
+  const icoGlow = ctx.createRadialGradient(w/2, icoY+icoS/2, icoS*0.15, w/2, icoY+icoS/2, icoS*0.7);
+  icoGlow.addColorStop(0, withAlpha(pal.glow, 0.08));
+  icoGlow.addColorStop(0.5, withAlpha(pal.acc2, 0.03));
   icoGlow.addColorStop(1, 'transparent');
   ctx.fillStyle = icoGlow;
-  ctx.fillRect(icoX - 40, icoY - 40, icoS + 80, icoS + 80);
+  ctx.fillRect(icoX - 50, icoY - 50, icoS + 100, icoS + 100);
 
-  // Identicon frame
+  // Frame — double border with accent corners
   ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
-  ctx.strokeRect(icoX - 3, icoY - 3, icoS + 6, icoS + 6);
-  drawCorners(ctx, icoX - 6, icoY - 6, icoS + 12, icoS + 12, pal.acc);
+  ctx.strokeRect(icoX - 4, icoY - 4, icoS + 8, icoS + 8);
+  ctx.strokeStyle = withAlpha(pal.acc2, 0.3); ctx.lineWidth = 0.5;
+  ctx.strokeRect(icoX - 7, icoY - 7, icoS + 14, icoS + 14);
+  drawCorners(ctx, icoX - 9, icoY - 9, icoS + 18, icoS + 18, pal.acc, 20);
+  // Corner diamonds in acc2
+  const dSize = 3;
+  [[icoX-9, icoY-9],[icoX+icoS+9, icoY-9],[icoX-9, icoY+icoS+9],[icoX+icoS+9, icoY+icoS+9]].forEach(([cx,cy]) => {
+    ctx.fillStyle = pal.acc2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy-dSize); ctx.lineTo(cx+dSize, cy);
+    ctx.lineTo(cx, cy+dSize); ctx.lineTo(cx-dSize, cy);
+    ctx.closePath(); ctx.fill();
+  });
 
-  drawIdenticon(ctx, icoX, icoY, icoS, dna.identiconSeed, pal.pri);
+  // Draw the identicon with dual colors
+  drawIdenticon(ctx, icoX, icoY, icoS, dna.identiconSeed, pal.pri, pal.acc2);
 
-  // ═══ CERTIFICATE ID ═══
+  // ═══ CERTIFICATE ID + BARCODE ═══
   const cy = icoY + icoS + 20;
   ctx.textAlign = 'left';
   ctx.font = `10px ${font}`;
   ctx.fillStyle = pal.dim;
   ctx.fillText('CERTIFICATE ID', L, cy);
-  ctx.font = `bold 20px ${font}`;
+  ctx.font = `bold 19px ${font}`;
   ctx.fillStyle = pal.sec;
   ctx.shadowColor = pal.glow;
-  ctx.shadowBlur = 3;  // Minimal blur for readability
+  ctx.shadowBlur = 2;
   ctx.fillText(certId, L, cy + 18);
   ctx.shadowBlur = 0;
 
+  // Barcode under cert ID
+  drawBarcode(ctx, L, cy + 38, cw * 0.65, 8, fnv1a(certId + ':bar'), pal.pri);
+
   // ═══ TYPE + STATUS ═══
-  const ty = cy + 50;
+  const ty = cy + 56;
   ctx.font = `10px ${font}`;
   ctx.fillStyle = pal.dim;
   ctx.fillText('TYPE', L, ty);
   ctx.fillText('STATUS', w/2 + 10, ty);
-  ctx.font = `bold 14px ${font}`;
+  ctx.font = `bold 13px ${font}`;
   ctx.fillStyle = pal.sec;
-  ctx.fillText('INDIVIDUAL', L, ty + 16);
+  ctx.fillText('INDIVIDUAL', L, ty + 15);
   ctx.fillStyle = pal.acc;
-  ctx.fillText('\u25CF VERIFIED', w/2 + 10, ty + 16);
+  ctx.fillText('\u25CF VERIFIED', w/2 + 10, ty + 15);
 
-  // Divider
-  const dv3 = ty + 42;
-  ctx.fillStyle = pal.dim;
-  ctx.fillRect(L, dv3, cw, 0.5);
+  // Gradient divider
+  const dv3 = ty + 38;
+  drawGradientDivider(ctx, L, dv3, cw, pal.dim, pal.acc2);
 
-  // ═══ METADATA ROW ═══
-  const my = dv3 + 14;
-  ctx.font = `10px ${font}`;
+  // ═══ METADATA ═══
+  const my = dv3 + 13;
+  ctx.font = `9px ${font}`;
   ctx.fillStyle = pal.dim;
   ctx.fillText('ISSUED', L, my);
-  ctx.fillText('EXPIRES', L + 180, my);
-  ctx.fillText('PROTOCOL', L + 340, my);
-  ctx.font = `13px ${font}`;
+  ctx.fillText('EXPIRES', L + 160, my);
+  ctx.fillText('PROTOCOL', L + 310, my);
+  ctx.font = `12px ${font}`;
   ctx.fillStyle = pal.sec;
   const now = new Date();
-  ctx.fillText(`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`, L, my + 16);
-  ctx.fillText('NEVER', L + 180, my + 16);
+  ctx.fillText(`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`, L, my + 14);
+  ctx.fillText('NEVER', L + 160, my + 14);
   ctx.fillStyle = pal.acc;
-  ctx.fillText('v1.0', L + 340, my + 16);
+  ctx.fillText('v1.0', L + 310, my + 14);
 
-  // Divider
-  const dv4 = my + 38;
-  ctx.fillStyle = pal.dim;
-  ctx.fillRect(L, dv4, cw, 0.5);
+  // Security microtext
+  drawMicroText(ctx, L, my + 30, cw, 'DMV-VERIFIED-AGENT-REGISTRY-AUTHENTIC ', pal.dim);
 
-  // ═══ QR CODE (bottom section) ═══
-  const qy = dv4 + 14;
-  const qs = 130;
+  // Gradient divider
+  const dv4 = my + 36;
+  drawGradientDivider(ctx, L, dv4, cw, pal.acc, pal.dim);
+
+  // ═══ QR + REGISTRY INFO + RARITY SEAL ═══
+  const qy = dv4 + 12;
+  const qs = 115;
   drawQR(ctx, L, qy, qs, fnv1a(certId), pal.pri);
 
-  // Right side of QR: registry info + decorations
-  const qx = L + qs + 24;
-  ctx.font = `10px ${font}`;
+  // Registry info
+  const qx = L + qs + 18;
+  ctx.font = `9px ${font}`;
   ctx.fillStyle = pal.dim;
-  ctx.fillText('REGISTRY', qx, qy + 10);
-  ctx.font = `12px ${font}`;
+  ctx.fillText('REGISTRY', qx, qy + 8);
+  ctx.font = `11px ${font}`;
   ctx.fillStyle = pal.sec;
-  ctx.fillText('agentcommunity.org', qx, qy + 26);
+  ctx.fillText('agentcommunity', qx, qy + 22);
+  ctx.fillStyle = pal.acc;
+  ctx.fillText('.org', qx + ctx.measureText('agentcommunity').width, qy + 22);
 
-  ctx.font = `10px ${font}`;
+  ctx.font = `9px ${font}`;
   ctx.fillStyle = pal.dim;
-  ctx.fillText('NETWORK', qx, qy + 52);
-  ctx.font = `12px ${font}`;
-  ctx.fillStyle = pal.sec;
-  ctx.fillText('.agent TLD', qx, qy + 68);
+  ctx.fillText('NETWORK', qx, qy + 42);
+  ctx.font = `11px ${font}`;
+  ctx.fillStyle = pal.acc2;
+  ctx.fillText('.agent TLD', qx, qy + 56);
 
-  // Rarity seal (right of QR, bottom)
-  const sealY = qy + qs - 32;
-  const sealX = qx + 60;
-  ctx.textAlign = 'center';
-  // Seal ring
-  ctx.strokeStyle = pal.acc;
-  ctx.globalAlpha = 0.3;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(sealX, sealY, 22, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.globalAlpha = 0.15;
-  ctx.beginPath();
-  ctx.arc(sealX, sealY, 18, 0, Math.PI * 2);
-  ctx.stroke();
+  // Rarity seal — circular emblem
+  const sealX = qx + 75, sealY = qy + qs - 22;
+  // Triple ring seal
+  [26, 22, 18].forEach((r, i) => {
+    ctx.strokeStyle = i === 1 ? pal.acc2 : pal.acc;
+    ctx.globalAlpha = 0.15 + i * 0.1;
+    ctx.lineWidth = i === 0 ? 0.5 : 1;
+    ctx.beginPath();
+    ctx.arc(sealX, sealY, r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
   ctx.globalAlpha = 1;
-  // Seal content
+  ctx.textAlign = 'center';
   if (dna.rarity > 0) {
-    ctx.font = `bold 18px ${font}`;
-    ctx.fillStyle = pal.acc;
-    ctx.shadowColor = pal.glow;
-    ctx.shadowBlur = rarity.glow * 0.5;
-    ctx.fillText(rarity.sym, sealX, sealY - 4);
+    ctx.font = `bold 20px ${font}`;
+    ctx.fillStyle = pal.acc2;
+    ctx.shadowColor = pal.acc2;
+    ctx.shadowBlur = rarity.glow * 0.6;
+    ctx.fillText(rarity.sym, sealX, sealY - 3);
     ctx.shadowBlur = 0;
-    ctx.font = `7px ${font}`;
+    ctx.font = `6px ${font}`;
     ctx.fillStyle = pal.dim;
-    ctx.fillText(rarity.name, sealX, sealY + 12);
+    ctx.fillText(rarity.name, sealX, sealY + 13);
   } else {
-    ctx.font = `8px ${font}`;
+    ctx.font = `9px ${font}`;
     ctx.fillStyle = pal.dim;
     ctx.fillText('STD', sealX, sealY + 3);
   }
   ctx.textAlign = 'left';
 
-  // ═══ BOTTOM DIVIDERS + FOOTER ═══
-  const bot = h - PAD - 36;
-  ctx.fillStyle = pal.acc;
-  ctx.fillRect(L, bot, cw, 1);
-  ctx.fillStyle = pal.dim;
-  ctx.fillRect(L, bot + 3, cw, 0.5);
+  // ═══ BOTTOM ═══
+  const bot = h - PAD - 34;
+  drawGradientDivider(ctx, L, bot, cw, pal.acc2, pal.acc);
 
-  // Decorative micro-dots
-  drawMicroDots(ctx, L, bot - 8, cw, 10, pal.dim);
+  // Bottom barcode strip
+  drawBarcode(ctx, L, bot + 8, cw, 5, fnv1a(name + ':bottom'), pal.dim);
 
   // Footer
-  ctx.font = `11px ${font}`;
+  ctx.font = `10px ${font}`;
   ctx.fillStyle = pal.dim;
   ctx.textAlign = 'center';
-  ctx.fillText('dmv.agentcommunity.org', w/2, bot + 18);
+  ctx.fillText('dmv.agentcommunity.org', w/2, bot + 20);
   ctx.textAlign = 'left';
 
-  // ═══ SCANLINES (subtle) ═══
-  ctx.fillStyle = 'rgba(0,0,0,0.035)';
+  // ═══ SCANLINES ═══
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
   for (let sy = 0; sy < h; sy += 3) ctx.fillRect(0, sy, w, 1);
 
   // ═══ VIGNETTE ═══
   const vig = ctx.createRadialGradient(w/2, h/2, h*0.35, w/2, h/2, h*0.7);
   vig.addColorStop(0, 'transparent');
-  vig.addColorStop(1, 'rgba(0,0,0,0.2)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.18)');
   ctx.fillStyle = vig;
   ctx.fillRect(0, 0, w, h);
 
@@ -1091,53 +1204,74 @@ function getEffectiveDNA() {
     patternSeed:  dna.patternSeed,
     borderSeed:   dna.borderSeed,
     identiconSeed:dna.identiconSeed,
+    starSeed:     dna.starSeed,
+    constellSeed: dna.constellSeed,
     name:         dna.name,
   };
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  HOLO & HOVER
+//  HOLO & INTERACTION (mouse + touch)
 // ═══════════════════════════════════════════════════════════════
 function applyHoloType(cardEl, dna) {
   cardEl.classList.remove('holo-rainbow','holo-prism','holo-aurora','holo-duochrome');
   const holoId = HOLOS[dna.holo].id;
   if (holoId !== 'rainbow') cardEl.classList.add('holo-' + holoId);
   cardEl.style.setProperty('--holo-intensity', RARITIES[dna.rarity].intensity);
-
   if (holoId === 'duochrome') {
     const pal = PALETTES[dna.palette];
-    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.25));
-    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.25));
+    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.3));
+    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.3));
   }
   const pal = PALETTES[dna.palette];
   cardEl.closest('.card-wrap, .gallery-item')
-    ?.style.setProperty('--card-glow', withAlpha(pal.glow, 0.08));
+    ?.style.setProperty('--card-glow', withAlpha(pal.glow, 0.1));
 }
 
-// Track hover state per card
 const hoveredCards = new WeakSet();
 
+function applyTilt(cardEl, clientX, clientY) {
+  const rect = cardEl.getBoundingClientRect();
+  const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+  const ry = (x - 0.5) * 30;
+  const rx = (y - 0.5) * -30;
+  const angle = Math.atan2(y - 0.5, x - 0.5) * (180/Math.PI) + 90;
+  cardEl.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
+  cardEl.style.setProperty('--mx', (x*100)+'%');
+  cardEl.style.setProperty('--my', (y*100)+'%');
+  cardEl.style.setProperty('--angle', angle+'deg');
+}
+
 function setupCardHover(cardEl) {
+  // Mouse
   cardEl.addEventListener('mousemove', (e) => {
     hoveredCards.add(cardEl);
-    const rect = cardEl.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    const ry = (x - 0.5) * 25;
-    const rx = (y - 0.5) * -25;
-    const angle = Math.atan2(y - 0.5, x - 0.5) * (180/Math.PI) + 90;
-    cardEl.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
-    cardEl.style.setProperty('--mx', (x*100)+'%');
-    cardEl.style.setProperty('--my', (y*100)+'%');
-    cardEl.style.setProperty('--angle', angle+'deg');
+    applyTilt(cardEl, e.clientX, e.clientY);
   });
   cardEl.addEventListener('mouseleave', () => {
     hoveredCards.delete(cardEl);
   });
+  // Touch
+  cardEl.addEventListener('touchstart', (e) => {
+    hoveredCards.add(cardEl);
+    cardEl.classList.add('touching');
+    const t = e.touches[0];
+    applyTilt(cardEl, t.clientX, t.clientY);
+  }, { passive: true });
+  cardEl.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    applyTilt(cardEl, t.clientX, t.clientY);
+  }, { passive: false });
+  cardEl.addEventListener('touchend', () => {
+    hoveredCards.delete(cardEl);
+    cardEl.classList.remove('touching');
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  HOLO AUTO-ANIMATION (always shows holo, not just on hover)
+//  HOLO AUTO-ANIMATION
 // ═══════════════════════════════════════════════════════════════
 const allCards = [];
 
@@ -1146,14 +1280,15 @@ function animateHolo() {
 
   for (let i = 0; i < allCards.length; i++) {
     const cardEl = allCards[i];
-    if (hoveredCards.has(cardEl)) continue; // mouse overrides
+    if (hoveredCards.has(cardEl)) continue;
 
     const offset = i * 1.7;
-    const angle = (t + offset) * 28;
-    const mx = 50 + Math.sin((t + offset) * 0.6) * 30;
-    const my = 50 + Math.cos((t + offset) * 0.45) * 30;
-    const rx = Math.sin((t + offset) * 0.35) * 3;
-    const ry = Math.cos((t + offset) * 0.28) * 4;
+    const angle = (t + offset) * 32;
+    const mx = 50 + Math.sin((t + offset) * 0.7) * 35;
+    const my = 50 + Math.cos((t + offset) * 0.5) * 35;
+    // More dramatic tilt for visible holo
+    const rx = Math.sin((t + offset) * 0.4) * 5;
+    const ry = Math.cos((t + offset) * 0.3) * 6;
 
     cardEl.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
     cardEl.style.setProperty('--angle', angle + 'deg');
@@ -1169,32 +1304,26 @@ function animateHolo() {
 // ═══════════════════════════════════════════════════════════════
 function setupControls() {
   const nameInput = document.getElementById('nameInput');
-  const mainCanvas = document.getElementById('mainCanvas');
   const mainCard = document.getElementById('mainCard');
-
-  // Register main card for auto-animation
   allCards.push(mainCard);
 
-  // Palette buttons
   const palSel = document.getElementById('palSel');
   PALETTES.forEach((p, i) => {
     const btn = document.createElement('button');
     btn.className = 'pal-btn';
-    btn.style.background = p.pri;
+    // Show dual-color swatch
+    btn.style.background = `linear-gradient(135deg, ${p.pri} 50%, ${p.acc2} 50%)`;
     btn.title = p.name;
-    btn.dataset.idx = i;
     btn.onclick = () => { state.overrides.palette = i; updateMain(); };
     palSel.appendChild(btn);
   });
 
-  // Option selectors
   const makeOpts = (containerId, items, key) => {
     const el = document.getElementById(containerId);
     items.forEach((item, i) => {
       const btn = document.createElement('button');
       btn.className = 'opt-btn';
       btn.textContent = item.name;
-      btn.dataset.idx = i;
       btn.onclick = () => { state.overrides[key] = i; updateMain(); };
       el.appendChild(btn);
     });
@@ -1204,7 +1333,6 @@ function setupControls() {
   makeOpts('holoSel', HOLOS, 'holo');
   makeOpts('raritySel', RARITIES.map(r => ({ name: r.name })), 'rarity');
 
-  // Name input
   let debounce;
   nameInput.addEventListener('input', () => {
     clearTimeout(debounce);
@@ -1215,7 +1343,6 @@ function setupControls() {
     }, 200);
   });
 
-  // Random name
   document.getElementById('btnRandName').onclick = () => {
     state.name = AGENT_NAMES[(Math.random() * AGENT_NAMES.length) | 0];
     nameInput.value = state.name;
@@ -1225,7 +1352,6 @@ function setupControls() {
     setTimeout(() => mainCard.classList.remove('flipping'), 500);
   };
 
-  // Randomize all
   document.getElementById('btnRandomize').onclick = () => {
     state.name = AGENT_NAMES[(Math.random() * AGENT_NAMES.length) | 0];
     nameInput.value = state.name;
@@ -1269,7 +1395,7 @@ function updateReadout(dna) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  UI: GALLERY
+//  GALLERY
 // ═══════════════════════════════════════════════════════════════
 function setupGallery() {
   const grid = document.getElementById('galleryGrid');
@@ -1305,8 +1431,6 @@ function setupGallery() {
     renderCard(canvas, name, dna);
     applyHoloType(card, dna);
     setupCardHover(card);
-
-    // Register for auto-animation
     allCards.push(card);
 
     card.addEventListener('click', () => {
@@ -1327,7 +1451,6 @@ async function init() {
   setupControls();
   updateMain();
   setupGallery();
-  // Start holo animation loop
   requestAnimationFrame(animateHolo);
 }
 init();
