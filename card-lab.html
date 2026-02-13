@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Card Lab · DMV</title>
+  <style>
+    @font-face {
+      font-family: 'PPSupplyMono';
+      src: url('fonts/PPSupplyMono-Regular.otf') format('opentype');
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0e0e0e;
+      color: #999;
+      font-family: 'PPSupplyMono', 'SF Mono', 'Fira Code', monospace;
+      min-height: 100vh;
+    }
+    header {
+      text-align: center;
+      padding: 40px 20px 20px;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    header h1 { font-size: 24px; color: #fff; letter-spacing: 8px; }
+    header p { font-size: 11px; color: #444; margin-top: 8px; }
+
+    /* ── Preview Section ── */
+    .preview {
+      display: flex;
+      gap: 40px;
+      max-width: 950px;
+      margin: 40px auto;
+      padding: 0 20px;
+      align-items: flex-start;
+    }
+    .card-wrap {
+      flex-shrink: 0;
+      perspective: 800px;
+      position: relative;
+    }
+    .card-wrap::after {
+      content: '';
+      position: absolute;
+      inset: -60px;
+      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.06)), transparent 70%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    /* ── Card ── */
+    .card {
+      width: 315px;
+      height: 440px;
+      position: relative;
+      transform-style: preserve-3d;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      will-change: transform;
+      transition: transform 0.1s ease-out;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.05);
+    }
+    .card canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .card-shine, .card-glare, .card-foil {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .card:hover .card-shine,
+    .card:hover .card-glare,
+    .card:hover .card-foil { opacity: 1; }
+
+    /* Holo: Rainbow (default) */
+    .card-shine {
+      background: linear-gradient(
+        var(--angle, 130deg),
+        hsla(0,85%,55%,.12), hsla(60,85%,55%,.12),
+        hsla(120,85%,55%,.12), hsla(180,85%,55%,.12),
+        hsla(240,85%,55%,.12), hsla(300,85%,55%,.12),
+        hsla(360,85%,55%,.12)
+      );
+      mix-blend-mode: color-dodge;
+    }
+    .card:hover .card-shine { opacity: var(--holo-intensity, 0.5); }
+
+    /* Holo: Prism */
+    .holo-prism .card-shine {
+      background: conic-gradient(
+        from var(--angle, 0deg) at var(--mx, 50%) var(--my, 50%),
+        hsla(0,85%,55%,.22), hsla(90,85%,55%,.22),
+        hsla(180,85%,55%,.22), hsla(270,85%,55%,.22),
+        hsla(360,85%,55%,.22)
+      );
+    }
+    /* Holo: Aurora */
+    .holo-aurora .card-shine {
+      background: linear-gradient(to bottom,
+        hsla(150,80%,45%,.18) 0%, hsla(190,80%,50%,.1) 30%,
+        hsla(270,70%,45%,.16) 60%, transparent 100%
+      );
+    }
+    /* Holo: Duochrome */
+    .holo-duochrome .card-shine {
+      background: linear-gradient(var(--angle, 130deg),
+        var(--duo-1, hsla(320,80%,50%,.2)) 0%,
+        transparent 35%, transparent 65%,
+        var(--duo-2, hsla(180,80%,50%,.2)) 100%
+      );
+    }
+
+    .card-glare {
+      background: radial-gradient(
+        circle at var(--mx, 50%) var(--my, 50%),
+        rgba(255,255,255,0.2), transparent 50%
+      );
+      mix-blend-mode: overlay;
+    }
+    .card:hover .card-glare { opacity: 0.8; }
+
+    .card-foil {
+      background: repeating-linear-gradient(
+        calc(var(--angle, 0deg) + 90deg),
+        transparent 0px, transparent 2px,
+        rgba(255,255,255,0.03) 2px, rgba(255,255,255,0.03) 3px
+      );
+      mix-blend-mode: overlay;
+    }
+
+    /* ── Controls ── */
+    .controls {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
+    .ctrl-group {
+      background: #151515;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .ctrl-group label {
+      display: block;
+      font-size: 9px;
+      color: #555;
+      letter-spacing: 3px;
+      margin-bottom: 6px;
+    }
+    .input-row {
+      display: flex;
+      gap: 6px;
+    }
+    .input-row input {
+      flex: 1;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      outline: none;
+    }
+    .input-row input:focus { border-color: #555; }
+    .btn-icon {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      font-size: 16px;
+      width: 34px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-icon:hover { background: #252525; color: #fff; }
+
+    .pal-grid {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .pal-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s;
+    }
+    .pal-btn:hover { transform: scale(1.15); }
+    .pal-btn.active { border-color: #fff; transform: scale(1.15); }
+
+    .opt-row {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .opt-btn {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      color: #777;
+      font-family: inherit;
+      font-size: 10px;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .opt-btn:hover { background: #252525; color: #ccc; }
+    .opt-btn.active { background: #222; border-color: #555; color: #fff; }
+
+    .btn-randomize {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      letter-spacing: 2px;
+      transition: all 0.15s;
+    }
+    .btn-randomize:hover { background: #252525; color: #fff; border-color: #555; }
+
+    .dna-readout {
+      background: #0a0a0a;
+      border: 1px solid #1a1a1a;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 10px;
+      color: #555;
+      line-height: 1.8;
+    }
+    .dna-readout span { color: #888; }
+
+    /* ── Gallery ── */
+    .gallery {
+      max-width: 1100px;
+      margin: 60px auto;
+      padding: 0 20px 60px;
+    }
+    .gallery h2 {
+      font-size: 14px;
+      color: #fff;
+      letter-spacing: 6px;
+      text-align: center;
+    }
+    .gallery-sub {
+      font-size: 10px;
+      color: #444;
+      text-align: center;
+      margin: 8px 0 30px;
+    }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 24px;
+      justify-items: center;
+    }
+    .gallery-item { perspective: 600px; cursor: pointer; }
+    .gallery-card {
+      width: 170px;
+      height: 238px;
+    }
+    .gallery-card:hover {
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    }
+    .gallery-label {
+      font-size: 9px;
+      color: #555;
+      text-align: center;
+      margin-top: 8px;
+      letter-spacing: 1px;
+    }
+
+    @keyframes cardFlip {
+      0% { transform: rotateY(0); }
+      50% { transform: rotateY(90deg) scale(0.95); }
+      100% { transform: rotateY(0); }
+    }
+    .card.flipping { animation: cardFlip 0.5s ease-in-out; }
+
+    @media (max-width: 720px) {
+      .preview { flex-direction: column; align-items: center; }
+      .controls { width: 100%; max-width: 400px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>CARD LAB</h1>
+  <p>Procedural Card Generator &middot; Department of Machine Verification</p>
+</header>
+
+<main>
+  <section class="preview">
+    <div class="card-wrap">
+      <div class="card" id="mainCard">
+        <canvas id="mainCanvas" width="630" height="880"></canvas>
+        <div class="card-shine"></div>
+        <div class="card-glare"></div>
+        <div class="card-foil"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="ctrl-group">
+        <label>AGENT NAME</label>
+        <div class="input-row">
+          <input type="text" id="nameInput" value="nexus-7" spellcheck="false">
+          <button class="btn-icon" id="btnRandName" title="Random name">&#x27F3;</button>
+        </div>
+      </div>
+      <div class="ctrl-group">
+        <label>PALETTE</label>
+        <div class="pal-grid" id="palSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>BORDER</label>
+        <div class="opt-row" id="borderSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>PATTERN</label>
+        <div class="opt-row" id="patternSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>HOLO EFFECT</label>
+        <div class="opt-row" id="holoSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>RARITY</label>
+        <div class="opt-row" id="raritySel"></div>
+      </div>
+      <button class="btn-randomize" id="btnRandomize">&#x27F3; RANDOMIZE ALL</button>
+      <div class="dna-readout" id="dnaReadout"></div>
+    </div>
+  </section>
+
+  <section class="gallery">
+    <h2>GALLERY</h2>
+    <p class="gallery-sub">Each agent gets unique traits. Click to preview.</p>
+    <div class="gallery-grid" id="galleryGrid"></div>
+  </section>
+</main>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════════════
+const CW = 630, CH = 880, PAD = 24;
+
+// ═══════════════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════════════
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+function seededRand(seed) {
+  let s = seed;
+  return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+}
+
+function hexToRgb(hex) {
+  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+}
+
+function withAlpha(hex, a) {
+  const [r,g,b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+
+function generateCertId(name) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const rand = seededRand(fnv1a(name + ':cert'));
+  const pick = () => chars[(rand() * chars.length) | 0];
+  return `${pick()}${pick()}${pick()}${pick()}-${pick()}${pick()}${pick()}-${pick()}${pick()}${pick()}${pick()}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAWING HELPERS
+// ═══════════════════════════════════════════════════════════════
+function drawCorners(ctx, x, y, w, h, color) {
+  const L = 25, T = 2;
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, L, T);           ctx.fillRect(x, y, T, L);
+  ctx.fillRect(x+w-L, y, L, T);       ctx.fillRect(x+w-T, y, T, L);
+  ctx.fillRect(x, y+h-T, L, T);       ctx.fillRect(x, y+h-L, T, L);
+  ctx.fillRect(x+w-L, y+h-T, L, T);   ctx.fillRect(x+w-T, y+h-L, T, L);
+}
+
+function drawIdenticon(ctx, x, y, size, seed, color) {
+  const rand = seededRand(seed);
+  const grid = 9, cell = size / grid, half = Math.ceil(grid / 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x, y, size, size);
+  const cells = [];
+  for (let gy = 0; gy < half; gy++) {
+    cells[gy] = [];
+    for (let gx = 0; gx < half; gx++) cells[gy][gx] = rand() > 0.42;
+  }
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.8;
+  for (let gy = 0; gy < grid; gy++) {
+    for (let gx = 0; gx < grid; gx++) {
+      const sy = gy < half ? gy : grid-1-gy;
+      const sx = gx < half ? gx : grid-1-gx;
+      if (cells[sy]?.[sx]) ctx.fillRect(x+gx*cell+1, y+gy*cell+1, cell-2, cell-2);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawQR(ctx, x, y, size, seed, color) {
+  const n = 21, c = size / n, rand = seededRand(seed);
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x-2, y-2, size+4, size+4);
+  const dot = (mx, my) => ctx.fillRect(x+mx*c, y+my*c, c, c);
+  const finder = (fx, fy) => {
+    ctx.fillStyle = color;
+    for (let i = 0; i < 7; i++) { dot(fx+i,fy); dot(fx+i,fy+6); dot(fx,fy+i); dot(fx+6,fy+i); }
+    for (let i = 2; i < 5; i++) for (let j = 2; j < 5; j++) dot(fx+i, fy+j);
+  };
+  finder(0,0); finder(n-7,0); finder(0,n-7);
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.6;
+  for (let my = 0; my < n; my++)
+    for (let mx = 0; mx < n; mx++) {
+      if ((mx<8&&my<8)||(mx>=n-7&&my<8)||(mx<8&&my>=n-7)) continue;
+      if (mx===6||my===6) continue;
+      if (rand() > 0.5) dot(mx, my);
+    }
+  ctx.globalAlpha = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA: PALETTES
+// ═══════════════════════════════════════════════════════════════
+const PALETTES = [
+  { name:'Terminal',  bg:'#0a0d0a', bgL:'#0f130f', pri:'#33ff88', sec:'#88ffcc', dim:'#1a5a3a', acc:'#33ff88', glow:'#33ff88' },
+  { name:'Cyberpunk', bg:'#0d0610', bgL:'#140a18', pri:'#ff2d95', sec:'#ff88cc', dim:'#5a1a45', acc:'#00ffff', glow:'#ff2d95' },
+  { name:'Golden',    bg:'#100d06', bgL:'#1a1508', pri:'#ffd700', sec:'#ffe566', dim:'#5a4a1a', acc:'#ffa500', glow:'#ffd700' },
+  { name:'Ocean',     bg:'#060a10', bgL:'#081018', pri:'#00bbff', sec:'#88ddff', dim:'#1a3a5a', acc:'#00ffcc', glow:'#00bbff' },
+  { name:'Volcanic',  bg:'#100606', bgL:'#1a0808', pri:'#ff4422', sec:'#ff8866', dim:'#5a1a1a', acc:'#ffaa00', glow:'#ff4422' },
+  { name:'Arctic',    bg:'#080a10', bgL:'#0e1220', pri:'#aaddff', sec:'#ddeeff', dim:'#2a3a55', acc:'#ffffff', glow:'#aaddff' },
+  { name:'Void',      bg:'#0a0610', bgL:'#10081a', pri:'#aa44ff', sec:'#cc88ff', dim:'#3a1a55', acc:'#ff44ff', glow:'#aa44ff' },
+  { name:'Ember',     bg:'#100a06', bgL:'#1a1008', pri:'#ff8833', sec:'#ffbb66', dim:'#5a3a1a', acc:'#ff4466', glow:'#ff8833' },
+];
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA: BORDERS
+// ═══════════════════════════════════════════════════════════════
+const BORDERS = [
+  {
+    name: 'Clean',
+    draw(ctx, x, y, w, h, pal) {
+      ctx.strokeStyle = pal.acc; ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+      ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
+      ctx.strokeRect(x+6, y+6, w-12, h-12);
+      drawCorners(ctx, x-4, y-4, w+8, h+8, pal.acc);
+    }
+  },
+  {
+    name: 'Circuit',
+    draw(ctx, x, y, w, h, pal, seed) {
+      const rand = seededRand(seed);
+      ctx.strokeStyle = pal.acc; ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, y, w, h);
+      for (let i = 0; i < 35; i++) {
+        const side = (rand()*4)|0;
+        let sx, sy, dx, dy;
+        if (side===0)      { sx=x+rand()*w; sy=y;   dx=0;  dy=1;  }
+        else if (side===1) { sx=x+w; sy=y+rand()*h;  dx=-1; dy=0;  }
+        else if (side===2) { sx=x+rand()*w; sy=y+h;  dx=0;  dy=-1; }
+        else               { sx=x;   sy=y+rand()*h;  dx=1;  dy=0;  }
+        const len = 8 + rand()*22;
+        const mx2 = sx+dx*len, my2 = sy+dy*len;
+        ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(mx2, my2);
+        const turn = (rand()>0.5?1:-1)*(6+rand()*14);
+        if (dx===0) ctx.lineTo(mx2+turn, my2); else ctx.lineTo(mx2, my2+turn);
+        ctx.stroke();
+        ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.arc(mx2, my2, 1.5, 0, Math.PI*2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  },
+  {
+    name: 'Filigree',
+    draw(ctx, x, y, w, h, pal) {
+      ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, w, h);
+      const s = 35;
+      ctx.strokeStyle = pal.acc; ctx.lineWidth = 1.5;
+      [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([cx,cy,ddx,ddy]) => {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy+ddy*s); ctx.lineTo(cx, cy); ctx.lineTo(cx+ddx*s, cy);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx+ddx*5, cy+ddy*s*0.7);
+        ctx.quadraticCurveTo(cx+ddx*5, cy+ddy*5, cx+ddx*s*0.7, cy+ddy*5);
+        ctx.stroke();
+        ctx.fillStyle = pal.acc;
+        ctx.beginPath(); ctx.arc(cx+ddx*5, cy+ddy*5, 2, 0, Math.PI*2); ctx.fill();
+      });
+      const dc = 6;
+      ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.8;
+      [[x+w/2,y],[x+w/2,y+h],[x,y+h/2],[x+w,y+h/2]].forEach(([cx2,cy2]) => {
+        ctx.beginPath();
+        ctx.moveTo(cx2,cy2-dc); ctx.lineTo(cx2+dc,cy2);
+        ctx.lineTo(cx2,cy2+dc); ctx.lineTo(cx2-dc,cy2);
+        ctx.closePath(); ctx.stroke();
+      });
+    }
+  },
+  {
+    name: 'Glitch',
+    draw(ctx, x, y, w, h, pal, seed) {
+      const rand = seededRand(seed);
+      // RGB split ghosts
+      ctx.globalAlpha = 0.12;
+      ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1; ctx.strokeRect(x+2, y+1, w, h);
+      ctx.strokeStyle = '#0000ff'; ctx.strokeRect(x-1, y-1, w, h);
+      ctx.globalAlpha = 1;
+      // Main border with displacement
+      ctx.strokeStyle = pal.acc; ctx.lineWidth = 2;
+      const drawEdge = (x1,y1,x2,y2,horiz) => {
+        ctx.beginPath(); ctx.moveTo(x1,y1);
+        let c = horiz ? x1 : y1;
+        const end = horiz ? x2 : y2;
+        const dir = end > c ? 1 : -1;
+        while ((dir>0 ? c<end : c>end)) {
+          const seg = 15 + rand()*50;
+          c = dir>0 ? Math.min(c+seg,end) : Math.max(c-seg,end);
+          const shift = rand()>0.75 ? (rand()-0.5)*8 : 0;
+          if (horiz) ctx.lineTo(c, y1+shift); else ctx.lineTo(x1+shift, c);
+        }
+        ctx.stroke();
+      };
+      drawEdge(x,y,x+w,y,true);     drawEdge(x+w,y,x+w,y+h,false);
+      drawEdge(x+w,y+h,x,y+h,true); drawEdge(x,y+h,x,y,false);
+      // Glitch bars
+      for (let i = 0; i < 5; i++) {
+        const gy2 = y + rand()*h, gw2 = 30+rand()*80, gx2 = x+rand()*(w-gw2);
+        ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.04;
+        ctx.fillRect(gx2, gy2, gw2, 2);
+        ctx.globalAlpha = 1;
+      }
+    }
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA: PATTERNS
+// ═══════════════════════════════════════════════════════════════
+const PATTERNS = [
+  {
+    name: 'Grid',
+    draw(ctx, w, h, color) {
+      ctx.strokeStyle = color; ctx.lineWidth = 0.5;
+      for (let x2 = PAD; x2 < w-PAD; x2 += 28) {
+        ctx.beginPath(); ctx.moveTo(x2, PAD); ctx.lineTo(x2, h-PAD); ctx.stroke();
+      }
+      for (let y2 = PAD; y2 < h-PAD; y2 += 28) {
+        ctx.beginPath(); ctx.moveTo(PAD, y2); ctx.lineTo(w-PAD, y2); ctx.stroke();
+      }
+    }
+  },
+  {
+    name: 'Hex',
+    draw(ctx, w, h, color) {
+      ctx.strokeStyle = color; ctx.lineWidth = 0.4;
+      const sz = 18, hh = sz * Math.sqrt(3) / 2;
+      for (let row = -1; row < h/hh+1; row++) {
+        for (let col = -1; col < w/(sz*1.5)+1; col++) {
+          const cx = col * sz * 1.5, cy = row * hh * 2 + (col%2 ? hh : 0);
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+            const a2 = Math.PI/180*(60*i-30);
+            const px = cx + sz*0.8*Math.cos(a2), py = cy + sz*0.8*Math.sin(a2);
+            if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+          }
+          ctx.closePath(); ctx.stroke();
+        }
+      }
+    }
+  },
+  {
+    name: 'Topo',
+    draw(ctx, w, h, color, seed) {
+      const rand = seededRand(seed);
+      ctx.strokeStyle = color; ctx.lineWidth = 0.5;
+      for (let ci = 0; ci < 3; ci++) {
+        const ccx = w*(0.2+rand()*0.6), ccy = h*(0.2+rand()*0.6);
+        for (let r = 30; r < Math.max(w,h)*0.8; r += 18+rand()*12) {
+          ctx.beginPath();
+          for (let a2 = 0; a2 < Math.PI*2; a2 += 0.08) {
+            const noise = Math.sin(a2*3+r*0.05)*r*0.08 + Math.sin(a2*7)*r*0.03;
+            const px = ccx + Math.cos(a2)*(r+noise);
+            const py = ccy + Math.sin(a2)*(r*0.6+noise*0.6);
+            if (a2===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+          }
+          ctx.closePath(); ctx.stroke();
+        }
+      }
+    }
+  },
+  {
+    name: 'Cross',
+    draw(ctx, w, h, color) {
+      ctx.strokeStyle = color; ctx.lineWidth = 0.3;
+      const sp = 16;
+      for (let i = -h; i < w+h; i += sp) {
+        ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i+h,h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(i,h); ctx.lineTo(i+h,0); ctx.stroke();
+      }
+    }
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA: HOLOS & RARITIES
+// ═══════════════════════════════════════════════════════════════
+const HOLOS = [
+  { name: 'Rainbow', id: 'rainbow' },
+  { name: 'Prism',   id: 'prism' },
+  { name: 'Aurora',  id: 'aurora' },
+  { name: 'Duo',     id: 'duochrome' },
+];
+
+const RARITIES = [
+  { name:'STANDARD',  label:'STANDARD',           pct:50,  intensity:0.35, glow:4  },
+  { name:'ENHANCED',  label:'\u25C6 ENHANCED \u25C6', pct:80,  intensity:0.55, glow:8  },
+  { name:'RARE',      label:'\u2605 RARE \u2605',     pct:95,  intensity:0.75, glow:12 },
+  { name:'LEGENDARY', label:'\u2726 LEGENDARY \u2726',pct:100, intensity:0.95, glow:16 },
+];
+
+const AGENT_NAMES = [
+  'nexus-7','cipher','aurora','quantum','atlas','phantom','vortex','nova',
+  'echo','spark','pulse','drift','flux','prism','orbit','zenith','crypt',
+  'delta','omega','matrix','vector','byte','pixel','glitch','neon','void',
+  'sage','rune','ghost','frost',
+];
+
+// ═══════════════════════════════════════════════════════════════
+//  CARD DNA
+// ═══════════════════════════════════════════════════════════════
+class CardDNA {
+  constructor(name) {
+    this.name = name;
+    const h = fnv1a(name);
+    this.palette     = fnv1a(name+':pal') % PALETTES.length;
+    this.border      = fnv1a(name+':brd') % BORDERS.length;
+    this.pattern     = fnv1a(name+':pat') % PATTERNS.length;
+    this.holo        = fnv1a(name+':holo') % HOLOS.length;
+    this.patternSeed = fnv1a(name+':ps');
+    this.borderSeed  = fnv1a(name+':bs');
+    this.identiconSeed = h;
+    // Rarity
+    const roll = h % 100;
+    this.rarity = roll < 50 ? 0 : roll < 80 ? 1 : roll < 95 ? 2 : 3;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CARD RENDERING
+// ═══════════════════════════════════════════════════════════════
+function renderCard(canvas, name, dna) {
+  const ctx = canvas.getContext('2d');
+  const w = CW, h = CH;
+  const pal = PALETTES[dna.palette];
+  const rarity = RARITIES[dna.rarity];
+  const certId = generateCertId(name);
+  const font = "'PPSupplyMono', 'SF Mono', monospace";
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+
+  // Rounded clip
+  roundRect(ctx, 0, 0, w, h, 16);
+  ctx.clip();
+
+  // Background
+  ctx.fillStyle = pal.bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Background pattern
+  PATTERNS[dna.pattern].draw(ctx, w, h, pal.bgL, dna.patternSeed);
+
+  // Border
+  BORDERS[dna.border].draw(ctx, PAD, PAD, w-PAD*2, h-PAD*2, pal, dna.borderSeed, font);
+
+  // Header
+  const hy = PAD + 18;
+  ctx.font = `bold 16px ${font}`;
+  ctx.fillStyle = pal.sec;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.fillText('DEPT. OF MACHINE VERIFICATION', w/2, hy);
+
+  // Header dividers
+  const dv = hy + 28;
+  ctx.fillStyle = pal.acc;
+  ctx.fillRect(PAD+20, dv, w-PAD*2-40, 1);
+  ctx.fillStyle = pal.dim;
+  ctx.fillRect(PAD+20, dv+3, w-PAD*2-40, 1);
+
+  // Identicon
+  const icoS = 240, icoX = (w-icoS)/2, icoY = dv + 18;
+  ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
+  ctx.strokeRect(icoX-3, icoY-3, icoS+6, icoS+6);
+  drawIdenticon(ctx, icoX, icoY, icoS, dna.identiconSeed, pal.pri);
+
+  // Agent name
+  const ny = icoY + icoS + 22;
+  ctx.font = `bold 28px ${font}`;
+  ctx.fillStyle = pal.pri;
+  ctx.textAlign = 'left';
+  ctx.shadowColor = pal.glow;
+  ctx.shadowBlur = rarity.glow;
+  ctx.fillText(name + '.agent', PAD+20, ny);
+  ctx.shadowBlur = 0;
+
+  // Divider
+  ctx.fillStyle = pal.dim;
+  ctx.fillRect(PAD+20, ny+36, w-PAD*2-40, 1);
+
+  // Cert ID
+  const cy = ny + 52;
+  ctx.font = `11px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.fillText('CERTIFICATE ID', PAD+20, cy);
+  ctx.font = `bold 22px ${font}`;
+  ctx.fillStyle = pal.sec;
+  ctx.shadowColor = pal.acc;
+  ctx.shadowBlur = rarity.glow * 0.5;
+  ctx.fillText(certId, PAD+20, cy+20);
+  ctx.shadowBlur = 0;
+
+  // Type + Status
+  const iy = cy + 58;
+  ctx.font = `11px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.fillText('TYPE', PAD+20, iy);
+  ctx.fillText('STATUS', PAD+220, iy);
+  ctx.font = `bold 14px ${font}`;
+  ctx.fillStyle = pal.sec;
+  ctx.fillText('INDIVIDUAL', PAD+20, iy+18);
+  ctx.fillStyle = pal.acc;
+  ctx.fillText('\u25CF VERIFIED', PAD+220, iy+18);
+
+  // QR
+  const qy = iy + 48, qs = 110;
+  drawQR(ctx, PAD+20, qy, qs, fnv1a(certId), pal.pri);
+
+  // Metadata
+  const mx = PAD + 20 + qs + 20;
+  ctx.font = `11px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.fillText('ISSUED', mx, qy+8);
+  ctx.font = `13px ${font}`;
+  ctx.fillStyle = pal.sec;
+  const now = new Date();
+  ctx.fillText(`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`, mx, qy+24);
+  ctx.font = `11px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.fillText('EXPIRES', mx, qy+50);
+  ctx.font = `13px ${font}`;
+  ctx.fillStyle = pal.sec;
+  ctx.fillText('NEVER', mx, qy+66);
+
+  // Rarity badge
+  ctx.font = `bold 14px ${font}`;
+  ctx.fillStyle = pal.acc;
+  ctx.shadowColor = pal.acc;
+  ctx.shadowBlur = rarity.glow;
+  ctx.textAlign = 'center';
+  ctx.fillText(rarity.label, mx + 90, qy + qs - 10);
+  ctx.shadowBlur = 0;
+  ctx.textAlign = 'left';
+
+  // Bottom divider
+  const bot = h - PAD - 46;
+  ctx.fillStyle = pal.acc;
+  ctx.fillRect(PAD+20, bot, w-PAD*2-40, 1);
+  ctx.fillStyle = pal.dim;
+  ctx.fillRect(PAD+20, bot+3, w-PAD*2-40, 1);
+
+  // Footer
+  ctx.font = `12px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.textAlign = 'center';
+  ctx.fillText('dmv.agentcommunity.org', w/2, bot+18);
+  ctx.textAlign = 'left';
+
+  // Scanlines
+  ctx.fillStyle = 'rgba(0,0,0,0.06)';
+  for (let sy = 0; sy < h; sy += 3) ctx.fillRect(0, sy, w, 1);
+
+  // Vignette
+  const vig = ctx.createRadialGradient(w/2, h/2, h*0.35, w/2, h/2, h*0.7);
+  vig.addColorStop(0, 'transparent');
+  vig.addColorStop(1, 'rgba(0,0,0,0.2)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+const state = { name: 'nexus-7', overrides: {} };
+
+function getEffectiveDNA() {
+  const dna = new CardDNA(state.name);
+  return {
+    palette:      state.overrides.palette ?? dna.palette,
+    border:       state.overrides.border ?? dna.border,
+    pattern:      state.overrides.pattern ?? dna.pattern,
+    holo:         state.overrides.holo ?? dna.holo,
+    rarity:       state.overrides.rarity ?? dna.rarity,
+    patternSeed:  dna.patternSeed,
+    borderSeed:   dna.borderSeed,
+    identiconSeed:dna.identiconSeed,
+    name:         dna.name,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HOLO & HOVER
+// ═══════════════════════════════════════════════════════════════
+function applyHoloType(cardEl, dna) {
+  // Remove old holo classes
+  cardEl.classList.remove('holo-rainbow','holo-prism','holo-aurora','holo-duochrome');
+  const holoId = HOLOS[dna.holo].id;
+  if (holoId !== 'rainbow') cardEl.classList.add('holo-' + holoId);
+  cardEl.style.setProperty('--holo-intensity', RARITIES[dna.rarity].intensity);
+
+  // Duochrome colors from palette
+  if (holoId === 'duochrome') {
+    const pal = PALETTES[dna.palette];
+    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.2));
+    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.2));
+  }
+  // Ambient glow
+  const pal = PALETTES[dna.palette];
+  cardEl.closest('.card-wrap, .gallery-item')
+    ?.style.setProperty('--card-glow', withAlpha(pal.glow, 0.06));
+}
+
+function setupCardHover(cardEl) {
+  cardEl.addEventListener('mousemove', (e) => {
+    const rect = cardEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    const ry = (x - 0.5) * 25;
+    const rx = (y - 0.5) * -25;
+    const angle = Math.atan2(y - 0.5, x - 0.5) * (180/Math.PI) + 90;
+    cardEl.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
+    cardEl.style.setProperty('--mx', (x*100)+'%');
+    cardEl.style.setProperty('--my', (y*100)+'%');
+    cardEl.style.setProperty('--angle', angle+'deg');
+  });
+  cardEl.addEventListener('mouseleave', () => {
+    cardEl.style.transform = '';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI: CONTROLS
+// ═══════════════════════════════════════════════════════════════
+function setupControls() {
+  const nameInput = document.getElementById('nameInput');
+  const mainCanvas = document.getElementById('mainCanvas');
+  const mainCard = document.getElementById('mainCard');
+
+  // Palette buttons
+  const palSel = document.getElementById('palSel');
+  PALETTES.forEach((p, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'pal-btn';
+    btn.style.background = p.pri;
+    btn.title = p.name;
+    btn.dataset.idx = i;
+    btn.onclick = () => { state.overrides.palette = i; updateMain(); };
+    palSel.appendChild(btn);
+  });
+
+  // Option selectors
+  const makeOpts = (containerId, items, key) => {
+    const el = document.getElementById(containerId);
+    items.forEach((item, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt-btn';
+      btn.textContent = item.name;
+      btn.dataset.idx = i;
+      btn.onclick = () => { state.overrides[key] = i; updateMain(); };
+      el.appendChild(btn);
+    });
+  };
+  makeOpts('borderSel', BORDERS, 'border');
+  makeOpts('patternSel', PATTERNS, 'pattern');
+  makeOpts('holoSel', HOLOS, 'holo');
+  makeOpts('raritySel', RARITIES.map(r => ({ name: r.name })), 'rarity');
+
+  // Name input
+  let debounce;
+  nameInput.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      state.name = nameInput.value.trim() || 'agent';
+      state.overrides = {};
+      updateMain();
+    }, 200);
+  });
+
+  // Random name
+  document.getElementById('btnRandName').onclick = () => {
+    state.name = AGENT_NAMES[(Math.random() * AGENT_NAMES.length) | 0];
+    nameInput.value = state.name;
+    state.overrides = {};
+    mainCard.classList.add('flipping');
+    setTimeout(() => updateMain(), 200);
+    setTimeout(() => mainCard.classList.remove('flipping'), 500);
+  };
+
+  // Randomize all
+  document.getElementById('btnRandomize').onclick = () => {
+    state.name = AGENT_NAMES[(Math.random() * AGENT_NAMES.length) | 0];
+    nameInput.value = state.name;
+    state.overrides = {};
+    mainCard.classList.add('flipping');
+    setTimeout(() => updateMain(), 200);
+    setTimeout(() => mainCard.classList.remove('flipping'), 500);
+  };
+
+  setupCardHover(mainCard);
+}
+
+function updateMain() {
+  const dna = getEffectiveDNA();
+  const canvas = document.getElementById('mainCanvas');
+  const card = document.getElementById('mainCard');
+  renderCard(canvas, state.name, dna);
+  applyHoloType(card, dna);
+  updateHighlights(dna);
+  updateReadout(dna);
+}
+
+function updateHighlights(dna) {
+  // Palette
+  document.querySelectorAll('#palSel .pal-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', i === dna.palette);
+  });
+  // Others
+  ['borderSel','patternSel','holoSel','raritySel'].forEach(id => {
+    const key = id.replace('Sel','');
+    const val = dna[key === 'raritySel' ? 'rarity' : key];
+    document.querySelectorAll(`#${id} .opt-btn`).forEach((btn, i) => {
+      btn.classList.toggle('active', i === dna[key.replace('Sel','')]);
+    });
+  });
+  // Fix: direct access
+  document.querySelectorAll('#borderSel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.border));
+  document.querySelectorAll('#patternSel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.pattern));
+  document.querySelectorAll('#holoSel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.holo));
+  document.querySelectorAll('#raritySel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.rarity));
+}
+
+function updateReadout(dna) {
+  const el = document.getElementById('dnaReadout');
+  el.innerHTML = [
+    `Palette: <span>${PALETTES[dna.palette].name}</span>`,
+    `Border: <span>${BORDERS[dna.border].name}</span>`,
+    `Pattern: <span>${PATTERNS[dna.pattern].name}</span>`,
+    `Holo: <span>${HOLOS[dna.holo].name}</span>`,
+    `Rarity: <span>${RARITIES[dna.rarity].label}</span>`,
+    `Combos: <span>2,048+</span>`,
+  ].join('<br>');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI: GALLERY
+// ═══════════════════════════════════════════════════════════════
+function setupGallery() {
+  const grid = document.getElementById('galleryGrid');
+  const names = ['cipher','aurora','quantum','phantom','vortex','nova','zenith','frost'];
+  names.forEach(name => {
+    const item = document.createElement('div');
+    item.className = 'gallery-item';
+    item.style.perspective = '600px';
+
+    const card = document.createElement('div');
+    card.className = 'card gallery-card';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = CW; canvas.height = CH;
+    card.appendChild(canvas);
+
+    ['card-shine','card-glare','card-foil'].forEach(cls => {
+      const div = document.createElement('div');
+      div.className = cls;
+      card.appendChild(div);
+    });
+
+    item.appendChild(card);
+
+    const label = document.createElement('div');
+    label.className = 'gallery-label';
+    label.textContent = name + '.agent';
+    item.appendChild(label);
+
+    grid.appendChild(item);
+
+    const dna = new CardDNA(name);
+    renderCard(canvas, name, dna);
+    applyHoloType(card, dna);
+    setupCardHover(card);
+
+    card.addEventListener('click', () => {
+      state.name = name;
+      state.overrides = {};
+      document.getElementById('nameInput').value = name;
+      updateMain();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+async function init() {
+  try { await document.fonts.load('16px PPSupplyMono'); } catch(e) {}
+  setupControls();
+  updateMain();
+  setupGallery();
+}
+init();
+</script>
+</body>
+</html>
