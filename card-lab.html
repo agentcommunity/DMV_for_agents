@@ -42,7 +42,7 @@
       content: '';
       position: absolute;
       inset: -60px;
-      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.06)), transparent 70%);
+      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.08)), transparent 70%);
       pointer-events: none;
       z-index: -1;
     }
@@ -58,82 +58,86 @@
       cursor: pointer;
       will-change: transform;
       transition: transform 0.1s ease-out;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.05);
+      background: #050505;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 1px rgba(255,255,255,0.08);
     }
     .card canvas {
       width: 100%;
       height: 100%;
       display: block;
     }
+
+    /* ── Holo Overlays (always partially visible, enhanced on hover) ── */
     .card-shine, .card-glare, .card-foil {
       position: absolute;
       inset: 0;
       border-radius: inherit;
       pointer-events: none;
-      opacity: 0;
       transition: opacity 0.3s;
     }
-    .card:hover .card-shine,
-    .card:hover .card-glare,
+    .card-shine { opacity: 0.2; }
+    .card-glare { opacity: 0.12; }
+    .card-foil { opacity: 0.35; }
+    .card:hover .card-shine { opacity: var(--holo-intensity, 0.6); }
+    .card:hover .card-glare { opacity: 0.85; }
     .card:hover .card-foil { opacity: 1; }
 
     /* Holo: Rainbow (default) */
     .card-shine {
       background: linear-gradient(
         var(--angle, 130deg),
-        hsla(0,90%,55%,.15), hsla(45,90%,55%,.12),
-        hsla(90,90%,55%,.15), hsla(135,90%,55%,.12),
-        hsla(180,90%,55%,.15), hsla(225,90%,55%,.12),
-        hsla(270,90%,55%,.15), hsla(315,90%,55%,.12),
-        hsla(360,90%,55%,.15)
+        hsla(0,90%,55%,.18), hsla(45,90%,55%,.14),
+        hsla(90,90%,55%,.18), hsla(135,90%,55%,.14),
+        hsla(180,90%,55%,.18), hsla(225,90%,55%,.14),
+        hsla(270,90%,55%,.18), hsla(315,90%,55%,.14),
+        hsla(360,90%,55%,.18)
       );
       mix-blend-mode: color-dodge;
     }
-    .card:hover .card-shine { opacity: var(--holo-intensity, 0.5); }
 
     /* Holo: Prism — conic gradient emanating from cursor position */
     .holo-prism .card-shine {
       background: conic-gradient(
         from var(--angle, 0deg) at var(--mx, 50%) var(--my, 50%),
-        hsla(0,90%,55%,.25), hsla(60,90%,55%,.18),
-        hsla(120,90%,55%,.25), hsla(180,90%,55%,.18),
-        hsla(240,90%,55%,.25), hsla(300,90%,55%,.18),
-        hsla(360,90%,55%,.25)
+        hsla(0,90%,55%,.28), hsla(60,90%,55%,.20),
+        hsla(120,90%,55%,.28), hsla(180,90%,55%,.20),
+        hsla(240,90%,55%,.28), hsla(300,90%,55%,.20),
+        hsla(360,90%,55%,.28)
       );
     }
     /* Holo: Aurora — vertical flowing green/cyan/purple */
     .holo-aurora .card-shine {
       background: linear-gradient(
         calc(170deg + var(--angle, 0deg) * 0.15),
-        hsla(120,75%,40%,.2) 0%, hsla(160,80%,45%,.15) 20%,
-        hsla(190,85%,50%,.18) 40%, transparent 55%,
-        hsla(260,70%,45%,.15) 70%, hsla(290,65%,40%,.1) 85%,
+        hsla(120,75%,40%,.22) 0%, hsla(160,80%,45%,.17) 20%,
+        hsla(190,85%,50%,.20) 40%, transparent 55%,
+        hsla(260,70%,45%,.17) 70%, hsla(290,65%,40%,.12) 85%,
         transparent 100%
       );
     }
     /* Holo: Duochrome — two-color shift from palette pri + acc */
     .holo-duochrome .card-shine {
       background: linear-gradient(var(--angle, 130deg),
-        var(--duo-1, hsla(320,80%,50%,.25)) 0%,
+        var(--duo-1, hsla(320,80%,50%,.28)) 0%,
         transparent 30%, transparent 70%,
-        var(--duo-2, hsla(180,80%,50%,.25)) 100%
+        var(--duo-2, hsla(180,80%,50%,.28)) 100%
       );
     }
 
     .card-glare {
       background: radial-gradient(
         circle at var(--mx, 50%) var(--my, 50%),
-        rgba(255,255,255,0.25), transparent 45%
+        rgba(255,255,255,0.28), transparent 45%
       );
       mix-blend-mode: overlay;
     }
-    .card:hover .card-glare { opacity: 0.8; }
 
     .card-foil {
       background: repeating-linear-gradient(
         calc(var(--angle, 0deg) + 90deg),
         transparent 0px, transparent 2px,
-        rgba(255,255,255,0.035) 2px, rgba(255,255,255,0.035) 3px
+        rgba(255,255,255,0.04) 2px, rgba(255,255,255,0.04) 3px
       );
       mix-blend-mode: overlay;
     }
@@ -279,7 +283,7 @@
       content: '';
       position: absolute;
       inset: -30px;
-      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.04)), transparent 70%);
+      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.05)), transparent 70%);
       pointer-events: none;
       z-index: -1;
       transition: opacity 0.3s;
@@ -438,7 +442,7 @@ function drawCorners(ctx, x, y, w, h, color) {
 function drawIdenticon(ctx, x, y, size, seed, color) {
   const rand = seededRand(seed);
   const grid = 9, cell = size / grid, half = Math.ceil(grid / 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(x, y, size, size);
   const cells = [];
   for (let gy = 0; gy < half; gy++) {
@@ -446,7 +450,7 @@ function drawIdenticon(ctx, x, y, size, seed, color) {
     for (let gx = 0; gx < half; gx++) cells[gy][gx] = rand() > 0.42;
   }
   ctx.fillStyle = color;
-  ctx.globalAlpha = 0.8;
+  ctx.globalAlpha = 0.85;
   for (let gy = 0; gy < grid; gy++) {
     for (let gx = 0; gx < grid; gx++) {
       const sy = gy < half ? gy : grid-1-gy;
@@ -459,7 +463,7 @@ function drawIdenticon(ctx, x, y, size, seed, color) {
 
 function drawQR(ctx, x, y, size, seed, color) {
   const n = 21, c = size / n, rand = seededRand(seed);
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(x-2, y-2, size+4, size+4);
   const dot = (mx, my) => ctx.fillRect(x+mx*c, y+my*c, c, c);
   const finder = (fx, fy) => {
@@ -469,7 +473,7 @@ function drawQR(ctx, x, y, size, seed, color) {
   };
   finder(0,0); finder(n-7,0); finder(0,n-7);
   ctx.fillStyle = color;
-  ctx.globalAlpha = 0.6;
+  ctx.globalAlpha = 0.65;
   for (let my = 0; my < n; my++)
     for (let mx = 0; mx < n; mx++) {
       if ((mx<8&&my<8)||(mx>=n-7&&my<8)||(mx<8&&my>=n-7)) continue;
@@ -477,6 +481,29 @@ function drawQR(ctx, x, y, size, seed, color) {
       if (rand() > 0.5) dot(mx, my);
     }
   ctx.globalAlpha = 1;
+}
+
+function drawMicroDots(ctx, x, y, w, count, color) {
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.25;
+  const spacing = w / (count + 1);
+  for (let i = 1; i <= count; i++) {
+    ctx.beginPath();
+    ctx.arc(x + i * spacing, y, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawDiamond(ctx, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - size);
+  ctx.lineTo(x + size, y);
+  ctx.lineTo(x, y + size);
+  ctx.lineTo(x - size, y);
+  ctx.closePath();
+  ctx.fill();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -511,13 +538,10 @@ const BORDERS = [
     name: 'Circuit',
     draw(ctx, x, y, w, h, pal, seed) {
       const rand = seededRand(seed);
-      // Outer border
       ctx.strokeStyle = pal.acc; ctx.lineWidth = 1.5;
       ctx.strokeRect(x, y, w, h);
-      // Inner border (thinner)
       ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.5;
       ctx.strokeRect(x+4, y+4, w-8, h-8);
-      // PCB traces branching inward from border
       for (let i = 0; i < 40; i++) {
         const side = (rand()*4)|0;
         let sx, sy, dx, dy;
@@ -527,32 +551,26 @@ const BORDERS = [
         else               { sx=x;   sy=y+rand()*h;  dx=1;  dy=0;  }
         const len = 10 + rand()*30;
         const mx2 = sx+dx*len, my2 = sy+dy*len;
-        // Trace line
         ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(mx2, my2);
-        // First turn
         const turn1 = (rand()>0.5?1:-1)*(8+rand()*18);
         let tx1, ty1;
         if (dx===0) { tx1=mx2+turn1; ty1=my2; } else { tx1=mx2; ty1=my2+turn1; }
         ctx.lineTo(tx1, ty1);
-        // Second turn (sometimes)
         if (rand() > 0.4) {
           const len2 = 5 + rand()*12;
           if (dx===0) { ctx.lineTo(tx1, ty1+dy*len2); }
           else        { ctx.lineTo(tx1+dx*len2, ty1); }
         }
         ctx.stroke();
-        // Solder dot at junction
         ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.6;
         ctx.beginPath(); ctx.arc(mx2, my2, 2, 0, Math.PI*2); ctx.fill();
-        // End dot
         if (rand() > 0.5) {
           ctx.fillStyle = pal.pri; ctx.globalAlpha = 0.3;
           ctx.beginPath(); ctx.arc(tx1, ty1, 1.5, 0, Math.PI*2); ctx.fill();
         }
         ctx.globalAlpha = 1;
       }
-      // Corner solder pads (square)
       ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.4;
       [[x+3,y+3],[x+w-7,y+3],[x+3,y+h-7],[x+w-7,y+h-7]].forEach(([px,py]) => {
         ctx.fillRect(px, py, 4, 4);
@@ -563,47 +581,38 @@ const BORDERS = [
   {
     name: 'Filigree',
     draw(ctx, x, y, w, h, pal) {
-      // Thin inner border
       ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.5;
       ctx.strokeRect(x+2, y+2, w-4, h-4);
-      // Outer border
       ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
       ctx.strokeRect(x, y, w, h);
-      // Ornate corner flourishes
       const s = 40;
       ctx.lineWidth = 1.5;
       [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([cx,cy,ddx,ddy]) => {
-        // Main L-bracket
         ctx.strokeStyle = pal.acc;
         ctx.beginPath();
         ctx.moveTo(cx, cy+ddy*s); ctx.lineTo(cx, cy); ctx.lineTo(cx+ddx*s, cy);
         ctx.stroke();
-        // Inner curve
         ctx.beginPath();
         ctx.moveTo(cx+ddx*6, cy+ddy*s*0.75);
         ctx.quadraticCurveTo(cx+ddx*6, cy+ddy*6, cx+ddx*s*0.75, cy+ddy*6);
         ctx.stroke();
-        // Second inner curve (smaller, nested)
         ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.8;
         ctx.beginPath();
         ctx.moveTo(cx+ddx*12, cy+ddy*s*0.55);
         ctx.quadraticCurveTo(cx+ddx*12, cy+ddy*12, cx+ddx*s*0.55, cy+ddy*12);
         ctx.stroke();
         ctx.lineWidth = 1.5;
-        // Corner diamond
         ctx.fillStyle = pal.acc;
         const dx2 = cx+ddx*8, dy2 = cy+ddy*8;
         ctx.beginPath();
         ctx.moveTo(dx2, dy2-3); ctx.lineTo(dx2+3, dy2);
         ctx.lineTo(dx2, dy2+3); ctx.lineTo(dx2-3, dy2);
         ctx.closePath(); ctx.fill();
-        // Small accent dots
         ctx.globalAlpha = 0.5;
         ctx.beginPath(); ctx.arc(cx+ddx*s*0.5, cy+ddy*3, 1, 0, Math.PI*2); ctx.fill();
         ctx.beginPath(); ctx.arc(cx+ddx*3, cy+ddy*s*0.5, 1, 0, Math.PI*2); ctx.fill();
         ctx.globalAlpha = 1;
       });
-      // Edge-center diamonds (larger, more ornate)
       const dc = 7;
       ctx.strokeStyle = pal.acc; ctx.lineWidth = 1;
       [[x+w/2,y],[x+w/2,y+h],[x,y+h/2],[x+w,y+h/2]].forEach(([cx2,cy2]) => {
@@ -611,7 +620,6 @@ const BORDERS = [
         ctx.moveTo(cx2,cy2-dc); ctx.lineTo(cx2+dc,cy2);
         ctx.lineTo(cx2,cy2+dc); ctx.lineTo(cx2-dc,cy2);
         ctx.closePath(); ctx.stroke();
-        // Inner diamond
         ctx.strokeStyle = pal.dim; ctx.lineWidth = 0.6;
         const di = 3.5;
         ctx.beginPath();
@@ -626,7 +634,6 @@ const BORDERS = [
     name: 'Glitch',
     draw(ctx, x, y, w, h, pal, seed) {
       const rand = seededRand(seed);
-      // RGB split ghost borders (red + blue displaced)
       ctx.globalAlpha = 0.15;
       ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1.5;
       ctx.strokeRect(x+3, y+2, w, h);
@@ -635,7 +642,6 @@ const BORDERS = [
       ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 0.5;
       ctx.strokeRect(x+1, y-2, w, h);
       ctx.globalAlpha = 1;
-      // Main border with displacement
       ctx.strokeStyle = pal.acc; ctx.lineWidth = 2;
       const drawEdge = (x1,y1,x2,y2,horiz) => {
         ctx.beginPath(); ctx.moveTo(x1,y1);
@@ -652,7 +658,6 @@ const BORDERS = [
       };
       drawEdge(x,y,x+w,y,true);     drawEdge(x+w,y,x+w,y+h,false);
       drawEdge(x+w,y+h,x,y+h,true); drawEdge(x,y+h,x,y,false);
-      // Glitch bars (horizontal displacement bands)
       for (let i = 0; i < 8; i++) {
         const gy2 = y + rand()*h;
         const gw2 = 40+rand()*120;
@@ -660,14 +665,12 @@ const BORDERS = [
         const gh2 = 1 + rand()*3;
         ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.03 + rand()*0.04;
         ctx.fillRect(gx2, gy2, gw2, gh2);
-        // Occasional bright glitch pixel cluster
         if (rand() > 0.6) {
           ctx.fillStyle = pal.pri; ctx.globalAlpha = 0.08;
           ctx.fillRect(gx2+rand()*gw2, gy2-1, 6+rand()*10, 1);
         }
         ctx.globalAlpha = 1;
       }
-      // Corner glitch markers
       ctx.fillStyle = pal.acc; ctx.globalAlpha = 0.2;
       [[x,y],[x+w-8,y],[x,y+h-8],[x+w-8,y+h-8]].forEach(([px,py]) => {
         for (let j = 0; j < 3; j++) {
@@ -694,7 +697,6 @@ const PATTERNS = [
       for (let y2 = PAD; y2 < h-PAD; y2 += sp) {
         ctx.beginPath(); ctx.moveTo(PAD, y2); ctx.lineTo(w-PAD, y2); ctx.stroke();
       }
-      // Subtle intersection dots
       ctx.fillStyle = color; ctx.globalAlpha = 0.3;
       for (let x2 = PAD; x2 < w-PAD; x2 += sp*4) {
         for (let y2 = PAD; y2 < h-PAD; y2 += sp*4) {
@@ -721,7 +723,6 @@ const PATTERNS = [
           ctx.closePath(); ctx.stroke();
         }
       }
-      // Center dots in some hexagons
       ctx.fillStyle = color; ctx.globalAlpha = 0.15;
       for (let row = 0; row < h/hh; row += 3) {
         for (let col = 0; col < w/(sz*1.5); col += 3) {
@@ -759,12 +760,10 @@ const PATTERNS = [
     name: 'Crosshatch',
     draw(ctx, w, h, color) {
       const sp = 14;
-      // First diagonal direction
       ctx.strokeStyle = color; ctx.lineWidth = 0.3;
       for (let i = -h; i < w+h; i += sp) {
         ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i+h,h); ctx.stroke();
       }
-      // Second diagonal direction (slightly different spacing for texture)
       ctx.lineWidth = 0.25;
       for (let i = -h; i < w+h; i += sp) {
         ctx.beginPath(); ctx.moveTo(i,h); ctx.lineTo(i+h,0); ctx.stroke();
@@ -784,10 +783,10 @@ const HOLOS = [
 ];
 
 const RARITIES = [
-  { name:'STANDARD',  label:'STANDARD',           pct:50,  intensity:0.35, glow:4  },
-  { name:'ENHANCED',  label:'\u25C6 ENHANCED \u25C6', pct:80,  intensity:0.55, glow:8  },
-  { name:'RARE',      label:'\u2605 RARE \u2605',     pct:95,  intensity:0.75, glow:12 },
-  { name:'LEGENDARY', label:'\u2726 LEGENDARY \u2726',pct:100, intensity:0.95, glow:16 },
+  { name:'STANDARD',  label:'STANDARD',           sym:'',  pct:50,  intensity:0.35, glow:4  },
+  { name:'ENHANCED',  label:'\u25C7 ENHANCED \u25C7', sym:'\u25C7', pct:80,  intensity:0.55, glow:8  },
+  { name:'RARE',      label:'\u2605 RARE \u2605',     sym:'\u2605', pct:95,  intensity:0.75, glow:12 },
+  { name:'LEGENDARY', label:'\u2726 LEGENDARY \u2726',sym:'\u2726', pct:100, intensity:0.95, glow:16 },
 ];
 
 const AGENT_NAMES = [
@@ -800,7 +799,6 @@ const AGENT_NAMES = [
 // ═══════════════════════════════════════════════════════════════
 //  CARD DNA
 // ═══════════════════════════════════════════════════════════════
-// Mix a hash with a salt to produce independent trait values
 function mixHash(h, salt) {
   let m = h ^ salt;
   m = Math.imul(m ^ (m >>> 16), 0x45d9f3b);
@@ -812,7 +810,6 @@ class CardDNA {
   constructor(name) {
     this.name = name;
     const h = fnv1a(name);
-    // Each trait uses a different prime salt for independent distribution
     this.palette     = mixHash(h, 0x9e3779b9) % PALETTES.length;
     this.border      = mixHash(h, 0x517cc1b7) % BORDERS.length;
     this.pattern     = mixHash(h, 0x6c62272e) % PATTERNS.length;
@@ -820,7 +817,6 @@ class CardDNA {
     this.patternSeed = mixHash(h, 0x85ebca6b);
     this.borderSeed  = mixHash(h, 0xc2b2ae35);
     this.identiconSeed = h;
-    // Rarity
     const roll = mixHash(h, 0x27d4eb2f) % 100;
     this.rarity = roll < 50 ? 0 : roll < 80 ? 1 : roll < 95 ? 2 : 3;
   }
@@ -836,149 +832,243 @@ function renderCard(canvas, name, dna) {
   const rarity = RARITIES[dna.rarity];
   const certId = generateCertId(name);
   const font = "'PPSupplyMono', 'SF Mono', monospace";
+  const L = PAD + 20;  // left content edge
+  const R = w - PAD - 20;  // right content edge
+  const cw = R - L;  // content width
 
   ctx.clearRect(0, 0, w, h);
   ctx.save();
 
-  // Rounded clip
+  // ── Opaque base fill (prevent see-through) ──
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, w, h);
+
+  // ── Rounded clip ──
   roundRect(ctx, 0, 0, w, h, 16);
   ctx.clip();
 
-  // Background
+  // ── Background ──
   ctx.fillStyle = pal.bg;
   ctx.fillRect(0, 0, w, h);
 
-  // Subtle ambient center glow
-  const amb = ctx.createRadialGradient(w/2, h*0.35, 0, w/2, h*0.35, h*0.5);
-  amb.addColorStop(0, withAlpha(pal.glow, 0.03));
+  // Subtle ambient glow
+  const amb = ctx.createRadialGradient(w/2, h*0.25, 0, w/2, h*0.25, h*0.5);
+  amb.addColorStop(0, withAlpha(pal.glow, 0.05));
   amb.addColorStop(1, 'transparent');
   ctx.fillStyle = amb;
   ctx.fillRect(0, 0, w, h);
 
-  // Background pattern
+  // Background pattern (subtle)
+  ctx.globalAlpha = 0.35;
   PATTERNS[dna.pattern].draw(ctx, w, h, pal.bgL, dna.patternSeed);
+  ctx.globalAlpha = 1;
 
   // Border
   BORDERS[dna.border].draw(ctx, PAD, PAD, w-PAD*2, h-PAD*2, pal, dna.borderSeed, font);
 
-  // Header
-  const hy = PAD + 18;
-  ctx.font = `bold 16px ${font}`;
+  // ═══ HEADER ═══
+  const hy = PAD + 20;
+  ctx.font = `bold 14px ${font}`;
   ctx.fillStyle = pal.sec;
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
+  ctx.globalAlpha = 0.7;
   ctx.fillText('DEPT. OF MACHINE VERIFICATION', w/2, hy);
+  ctx.globalAlpha = 1;
 
   // Header dividers
-  const dv = hy + 28;
+  const dv1 = hy + 24;
   ctx.fillStyle = pal.acc;
-  ctx.fillRect(PAD+20, dv, w-PAD*2-40, 1);
+  ctx.fillRect(L, dv1, cw, 1);
   ctx.fillStyle = pal.dim;
-  ctx.fillRect(PAD+20, dv+3, w-PAD*2-40, 1);
+  ctx.fillRect(L, dv1 + 3, cw, 0.5);
 
-  // Identicon
-  const icoS = 240, icoX = (w-icoS)/2, icoY = dv + 18;
-  // Identicon glow (behind the identicon box)
-  const icoGlow = ctx.createRadialGradient(w/2, icoY+icoS/2, icoS*0.3, w/2, icoY+icoS/2, icoS*0.7);
-  icoGlow.addColorStop(0, withAlpha(pal.glow, 0.04));
+  // Decorative micro-dots under header
+  drawMicroDots(ctx, L, dv1 + 10, cw, 12, pal.dim);
+
+  // ═══ AGENT NAME (big, above identicon) ═══
+  const ny = dv1 + 24;
+  const displayName = name + '.agent';
+  let nameSize = 34;
+  ctx.font = `bold ${nameSize}px ${font}`;
+  while (ctx.measureText(displayName).width > cw && nameSize > 16) {
+    nameSize -= 2;
+    ctx.font = `bold ${nameSize}px ${font}`;
+  }
+  ctx.fillStyle = pal.pri;
+  ctx.textAlign = 'center';
+  ctx.shadowColor = pal.glow;
+  ctx.shadowBlur = rarity.glow + 4;
+  ctx.fillText(displayName, w/2, ny);
+  ctx.shadowBlur = 0;
+
+  // Rarity tag under name
+  const rtag = ny + nameSize + 6;
+  if (dna.rarity > 0) {
+    ctx.font = `bold 10px ${font}`;
+    ctx.fillStyle = pal.acc;
+    ctx.globalAlpha = 0.7;
+    ctx.shadowColor = pal.glow;
+    ctx.shadowBlur = rarity.glow * 0.5;
+    ctx.fillText(rarity.label, w/2, rtag);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  // Thin divider
+  const dv2 = rtag + 16;
+  ctx.fillStyle = pal.dim;
+  ctx.globalAlpha = 0.5;
+  ctx.fillRect(L + 60, dv2, cw - 120, 0.5);
+  ctx.globalAlpha = 1;
+
+  // ═══ IDENTICON ═══
+  const icoS = 200, icoX = (w - icoS) / 2, icoY = dv2 + 14;
+
+  // Glow behind identicon
+  const icoGlow = ctx.createRadialGradient(w/2, icoY+icoS/2, icoS*0.2, w/2, icoY+icoS/2, icoS*0.65);
+  icoGlow.addColorStop(0, withAlpha(pal.glow, 0.06));
   icoGlow.addColorStop(1, 'transparent');
   ctx.fillStyle = icoGlow;
-  ctx.fillRect(icoX-50, icoY-50, icoS+100, icoS+100);
-  // Identicon border
+  ctx.fillRect(icoX - 40, icoY - 40, icoS + 80, icoS + 80);
+
+  // Identicon frame
   ctx.strokeStyle = pal.dim; ctx.lineWidth = 1;
-  ctx.strokeRect(icoX-3, icoY-3, icoS+6, icoS+6);
+  ctx.strokeRect(icoX - 3, icoY - 3, icoS + 6, icoS + 6);
+  drawCorners(ctx, icoX - 6, icoY - 6, icoS + 12, icoS + 12, pal.acc);
+
   drawIdenticon(ctx, icoX, icoY, icoS, dna.identiconSeed, pal.pri);
 
-  // Agent name
-  const ny = icoY + icoS + 22;
-  ctx.font = `bold 28px ${font}`;
-  ctx.fillStyle = pal.pri;
+  // ═══ CERTIFICATE ID ═══
+  const cy = icoY + icoS + 20;
   ctx.textAlign = 'left';
-  ctx.shadowColor = pal.glow;
-  ctx.shadowBlur = rarity.glow;
-  ctx.fillText(name + '.agent', PAD+20, ny);
-  ctx.shadowBlur = 0;
-
-  // Divider
+  ctx.font = `10px ${font}`;
   ctx.fillStyle = pal.dim;
-  ctx.fillRect(PAD+20, ny+36, w-PAD*2-40, 1);
-
-  // Cert ID
-  const cy = ny + 52;
-  ctx.font = `11px ${font}`;
-  ctx.fillStyle = pal.dim;
-  ctx.fillText('CERTIFICATE ID', PAD+20, cy);
-  ctx.font = `bold 22px ${font}`;
+  ctx.fillText('CERTIFICATE ID', L, cy);
+  ctx.font = `bold 20px ${font}`;
   ctx.fillStyle = pal.sec;
-  ctx.shadowColor = pal.acc;
-  ctx.shadowBlur = rarity.glow * 0.5;
-  ctx.fillText(certId, PAD+20, cy+20);
+  ctx.shadowColor = pal.glow;
+  ctx.shadowBlur = 3;  // Minimal blur for readability
+  ctx.fillText(certId, L, cy + 18);
   ctx.shadowBlur = 0;
 
-  // Type + Status
-  const iy = cy + 58;
-  ctx.font = `11px ${font}`;
+  // ═══ TYPE + STATUS ═══
+  const ty = cy + 50;
+  ctx.font = `10px ${font}`;
   ctx.fillStyle = pal.dim;
-  ctx.fillText('TYPE', PAD+20, iy);
-  ctx.fillText('STATUS', PAD+220, iy);
+  ctx.fillText('TYPE', L, ty);
+  ctx.fillText('STATUS', w/2 + 10, ty);
   ctx.font = `bold 14px ${font}`;
   ctx.fillStyle = pal.sec;
-  ctx.fillText('INDIVIDUAL', PAD+20, iy+18);
+  ctx.fillText('INDIVIDUAL', L, ty + 16);
   ctx.fillStyle = pal.acc;
-  ctx.fillText('\u25CF VERIFIED', PAD+220, iy+18);
+  ctx.fillText('\u25CF VERIFIED', w/2 + 10, ty + 16);
 
-  // QR
-  const qy = iy + 48, qs = 110;
-  drawQR(ctx, PAD+20, qy, qs, fnv1a(certId), pal.pri);
-
-  // Metadata
-  const mx = PAD + 20 + qs + 20;
-  ctx.font = `11px ${font}`;
+  // Divider
+  const dv3 = ty + 42;
   ctx.fillStyle = pal.dim;
-  ctx.fillText('ISSUED', mx, qy+8);
+  ctx.fillRect(L, dv3, cw, 0.5);
+
+  // ═══ METADATA ROW ═══
+  const my = dv3 + 14;
+  ctx.font = `10px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.fillText('ISSUED', L, my);
+  ctx.fillText('EXPIRES', L + 180, my);
+  ctx.fillText('PROTOCOL', L + 340, my);
   ctx.font = `13px ${font}`;
   ctx.fillStyle = pal.sec;
   const now = new Date();
-  ctx.fillText(`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`, mx, qy+24);
-  ctx.font = `11px ${font}`;
-  ctx.fillStyle = pal.dim;
-  ctx.fillText('EXPIRES', mx, qy+50);
-  ctx.font = `13px ${font}`;
-  ctx.fillStyle = pal.sec;
-  ctx.fillText('NEVER', mx, qy+66);
-
-  // Rarity badge
-  ctx.font = `bold 14px ${font}`;
+  ctx.fillText(`${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`, L, my + 16);
+  ctx.fillText('NEVER', L + 180, my + 16);
   ctx.fillStyle = pal.acc;
-  ctx.shadowColor = pal.acc;
-  ctx.shadowBlur = rarity.glow;
+  ctx.fillText('v1.0', L + 340, my + 16);
+
+  // Divider
+  const dv4 = my + 38;
+  ctx.fillStyle = pal.dim;
+  ctx.fillRect(L, dv4, cw, 0.5);
+
+  // ═══ QR CODE (bottom section) ═══
+  const qy = dv4 + 14;
+  const qs = 130;
+  drawQR(ctx, L, qy, qs, fnv1a(certId), pal.pri);
+
+  // Right side of QR: registry info + decorations
+  const qx = L + qs + 24;
+  ctx.font = `10px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.fillText('REGISTRY', qx, qy + 10);
+  ctx.font = `12px ${font}`;
+  ctx.fillStyle = pal.sec;
+  ctx.fillText('agentcommunity.org', qx, qy + 26);
+
+  ctx.font = `10px ${font}`;
+  ctx.fillStyle = pal.dim;
+  ctx.fillText('NETWORK', qx, qy + 52);
+  ctx.font = `12px ${font}`;
+  ctx.fillStyle = pal.sec;
+  ctx.fillText('.agent TLD', qx, qy + 68);
+
+  // Rarity seal (right of QR, bottom)
+  const sealY = qy + qs - 32;
+  const sealX = qx + 60;
   ctx.textAlign = 'center';
-  ctx.fillText(rarity.label, mx + 90, qy + qs - 10);
-  ctx.shadowBlur = 0;
+  // Seal ring
+  ctx.strokeStyle = pal.acc;
+  ctx.globalAlpha = 0.3;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(sealX, sealY, 22, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.15;
+  ctx.beginPath();
+  ctx.arc(sealX, sealY, 18, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // Seal content
+  if (dna.rarity > 0) {
+    ctx.font = `bold 18px ${font}`;
+    ctx.fillStyle = pal.acc;
+    ctx.shadowColor = pal.glow;
+    ctx.shadowBlur = rarity.glow * 0.5;
+    ctx.fillText(rarity.sym, sealX, sealY - 4);
+    ctx.shadowBlur = 0;
+    ctx.font = `7px ${font}`;
+    ctx.fillStyle = pal.dim;
+    ctx.fillText(rarity.name, sealX, sealY + 12);
+  } else {
+    ctx.font = `8px ${font}`;
+    ctx.fillStyle = pal.dim;
+    ctx.fillText('STD', sealX, sealY + 3);
+  }
   ctx.textAlign = 'left';
 
-  // Bottom divider
-  const bot = h - PAD - 46;
+  // ═══ BOTTOM DIVIDERS + FOOTER ═══
+  const bot = h - PAD - 36;
   ctx.fillStyle = pal.acc;
-  ctx.fillRect(PAD+20, bot, w-PAD*2-40, 1);
+  ctx.fillRect(L, bot, cw, 1);
   ctx.fillStyle = pal.dim;
-  ctx.fillRect(PAD+20, bot+3, w-PAD*2-40, 1);
+  ctx.fillRect(L, bot + 3, cw, 0.5);
+
+  // Decorative micro-dots
+  drawMicroDots(ctx, L, bot - 8, cw, 10, pal.dim);
 
   // Footer
-  ctx.font = `12px ${font}`;
+  ctx.font = `11px ${font}`;
   ctx.fillStyle = pal.dim;
   ctx.textAlign = 'center';
-  ctx.fillText('dmv.agentcommunity.org', w/2, bot+18);
+  ctx.fillText('dmv.agentcommunity.org', w/2, bot + 18);
   ctx.textAlign = 'left';
 
-  // Scanlines
-  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  // ═══ SCANLINES (subtle) ═══
+  ctx.fillStyle = 'rgba(0,0,0,0.035)';
   for (let sy = 0; sy < h; sy += 3) ctx.fillRect(0, sy, w, 1);
 
-  // Vignette
+  // ═══ VIGNETTE ═══
   const vig = ctx.createRadialGradient(w/2, h/2, h*0.35, w/2, h/2, h*0.7);
   vig.addColorStop(0, 'transparent');
-  vig.addColorStop(1, 'rgba(0,0,0,0.25)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.2)');
   ctx.fillStyle = vig;
   ctx.fillRect(0, 0, w, h);
 
@@ -1009,26 +1099,27 @@ function getEffectiveDNA() {
 //  HOLO & HOVER
 // ═══════════════════════════════════════════════════════════════
 function applyHoloType(cardEl, dna) {
-  // Remove old holo classes
   cardEl.classList.remove('holo-rainbow','holo-prism','holo-aurora','holo-duochrome');
   const holoId = HOLOS[dna.holo].id;
   if (holoId !== 'rainbow') cardEl.classList.add('holo-' + holoId);
   cardEl.style.setProperty('--holo-intensity', RARITIES[dna.rarity].intensity);
 
-  // Duochrome colors from palette
   if (holoId === 'duochrome') {
     const pal = PALETTES[dna.palette];
-    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.2));
-    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.2));
+    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.25));
+    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.25));
   }
-  // Ambient glow
   const pal = PALETTES[dna.palette];
   cardEl.closest('.card-wrap, .gallery-item')
-    ?.style.setProperty('--card-glow', withAlpha(pal.glow, 0.06));
+    ?.style.setProperty('--card-glow', withAlpha(pal.glow, 0.08));
 }
+
+// Track hover state per card
+const hoveredCards = new WeakSet();
 
 function setupCardHover(cardEl) {
   cardEl.addEventListener('mousemove', (e) => {
+    hoveredCards.add(cardEl);
     const rect = cardEl.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
@@ -1041,8 +1132,36 @@ function setupCardHover(cardEl) {
     cardEl.style.setProperty('--angle', angle+'deg');
   });
   cardEl.addEventListener('mouseleave', () => {
-    cardEl.style.transform = '';
+    hoveredCards.delete(cardEl);
   });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HOLO AUTO-ANIMATION (always shows holo, not just on hover)
+// ═══════════════════════════════════════════════════════════════
+const allCards = [];
+
+function animateHolo() {
+  const t = performance.now() * 0.001;
+
+  for (let i = 0; i < allCards.length; i++) {
+    const cardEl = allCards[i];
+    if (hoveredCards.has(cardEl)) continue; // mouse overrides
+
+    const offset = i * 1.7;
+    const angle = (t + offset) * 28;
+    const mx = 50 + Math.sin((t + offset) * 0.6) * 30;
+    const my = 50 + Math.cos((t + offset) * 0.45) * 30;
+    const rx = Math.sin((t + offset) * 0.35) * 3;
+    const ry = Math.cos((t + offset) * 0.28) * 4;
+
+    cardEl.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
+    cardEl.style.setProperty('--angle', angle + 'deg');
+    cardEl.style.setProperty('--mx', mx + '%');
+    cardEl.style.setProperty('--my', my + '%');
+  }
+
+  requestAnimationFrame(animateHolo);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1052,6 +1171,9 @@ function setupControls() {
   const nameInput = document.getElementById('nameInput');
   const mainCanvas = document.getElementById('mainCanvas');
   const mainCard = document.getElementById('mainCard');
+
+  // Register main card for auto-animation
+  allCards.push(mainCard);
 
   // Palette buttons
   const palSel = document.getElementById('palSel');
@@ -1151,7 +1273,6 @@ function updateReadout(dna) {
 // ═══════════════════════════════════════════════════════════════
 function setupGallery() {
   const grid = document.getElementById('galleryGrid');
-  // Curated for max trait diversity: all 8 palettes, all 4 borders, all 4 patterns, all 4 holos, all 4 rarities
   const names = ['nova','pulse','ghost','atlas','phantom','drift','flux','frost'];
   names.forEach(name => {
     const item = document.createElement('div');
@@ -1185,6 +1306,9 @@ function setupGallery() {
     applyHoloType(card, dna);
     setupCardHover(card);
 
+    // Register for auto-animation
+    allCards.push(card);
+
     card.addEventListener('click', () => {
       state.name = name;
       state.overrides = {};
@@ -1203,6 +1327,8 @@ async function init() {
   setupControls();
   updateMain();
   setupGallery();
+  // Start holo animation loop
+  requestAnimationFrame(animateHolo);
 }
 init();
 </script>
