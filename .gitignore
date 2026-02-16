@@ -2,3 +2,4 @@
 .env
 .npmrc
 node_modules/
+supabase/.temp/
