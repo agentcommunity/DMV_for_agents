@@ -1,6 +1,6 @@
 import { TV } from './TV.js?v=21';
 import { AboutPoster } from './AboutPoster.js?v=15';
-import { HoloCard } from './HoloCard.js?v=21';
+import { HoloCard } from './HoloCard.js?v=23';
 import { insertRegistration } from './supabase.js?v=15';
 
 const gsap = window.gsap;
@@ -321,7 +321,7 @@ terminalStatusBar?.addEventListener('click', (e) => {
 
 let prevCardZoomed = false;
 tv.onRender((dt) => {
-  holoCard.update(dt);
+  holoCard.update(dt, tv.camera, tv.renderer);
   // Show DOM card when zoom-in transition detected
   if (tv.isCardZoomed && !prevCardZoomed && holoCard.getMesh().visible) {
     holoCard.setVisible(true);
@@ -437,28 +437,30 @@ if (permalink) {
 // ─── Demo mode: ?demo — rapid card testing without CRT form ────
 const demoMode = !permalink && new URLSearchParams(location.search).has('demo');
 if (demoMode) {
-  const { CardDNA, PALETTES, HOLOS, RARITIES } = await import('./card-draw.js?v=21');
+  const { CardDNA, PALETTES, HOLOS, RARITIES, generateCertId } = await import('./card-draw.js?v=22');
   const demoNames = [
     'atlas','nova','cipher','echo','pulse','nexus','vortex','helix',
     'prism','flux','orbit','quasar','zenith','onyx','spark','glitch',
     'sonic','rune','axion','phantom','neon','vector','cosmic','ember',
     'jade','terra','bolt','sable','drift','haze','comet','titan',
   ];
+  const demoTypes = ['individual', 'organization', 'agent'];
   let demoIdx = 0;
   const showDemoCard = () => {
     const name = demoNames[demoIdx % demoNames.length];
-    const types = ['individual', 'organization'];
+    const type = demoTypes[demoIdx % demoTypes.length];
+    const certId = generateCertId(name);
     const fakeData = {
       agentName: name,
-      certificateId: null,
-      accountType: types[demoIdx % 2],
+      certificateId: certId,
+      accountType: type,
     };
     holoCard.show(fakeData, true);
     const dna = new CardDNA(name);
     const pal = PALETTES[dna.palette];
     const holo = HOLOS[dna.holo];
     const rar = RARITIES[dna.rarity];
-    console.log(`[demo] ${name}.agent — ${pal.name} / ${holo.name} / ${rar.name} — Space for next`);
+    console.log(`[demo] ${name}.agent — ${pal.name} / ${holo.name} / ${rar.name} / ${type} — Space for next`);
     demoIdx++;
   };
   showDemoCard();
