@@ -1,733 +1,386 @@
 import * as THREE from 'three';
+import { CardDNA, renderCard, PALETTES, RARITIES, HOLOS, hexToRgb, withAlpha, CW, CH } from './card-draw.js?v=22';
 
 /* ═══════════════════════════════════════════════════════════════════
-   HoloCard — Holographic 3D Agent Identity Card
-   Self-contained Three.js module. Only depends on Three.js.
-   Optional: window.gsap for fade-in animation.
+   HoloCard — DOM overlay card with CSS holo effects
+   Replaces GLSL shader version with the exact same holo system
+   as card-lab-v2.html (pokemon-cards-css style overlays).
+   Hidden Three.js mesh kept for TV.js raycasting & zoom.
    ═══════════════════════════════════════════════════════════════════ */
 
 // ─── Config ──────────────────────────────────────────────────────
 
-const CW = 630, CH = 880;
-const PAD = 24;
 const WORLD_H = 2.4;
 const WORLD_W = WORLD_H * (CW / CH);
 
-const RARITIES = [
-  { name: 'STANDARD',  pct: 60,  intensity: 0.25, accent: '#33ff88', rgb: [0.2, 1.0, 0.53] },
-  { name: 'ENHANCED',  pct: 85,  intensity: 0.45, accent: '#33ddff', rgb: [0.2, 0.87, 1.0] },
-  { name: 'RARE',      pct: 95,  intensity: 0.65, accent: '#ffaa33', rgb: [1.0, 0.67, 0.2] },
-  { name: 'LEGENDARY', pct: 100, intensity: 0.85, accent: '#ff44ff', rgb: [1.0, 0.27, 1.0] },
-];
+// Display size of DOM card (px) — 0.7x canvas resolution
+const CARD_PX_W = CW * 0.7;
+const CARD_PX_H = CH * 0.7;
 
-const RARITY_LABELS = {
-  STANDARD:  'STANDARD',
-  ENHANCED:  '\u25C6 ENHANCED \u25C6',
-  RARE:      '\u2605 RARE \u2605',
-  LEGENDARY: '\u2726 LEGENDARY \u2726',
-};
+// ─── Spring Physics (from card-lab-v2) ──────────────────────────
 
-// ─── Utilities ───────────────────────────────────────────────────
+function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
 
-function fnv1a(str) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
-
-function seededRand(seed) {
-  let s = seed;
-  return () => {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    return s / 0x7fffffff;
+function createSpring() {
+  return {
+    mx: 50, my: 50, angle: 130,
+    bgX: 50, bgY: 50,
+    rotX: 0, rotY: 0,
+    opacity: 0,
+    targetMx: 50, targetMy: 50, targetAngle: 130,
+    targetBgX: 50, targetBgY: 50,
+    targetRotX: 0, targetRotY: 0,
+    targetOpacity: 0,
   };
 }
-
-// ─── Shaders ─────────────────────────────────────────────────────
-
-const VERT = /* glsl */ `
-  varying vec2 vUv;
-  varying vec3 vNormal;
-  varying vec3 vViewDir;
-
-  void main() {
-    vUv = uv;
-    vNormal = normalize(normalMatrix * normal);
-    vec4 wp = modelMatrix * vec4(position, 1.0);
-    vViewDir = normalize(cameraPosition - wp.xyz);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const FRAG = /* glsl */ `
-  uniform sampler2D uCard;
-  uniform float uTime;
-  uniform vec2 uPointer;
-  uniform float uIntensity;
-  uniform vec3 uAccent;
-  uniform float uOpacity;
-
-  varying vec2 vUv;
-  varying vec3 vNormal;
-  varying vec3 vViewDir;
-
-  float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-  }
-
-  float vnoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(
-      mix(hash21(i), hash21(i + vec2(1, 0)), f.x),
-      mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), f.x),
-      f.y
-    );
-  }
-
-  vec3 hsv2rgb(float h, float s, float v) {
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(vec3(h) + K.xyz) * 6.0 - K.www);
-    return v * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), s);
-  }
-
-  void main() {
-    vec4 tex = texture2D(uCard, vUv);
-    vec3 base = pow(tex.rgb, vec3(2.2));
-
-    float va = dot(vNormal, vViewDir);
-
-    // Rainbow phase — shifts with view angle, UV, pointer, time
-    float phase = vUv.x * 2.5 + vUv.y * 1.8 + va * 4.0 + uTime * 0.08;
-    phase += (uPointer.x + uPointer.y) * 0.3;
-    vec3 rainbow = hsv2rgb(fract(phase), 0.75, 1.0);
-
-    // Foil lines (horizontal + diagonal)
-    float hLines = sin(vUv.y * 180.0 + va * 35.0) * 0.5 + 0.5;
-    hLines = smoothstep(0.65, 1.0, hLines);
-    float dLines = sin((vUv.x + vUv.y) * 100.0 + va * 25.0) * 0.5 + 0.5;
-    dLines = smoothstep(0.78, 1.0, dLines);
-    float foil = max(hLines * 0.8, dLines * 0.4);
-
-    // Glare spotlight following pointer
-    float glare = 1.0 - length(vUv - uPointer);
-    glare = pow(max(glare, 0.0), 4.0);
-
-    // Fresnel edge glow
-    float fresnel = pow(1.0 - max(va, 0.0), 3.0);
-
-    // Sparkle noise
-    float sp = vnoise(vUv * 50.0 + uTime * 0.4) * vnoise(vUv * 70.0 - uTime * 0.3);
-    sp = pow(max(sp, 0.0), 5.0) * 4.0;
-
-    // Composite holographic overlay
-    vec3 holo = rainbow * foil;
-    holo += rainbow * fresnel * 0.25;
-    holo += rainbow * sp * uIntensity;
-
-    float str = uIntensity * (0.3 + glare * 0.7);
-    vec3 overlay = clamp(holo * str, 0.0, 0.95);
-
-    // Color-dodge blend
-    vec3 result = base / (1.0 - overlay);
-
-    // Glare highlight
-    result += vec3(1.0, 0.98, 0.94) * glare * 0.12;
-
-    // Accent tint on fresnel edges
-    result += uAccent * fresnel * uIntensity * 0.15;
-
-    // Subtle grain
-    result += (hash21(vUv * 800.0 + uTime * 5.0) - 0.5) * 0.015;
-
-    gl_FragColor = vec4(result, tex.a * uOpacity);
-  }
-`;
 
 // ─── HoloCard Class ─────────────────────────────────────────────
 
 export class HoloCard {
 
-  /**
-   * @param {Object} options
-   * @param {Object} options.position  — { x, y, z } world position
-   * @param {number} options.rotationY — base Y rotation in radians
-   * @param {string} options.fontFamily — CSS font stack for card text
-   */
   constructor(options = {}) {
-    const rootStyle = getComputedStyle(document.documentElement);
-    const cssMono = rootStyle.getPropertyValue('--floating-ui-font-mono').trim();
     this.position = options.position || { x: 4, y: 1, z: -0.5 };
     this.rotationY = options.rotationY ?? -0.2;
-    this.font = options.fontFamily ||
-      cssMono ||
-      '"PPSupplyMono", "SF Mono", "Fira Code", "Courier New", monospace';
 
-    // --- Canvases ---
-    this.frontCanvas = document.createElement('canvas');
-    this.frontCanvas.width = CW;
-    this.frontCanvas.height = CH;
-    this.frontCtx = this.frontCanvas.getContext('2d');
-
-    this.backCanvas = document.createElement('canvas');
-    this.backCanvas.width = CW;
-    this.backCanvas.height = CH;
-    this.backCtx = this.backCanvas.getContext('2d');
-
-    // --- Textures ---
-    this.frontTex = new THREE.CanvasTexture(this.frontCanvas);
-    this.backTex = new THREE.CanvasTexture(this.backCanvas);
-
-    // --- Shader materials ---
-    this.frontMat = this._makeMaterial(this.frontTex);
-    this.backMat = this._makeMaterial(this.backTex);
-
-    // --- Meshes ---
+    // --- Hidden Three.js mesh (for raycasting & zoom positioning) ---
     const geo = new THREE.PlaneGeometry(WORLD_W, WORLD_H);
-    this.mesh = new THREE.Mesh(geo, this.frontMat);
+    const mat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      side: THREE.FrontSide,
+      depthWrite: false,
+    });
+    this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.position.set(this.position.x, this.position.y, this.position.z);
     this.mesh.rotation.y = this.rotationY;
     this.mesh.visible = false;
 
-    this.backMesh = new THREE.Mesh(geo.clone(), this.backMat);
-    this.backMesh.visible = false;
-    this._syncBack();
+    // --- DOM elements ---
+    this._domCreated = false;
+    this.cardWrap = null;
+    this.cardEl = null;
+    this.canvas = null;
 
     // --- Animation state ---
     this.time = 0;
     this.baseY = this.position.y;
-    this.baseRotY = this.rotationY;
-    this.targetTilt = { x: 0, y: 0 };
-    this.currentTilt = { x: 0, y: 0 };
-    this._tmpVec = new THREE.Vector3();
+    this.spring = createSpring();
+    this._interacting = false;
+    this._visible = false;
 
     // --- Data ---
     this.formData = null;
     this.rarity = null;
+    this._clickCb = null;
+
+    // --- Projection helpers (pre-allocated to avoid per-frame GC) ---
+    this._projVec = new THREE.Vector3();
+    this._topVec = new THREE.Vector3();
+    this._botVec = new THREE.Vector3();
   }
 
-  // ─── Material factory ───
+  // ─── Create DOM elements (once) ───
 
-  _makeMaterial(tex) {
-    return new THREE.ShaderMaterial({
-      uniforms: {
-        uCard:      { value: tex },
-        uTime:      { value: 0 },
-        uPointer:   { value: new THREE.Vector2(0.5, 0.5) },
-        uIntensity: { value: 0.25 },
-        uAccent:    { value: new THREE.Vector3(0.2, 1.0, 0.53) },
-        uOpacity:   { value: 0 },
-      },
-      vertexShader: VERT,
-      fragmentShader: FRAG,
-      transparent: true,
-      toneMapped: true,
-      side: THREE.FrontSide,
+  _ensureDOM() {
+    if (this._domCreated) return;
+    this._domCreated = true;
+
+    // Wrap
+    this.cardWrap = document.createElement('div');
+    this.cardWrap.className = 'holo-card-wrap';
+    this.cardWrap.style.cssText = `
+      position: fixed;
+      pointer-events: none;
+      z-index: 50;
+      transform-origin: center center;
+      display: none;
+    `;
+
+    // Card
+    this.cardEl = document.createElement('div');
+    this.cardEl.className = 'holo-card';
+    this.cardEl.style.cssText = `
+      width: ${CARD_PX_W}px;
+      height: ${CARD_PX_H}px;
+      pointer-events: auto;
+    `;
+
+    // Canvas
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = CW;
+    this.canvas.height = CH;
+    this.cardEl.appendChild(this.canvas);
+
+    // Holo overlays
+    for (const cls of ['card-shine', 'card-glare', 'card-foil', 'card-sparkle']) {
+      const div = document.createElement('div');
+      div.className = cls;
+      this.cardEl.appendChild(div);
+    }
+
+    this.cardWrap.appendChild(this.cardEl);
+    document.body.appendChild(this.cardWrap);
+
+    // Click handler
+    this.cardEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this._clickCb) this._clickCb();
+    });
+
+    // Mouse/touch interaction for spring tilt
+    this.cardEl.addEventListener('mouseenter', () => { this._interacting = true; });
+    this.cardEl.addEventListener('mousemove', (e) => {
+      this._interacting = true;
+      this._applyTilt(e.clientX, e.clientY);
+    });
+    this.cardEl.addEventListener('mouseleave', () => {
+      this._interacting = false;
+      this._resetSpring();
+    });
+    this.cardEl.addEventListener('touchstart', (e) => {
+      this._interacting = true;
+      const t = e.touches[0];
+      if (t) this._applyTilt(t.clientX, t.clientY);
+    }, { passive: true });
+    this.cardEl.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      if (t) this._applyTilt(t.clientX, t.clientY);
+    }, { passive: false });
+    this.cardEl.addEventListener('touchend', () => {
+      this._interacting = false;
+      this._resetSpring();
     });
   }
 
-  // ─── Sync back mesh to front mesh ───
+  // ─── Holo type application (from card-lab-v2) ───
 
-  _syncBack() {
-    this.backMesh.position.copy(this.mesh.position);
-    this.backMesh.rotation.copy(this.mesh.rotation);
-    this.backMesh.rotation.y += Math.PI;
+  _applyHoloType(dna) {
+    this.cardEl.classList.remove('holo-rainbow', 'holo-prism', 'holo-aurora', 'holo-duochrome');
+    const holoId = HOLOS[dna.holo].id;
+    if (holoId !== 'rainbow') this.cardEl.classList.add('holo-' + holoId);
+    this.cardEl.style.setProperty('--holo-intensity', RARITIES[dna.rarity].intensity);
+    if (holoId === 'duochrome') {
+      const pal = PALETTES[dna.palette];
+      this.cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.5));
+      this.cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.5));
+    }
+    const pal = PALETTES[dna.palette];
+    this.cardWrap.style.setProperty('--card-glow', withAlpha(pal.glow, 0.1));
   }
 
-  // ─── Rarity ───
+  // ─── Spring tilt (from card-lab-v2) ───
 
-  _computeRarity(certId) {
-    const roll = fnv1a(certId || 'unknown') % 100;
-    for (const r of RARITIES) {
-      if (roll < r.pct) return r;
-    }
-    return RARITIES[0];
+  _applyTilt(clientX, clientY) {
+    const rect = this.cardEl.getBoundingClientRect();
+    const px = clamp((clientX - rect.left) / rect.width, 0, 1);
+    const py = clamp((clientY - rect.top) / rect.height, 0, 1);
+    const s = this.spring;
+    s.targetRotY = (px - 0.5) * 40;
+    s.targetRotX = (py - 0.5) * -40;
+    s.targetAngle = Math.atan2(py - 0.5, px - 0.5) * (180 / Math.PI) + 90;
+    s.targetBgX = 37 + (px * 26);
+    s.targetBgY = 33 + (py * 34);
+    s.targetMx = px * 100;
+    s.targetMy = py * 100;
+    s.targetOpacity = 1;
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  CANVAS DRAWING — FRONT
-  // ════════════════════════════════════════════════════════════════
-
-  _drawFront(data, r) {
-    const ctx = this.frontCtx;
-    const w = CW, h = CH, f = this.font;
-    ctx.clearRect(0, 0, w, h);
-
-    // Background
-    ctx.fillStyle = '#0a0d0a';
-    ctx.fillRect(0, 0, w, h);
-
-    // Subtle background grid
-    ctx.strokeStyle = '#0f130f';
-    ctx.lineWidth = 0.5;
-    for (let gx = PAD; gx < w - PAD; gx += 28) {
-      ctx.beginPath(); ctx.moveTo(gx, PAD); ctx.lineTo(gx, h - PAD); ctx.stroke();
-    }
-    for (let gy = PAD; gy < h - PAD; gy += 28) {
-      ctx.beginPath(); ctx.moveTo(PAD, gy); ctx.lineTo(w - PAD, gy); ctx.stroke();
-    }
-
-    // Borders
-    ctx.strokeStyle = r.accent;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(PAD, PAD, w - PAD * 2, h - PAD * 2);
-    ctx.strokeStyle = '#1a5a3a';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(PAD + 6, PAD + 6, w - PAD * 2 - 12, h - PAD * 2 - 12);
-
-    // Corner brackets
-    this._corners(ctx, PAD - 4, PAD - 4, w - PAD * 2 + 8, h - PAD * 2 + 8, r.accent);
-
-    // Header
-    const hy = PAD + 18;
-    ctx.font = `bold 16px ${f}`;
-    ctx.fillStyle = '#88ffcc';
-    ctx.textBaseline = 'top';
-    ctx.textAlign = 'center';
-    ctx.fillText('DEPT. OF MACHINE VERIFICATION', w / 2, hy);
-
-    // Header dividers
-    const dv = hy + 28;
-    ctx.fillStyle = r.accent;
-    ctx.fillRect(PAD + 20, dv, w - PAD * 2 - 40, 1);
-    ctx.fillStyle = '#1a5a3a';
-    ctx.fillRect(PAD + 20, dv + 3, w - PAD * 2 - 40, 1);
-
-    // Identicon
-    const icoS = 240, icoX = (w - icoS) / 2, icoY = dv + 18;
-    ctx.strokeStyle = '#1a5a3a';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(icoX - 3, icoY - 3, icoS + 6, icoS + 6);
-    this._identicon(ctx, icoX, icoY, icoS, fnv1a(data.agentName || 'agent'), r.accent);
-
-    // Agent name
-    const ny = icoY + icoS + 22;
-    const agentName = (data.agentName || 'agent') + '.agent';
-    ctx.font = `bold 30px ${f}`;
-    ctx.fillStyle = '#33ff88';
-    ctx.textAlign = 'left';
-    ctx.shadowColor = '#33ff88';
-    ctx.shadowBlur = 10;
-    ctx.fillText(agentName, PAD + 20, ny);
-    ctx.shadowBlur = 0;
-
-    // Divider
-    ctx.fillStyle = '#1a5a3a';
-    ctx.fillRect(PAD + 20, ny + 38, w - PAD * 2 - 40, 1);
-
-    // Cert ID
-    const cy = ny + 54;
-    ctx.font = `11px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.fillText('CERTIFICATE ID', PAD + 20, cy);
-    ctx.font = `bold 24px ${f}`;
-    ctx.fillStyle = '#88ffcc';
-    ctx.shadowColor = r.accent;
-    ctx.shadowBlur = 6;
-    ctx.fillText(data.certificateId || 'NOVA-000-000X', PAD + 20, cy + 20);
-    ctx.shadowBlur = 0;
-
-    // Type + Status
-    const iy = cy + 60;
-    ctx.font = `11px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.fillText('TYPE', PAD + 20, iy);
-    ctx.fillText('STATUS', PAD + 220, iy);
-    ctx.font = `bold 14px ${f}`;
-    ctx.fillStyle = '#88ffcc';
-    ctx.fillText((data.accountType || data.type || 'individual').toUpperCase(), PAD + 20, iy + 18);
-    ctx.fillStyle = r.accent;
-    ctx.fillText('\u25CF VERIFIED', PAD + 220, iy + 18);
-
-    // QR pattern
-    const qy = iy + 50, qs = 110;
-    this._qr(ctx, PAD + 20, qy, qs, fnv1a(data.certificateId || ''));
-
-    // Metadata right of QR
-    const mx = PAD + 20 + qs + 20;
-    ctx.font = `11px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.fillText('ISSUED', mx, qy + 8);
-    ctx.font = `13px ${f}`;
-    ctx.fillStyle = '#88ffcc';
-    const now = new Date();
-    ctx.fillText(
-      `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`,
-      mx, qy + 24
-    );
-    ctx.font = `11px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.fillText('EXPIRES', mx, qy + 50);
-    ctx.font = `13px ${f}`;
-    ctx.fillStyle = '#88ffcc';
-    ctx.fillText('NEVER', mx, qy + 66);
-
-    // Rarity badge
-    ctx.font = `bold 15px ${f}`;
-    ctx.fillStyle = r.accent;
-    ctx.shadowColor = r.accent;
-    ctx.shadowBlur = 10;
-    ctx.textAlign = 'center';
-    ctx.fillText(RARITY_LABELS[r.name], mx + 90, qy + qs - 10);
-    ctx.shadowBlur = 0;
-    ctx.textAlign = 'left';
-
-    // Bottom divider
-    const by = h - PAD - 46;
-    ctx.fillStyle = r.accent;
-    ctx.fillRect(PAD + 20, by, w - PAD * 2 - 40, 1);
-    ctx.fillStyle = '#1a5a3a';
-    ctx.fillRect(PAD + 20, by + 3, w - PAD * 2 - 40, 1);
-
-    // Footer
-    ctx.font = `12px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.textAlign = 'center';
-    ctx.fillText('dmv.agentcommunity.org', w / 2, by + 18);
-    ctx.textAlign = 'left';
-
-    // Scanlines
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
-    for (let sy = 0; sy < h; sy += 3) ctx.fillRect(0, sy, w, 1);
+  _resetSpring() {
+    const s = this.spring;
+    s.targetMx = 50;
+    s.targetMy = 50;
+    s.targetAngle = 130;
+    s.targetBgX = 50;
+    s.targetBgY = 50;
+    s.targetRotX = 0;
+    s.targetRotY = 0;
+    s.targetOpacity = 0;
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  CANVAS DRAWING — BACK
-  // ════════════════════════════════════════════════════════════════
+  // ─── Project mesh world position to screen coords ───
 
-  _drawBack(data, r) {
-    const ctx = this.backCtx;
-    const w = CW, h = CH, f = this.font;
-    ctx.clearRect(0, 0, w, h);
+  _projectToScreen(camera, renderer) {
+    this._projVec.copy(this.mesh.position);
+    this._projVec.project(camera);
 
-    // Background
-    ctx.fillStyle = '#0a0d0a';
-    ctx.fillRect(0, 0, w, h);
+    const w = renderer.domElement.clientWidth;
+    const h = renderer.domElement.clientHeight;
+    const rect = renderer.domElement.getBoundingClientRect();
 
-    // Dot matrix
-    ctx.fillStyle = '#0f130f';
-    for (let dx = PAD; dx < w - PAD; dx += 12) {
-      for (let dy = PAD; dy < h - PAD; dy += 12) {
-        ctx.beginPath();
-        ctx.arc(dx, dy, 1, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // Borders
-    ctx.strokeStyle = r.accent;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(PAD, PAD, w - PAD * 2, h - PAD * 2);
-    ctx.strokeStyle = '#1a5a3a';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(PAD + 6, PAD + 6, w - PAD * 2 - 12, h - PAD * 2 - 12);
-    this._corners(ctx, PAD - 4, PAD - 4, w - PAD * 2 + 8, h - PAD * 2 + 8, r.accent);
-
-    // Large watermark
-    ctx.font = `bold 90px ${f}`;
-    ctx.fillStyle = '#111511';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('DMV', w / 2, h * 0.28);
-
-    // Subtitle
-    ctx.font = `14px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.textBaseline = 'top';
-    ctx.fillText('DEPARTMENT OF', w / 2, h * 0.28 + 55);
-    ctx.fillText('MACHINE VERIFICATION', w / 2, h * 0.28 + 75);
-
-    // Geometric divider
-    const dy = h * 0.48;
-    ctx.strokeStyle = '#1a5a3a';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(PAD + 40, dy); ctx.lineTo(w / 2 - 20, dy); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(w / 2 + 20, dy); ctx.lineTo(w - PAD - 40, dy); ctx.stroke();
-    // Diamond
-    ctx.strokeStyle = r.accent;
-    ctx.beginPath();
-    ctx.moveTo(w / 2, dy - 8); ctx.lineTo(w / 2 + 8, dy);
-    ctx.lineTo(w / 2, dy + 8); ctx.lineTo(w / 2 - 8, dy);
-    ctx.closePath(); ctx.stroke();
-
-    // Terms
-    const ty = dy + 30;
-    ctx.font = `10px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    const lines = [
-      'This certificate verifies the identity of the',
-      'named agent under DMV Protocol v2.1.',
-      'Unauthorized use or duplication is prohibited.',
-      '',
-      'All data processed in accordance with the',
-      'Machine Privacy Framework (MPF v2.1).',
-      'Registration is non-transferable.',
-    ];
-    lines.forEach((l, i) => ctx.fillText(l, w / 2, ty + i * 18));
-
-    // MRZ
-    const my = h - PAD - 105;
-    ctx.fillStyle = '#0d100d';
-    ctx.fillRect(PAD + 15, my, w - PAD * 2 - 30, 65);
-    ctx.strokeStyle = '#1a5a3a';
-    ctx.strokeRect(PAD + 15, my, w - PAD * 2 - 30, 65);
-
-    const name = (data.agentName || 'AGENT').toUpperCase();
-    const cert = (data.certificateId || 'NOVA000000X').replace(/-/g, '');
-    const pad36 = (s) => s + '<'.repeat(Math.max(0, 38 - s.length));
-    ctx.font = `12px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.textAlign = 'left';
-    ctx.fillText(pad36(`P<DMV<${name}`), PAD + 25, my + 22);
-    ctx.fillText(pad36(cert), PAD + 25, my + 44);
-
-    // Footer
-    ctx.font = `12px ${f}`;
-    ctx.fillStyle = '#1a5a3a';
-    ctx.textAlign = 'center';
-    ctx.fillText('dmv.agentcommunity.org', w / 2, h - PAD - 22);
-    ctx.textAlign = 'left';
-
-    // Scanlines
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
-    for (let sy = 0; sy < h; sy += 3) ctx.fillRect(0, sy, w, 1);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  //  DRAWING HELPERS
-  // ════════════════════════════════════════════════════════════════
-
-  _identicon(ctx, x, y, size, seed, color) {
-    const rand = seededRand(seed);
-    const grid = 9;
-    const cell = size / grid;
-    const half = Math.ceil(grid / 2);
-
-    ctx.fillStyle = '#060806';
-    ctx.fillRect(x, y, size, size);
-
-    // Build top-left quadrant, mirror 4-fold
-    const cells = [];
-    for (let gy = 0; gy < half; gy++) {
-      cells[gy] = [];
-      for (let gx = 0; gx < half; gx++) {
-        cells[gy][gx] = rand() > 0.42;
-      }
-    }
-
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.8;
-    for (let gy = 0; gy < grid; gy++) {
-      for (let gx = 0; gx < grid; gx++) {
-        const sy = gy < half ? gy : grid - 1 - gy;
-        const sx = gx < half ? gx : grid - 1 - gx;
-        if (cells[sy] && cells[sy][sx]) {
-          ctx.fillRect(x + gx * cell + 1, y + gy * cell + 1, cell - 2, cell - 2);
-        }
-      }
-    }
-    ctx.globalAlpha = 1.0;
-
-    // Subtle border
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.3;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x, y, size, size);
-    ctx.globalAlpha = 1.0;
-  }
-
-  _qr(ctx, x, y, size, seed) {
-    const n = 21;
-    const c = size / n;
-    const rand = seededRand(seed);
-
-    ctx.fillStyle = '#060806';
-    ctx.fillRect(x - 2, y - 2, size + 4, size + 4);
-
-    const dot = (mx, my) => ctx.fillRect(x + mx * c, y + my * c, c, c);
-
-    // Finder patterns
-    const finder = (fx, fy) => {
-      ctx.fillStyle = '#33ff88';
-      for (let i = 0; i < 7; i++) {
-        dot(fx + i, fy); dot(fx + i, fy + 6);
-        dot(fx, fy + i); dot(fx + 6, fy + i);
-      }
-      for (let i = 2; i < 5; i++)
-        for (let j = 2; j < 5; j++) dot(fx + i, fy + j);
+    return {
+      x: rect.left + (this._projVec.x * 0.5 + 0.5) * w,
+      y: rect.top + (-this._projVec.y * 0.5 + 0.5) * h,
     };
-    finder(0, 0);
-    finder(n - 7, 0);
-    finder(0, n - 7);
-
-    // Timing
-    ctx.fillStyle = '#1a5a3a';
-    for (let i = 8; i < n - 8; i++) {
-      if (i % 2 === 0) { dot(i, 6); dot(6, i); }
-    }
-
-    // Data
-    ctx.fillStyle = '#33ff88';
-    ctx.globalAlpha = 0.7;
-    for (let my = 0; my < n; my++) {
-      for (let mx = 0; mx < n; mx++) {
-        if ((mx < 8 && my < 8) || (mx >= n - 7 && my < 8) || (mx < 8 && my >= n - 7)) continue;
-        if (mx === 6 || my === 6) continue;
-        if (rand() > 0.5) dot(mx, my);
-      }
-    }
-    ctx.globalAlpha = 1.0;
-
-    ctx.strokeStyle = '#1a5a3a';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x - 2, y - 2, size + 4, size + 4);
   }
 
-  _corners(ctx, x, y, w, h, color) {
-    const L = 25, T = 2;
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, L, T);           ctx.fillRect(x, y, T, L);
-    ctx.fillRect(x + w - L, y, L, T);   ctx.fillRect(x + w - T, y, T, L);
-    ctx.fillRect(x, y + h - T, L, T);   ctx.fillRect(x, y + h - L, T, L);
-    ctx.fillRect(x + w - L, y + h - T, L, T); ctx.fillRect(x + w - T, y + h - L, T, L);
+  // ─── Calculate apparent size of mesh on screen ───
+
+  _projectScale(camera, renderer) {
+    this._topVec.copy(this.mesh.position);
+    this._topVec.y += WORLD_H / 2;
+    this._botVec.copy(this.mesh.position);
+    this._botVec.y -= WORLD_H / 2;
+
+    this._topVec.project(camera);
+    this._botVec.project(camera);
+
+    const h = renderer.domElement.clientHeight;
+    const screenH = Math.abs(this._topVec.y - this._botVec.y) * 0.5 * h;
+    return screenH / CARD_PX_H;
   }
 
   // ════════════════════════════════════════════════════════════════
-  //  PUBLIC API
+  //  PUBLIC API (compatible with app.js)
   // ════════════════════════════════════════════════════════════════
 
-  /**
-   * Add both meshes to a Three.js scene.
-   */
   addToScene(scene) {
     scene.add(this.mesh);
-    scene.add(this.backMesh);
   }
 
-  /**
-   * Draw the card and reveal it.
-   * @param {Object} formData — { agentName, certificateId, accountType }
-   * @param {boolean} instant — skip fade-in animation
-   */
   show(formData, instant = false) {
+    this._ensureDOM();
     this.formData = formData;
-    this.rarity = this._computeRarity(formData.certificateId);
 
-    // Shader uniforms
-    [this.frontMat, this.backMat].forEach(m => {
-      m.uniforms.uIntensity.value = this.rarity.intensity;
-      m.uniforms.uAccent.value.set(...this.rarity.rgb);
+    const dna = new CardDNA(formData.agentName || 'agent');
+    const rarity = RARITIES[dna.rarity];
+    this.rarity = rarity;
+
+    // Render canvas
+    renderCard(this.canvas, formData.agentName || 'agent', dna, {
+      certId: formData.certificateId,
+      accountType: formData.accountType,
     });
 
-    // Draw both faces
-    this._drawFront(formData, this.rarity);
-    this._drawBack(formData, this.rarity);
-    this.frontTex.needsUpdate = true;
-    this.backTex.needsUpdate = true;
+    // Apply holo type CSS classes
+    this._applyHoloType(dna);
 
+    // Show hidden mesh for raycasting
     this.mesh.visible = true;
-    this.backMesh.visible = true;
+
+    // Show DOM card
+    this._visible = true;
+    this.cardWrap.style.display = '';
 
     if (instant) {
-      this.frontMat.uniforms.uOpacity.value = 1;
-      this.backMat.uniforms.uOpacity.value = 1;
-      return;
-    }
-
-    // Animated fade-in
-    const gsap = window.gsap;
-    if (gsap) {
-      const proxy = { o: 0 };
-      gsap.to(proxy, {
-        o: 1, duration: 1.2, ease: 'power2.out',
-        onUpdate: () => {
-          this.frontMat.uniforms.uOpacity.value = proxy.o;
-          this.backMat.uniforms.uOpacity.value = proxy.o;
-        },
-      });
+      this.cardWrap.style.opacity = '1';
     } else {
-      this.frontMat.uniforms.uOpacity.value = 1;
-      this.backMat.uniforms.uOpacity.value = 1;
+      // Fade in
+      this.cardWrap.style.opacity = '0';
+      this.cardWrap.style.transition = 'opacity 1.2s ease-out';
+      requestAnimationFrame(() => {
+        this.cardWrap.style.opacity = '1';
+      });
     }
   }
 
   /**
-   * Call every frame. Handles bob, tilt, and shader time.
+   * Call every frame via tv.onRender(). Handles bob, spring, and DOM positioning.
    * @param {number} dt — delta time in seconds
+   * @param {THREE.Camera} camera — from TV.js
+   * @param {THREE.WebGLRenderer} renderer — from TV.js
    */
-  update(dt) {
-    if (!this.mesh.visible) return;
+  update(dt, camera, renderer) {
+    if (!this.mesh.visible || !this._visible) return;
     this.time += dt;
 
-    // Shader time
-    this.frontMat.uniforms.uTime.value = this.time;
-    this.backMat.uniforms.uTime.value = this.time;
-
-    // Gentle bob
+    // Gentle vertical bob on the mesh (so projection follows)
     this.mesh.position.y = this.baseY + Math.sin(this.time * 0.8) * 0.04;
 
-    // Spring-lerp tilt toward pointer
-    this.currentTilt.x += (this.targetTilt.x - this.currentTilt.x) * 0.04;
-    this.currentTilt.y += (this.targetTilt.y - this.currentTilt.y) * 0.04;
+    // --- Spring physics (from card-lab-v2 animateHolo) ---
+    const s = this.spring;
+    const isActive = this._interacting;
+    const t = this.time;
 
-    this.mesh.rotation.x = this.currentTilt.y * 0.12;
-    this.mesh.rotation.y = this.baseRotY + this.currentTilt.x * 0.12;
+    // Idle sway when not interacting
+    if (!isActive) {
+      s.targetRotX = Math.sin(t * 0.3) * 1.5;
+      s.targetRotY = Math.cos(t * 0.25) * 2;
+      s.targetBgX = 50 + Math.sin(t * 0.2) * 3;
+      s.targetBgY = 50 + Math.cos(t * 0.15) * 3;
+      s.targetAngle = 130 + Math.sin(t * 0.1) * 10;
+    }
 
-    // Map tilt to shader pointer (0..1)
-    const px = 0.5 + this.currentTilt.x * 0.4;
-    const py = 0.5 - this.currentTilt.y * 0.4;
-    this.frontMat.uniforms.uPointer.value.set(px, py);
-    this.backMat.uniforms.uPointer.value.set(1.0 - px, py);
+    const lerpRate = isActive ? 0.15 : 0.04;
+    s.mx += (s.targetMx - s.mx) * lerpRate;
+    s.my += (s.targetMy - s.my) * lerpRate;
+    s.angle += (s.targetAngle - s.angle) * lerpRate;
+    s.bgX += (s.targetBgX - s.bgX) * lerpRate;
+    s.bgY += (s.targetBgY - s.bgY) * lerpRate;
+    s.rotX += (s.targetRotX - s.rotX) * lerpRate;
+    s.rotY += (s.targetRotY - s.rotY) * lerpRate;
+    s.opacity += (s.targetOpacity - s.opacity) * (isActive ? 0.12 : 0.06);
 
-    this._syncBack();
+    const pointerFromCenter = clamp(
+      Math.sqrt(Math.pow((s.mx - 50) / 50, 2) + Math.pow((s.my - 50) / 50, 2)),
+      0, 1
+    );
+
+    // Apply CSS custom properties (same as card-lab-v2)
+    const el = this.cardEl;
+    el.style.transform = `rotateX(${s.rotX.toFixed(2)}deg) rotateY(${s.rotY.toFixed(2)}deg)`;
+    el.style.setProperty('--mx', s.mx.toFixed(1) + '%');
+    el.style.setProperty('--my', s.my.toFixed(1) + '%');
+    el.style.setProperty('--angle', s.angle.toFixed(1) + 'deg');
+    el.style.setProperty('--bg-x', s.bgX.toFixed(1) + '%');
+    el.style.setProperty('--bg-y', s.bgY.toFixed(1) + '%');
+    el.style.setProperty('--card-opacity', s.opacity.toFixed(3));
+    el.style.setProperty('--pointer-from-center', pointerFromCenter.toFixed(3));
+    el.style.setProperty('--pointer-from-left', (s.mx / 100).toFixed(3));
+    el.style.setProperty('--pointer-from-top', (s.my / 100).toFixed(3));
+
+    // --- Position DOM card to match mesh projection ---
+    if (camera && renderer) {
+      const screen = this._projectToScreen(camera, renderer);
+      const scale = this._projectScale(camera, renderer);
+      this.cardWrap.style.left = screen.x + 'px';
+      this.cardWrap.style.top = screen.y + 'px';
+      this.cardWrap.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(4)})`;
+    }
   }
 
   /**
-   * Set pointer / tilt target from mouse or gyroscope.
-   * @param {number} nx — normalized X, -1 (left) to 1 (right)
-   * @param {number} ny — normalized Y, -1 (bottom) to 1 (top)
+   * Set pointer / tilt target from mouse or gyroscope (app.js compatibility).
+   * When the mouse is NOT directly over the card, this drives subtle ambient tilt.
    */
   setPointer(nx, ny) {
-    this.targetTilt.x = Math.max(-1, Math.min(1, nx));
-    this.targetTilt.y = Math.max(-1, Math.min(1, ny));
+    if (this._interacting) return; // Direct hover takes priority
+    // Map normalized (-1..1) to spring targets for gentle ambient response
+    const s = this.spring;
+    s.targetRotY = clamp(nx, -1, 1) * 3;
+    s.targetRotX = clamp(ny, -1, 1) * -3;
   }
 
-  /**
-   * Primary mesh (for raycasting, zoom calculations).
-   */
+  setVisible(visible) {
+    if (!this._domCreated) return;
+    this._visible = visible;
+    this.cardWrap.style.display = visible ? '' : 'none';
+    if (visible && this.formData) {
+      this.mesh.visible = true;
+    }
+  }
+
+  onClick(cb) {
+    this._clickCb = cb;
+  }
+
   getMesh() {
     return this.mesh;
   }
 
-  /**
-   * Export the front face as PNG data-URL.
-   */
   toPNG() {
-    return this.frontCanvas.toDataURL('image/png');
+    return this.canvas ? this.canvas.toDataURL('image/png') : '';
   }
 
-  /**
-   * Get computed rarity info.
-   */
   getRarity() {
     return this.rarity;
   }
 
-  /**
-   * Clean up Three.js resources.
-   */
   dispose() {
-    this.frontTex.dispose();
-    this.backTex.dispose();
-    this.frontMat.dispose();
-    this.backMat.dispose();
     this.mesh.geometry.dispose();
-    this.backMesh.geometry.dispose();
+    this.mesh.material.dispose();
+    if (this.cardWrap && this.cardWrap.parentNode) {
+      this.cardWrap.parentNode.removeChild(this.cardWrap);
+    }
   }
 }

@@ -1,28 +1,5 @@
-# OS
 .DS_Store
-Thumbs.db
-
-# Environment
 .env
-.env.*
-!.env.example
-
-# Dependencies
+.npmrc
 node_modules/
-
-# Build output
-dist/
-.vercel/
-
-# Supabase local
 supabase/.temp/
-
-# Logs
-*.log
-npm-debug.log*
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*~

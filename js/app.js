@@ -1,6 +1,6 @@
-import { TV } from './TV.js?v=15';
+import { TV } from './TV.js?v=21';
 import { AboutPoster } from './AboutPoster.js?v=15';
-import { HoloCard } from './HoloCard.js?v=15';
+import { HoloCard } from './HoloCard.js?v=23';
 import { insertRegistration } from './supabase.js?v=15';
 
 const gsap = window.gsap;
@@ -34,6 +34,8 @@ const cardCopyBtn = document.getElementById('cardCopyBtn');
 const cardShareTicker = document.getElementById('cardShareTicker');
 const appFavicon = document.getElementById('appFavicon');
 const agentMark = document.getElementById('agentMark');
+const terminalStatusBar = document.getElementById('terminalStatusBar');
+const terminalStatusText = document.getElementById('terminalStatusText');
 
 const tv = new TV(container, label);
 await tv.init();
@@ -41,6 +43,16 @@ await tv.init();
 const holoCard = new HoloCard();
 holoCard.addToScene(tv.getScene());
 tv.setCardMesh(holoCard.getMesh());
+
+// DOM card click → toggle zoom (card captures clicks when visible via CSS pointer-events)
+holoCard.onClick(() => {
+  if (tv.isCardZoomed) {
+    holoCard.setVisible(false);
+    tv.zoomOutFromCard();
+  } else if (holoCard.getMesh().visible) {
+    tv.zoomToCard();
+  }
+});
 
 const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
@@ -100,6 +112,26 @@ const mobileViewportQuery = window.matchMedia('(max-width: 767px)');
 const isCoarsePointer = () => coarsePointerQuery.matches;
 const isMobileViewport = () => mobileViewportQuery.matches;
 const CARD_FOCUS_SAMPLES = [[0, 0], [0.18, 0], [-0.18, 0], [0, 0.18], [0, -0.18]];
+
+function isCRTInteractive() {
+  return lastScrollProgress > 0.75 && tv.crt.bootPhase >= 2;
+}
+
+function scrollToTop() {
+  document.getElementById('scroller').scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function syncTerminalStatusBar() {
+  if (!terminalStatusBar) return;
+  const isSceneFocused = tv.isCardZoomed || tv.isAboutZoomed;
+  const isReading = tv.crt.bootPhase === 5 && tv.crt.reviewReading;
+  const mobileZoomed = isMobileViewport() && isCRTInteractive() && !isSceneFocused;
+  const shouldShow = isReading || mobileZoomed;
+  terminalStatusBar.hidden = !shouldShow;
+  if (terminalStatusText) {
+    terminalStatusText.textContent = isReading ? '\u2190 BACK' : '\u2191 ZOOM OUT';
+  }
+}
 
 function syncMobileUICompact(progress = lastScrollProgress) {
   const isSceneFocused = tv.isCardZoomed || tv.isAboutZoomed;
@@ -276,9 +308,27 @@ cardCopyBtn?.addEventListener('click', async (e) => {
   setCardShareTicker(copied ? 'Link copied' : 'Copy failed', copied ? 'ok' : 'warn');
 });
 
+terminalStatusBar?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const isReading = tv.crt.bootPhase === 5 && tv.crt.reviewReading;
+  if (isReading) {
+    tv.crt.handleReviewInput('Escape');
+  } else {
+    scrollToTop();
+  }
+});
+
+let prevCardZoomed = false;
 tv.onRender((dt) => {
-  holoCard.update(dt);
+  holoCard.update(dt, tv.camera, tv.renderer);
+  // Show DOM card when zoom-in transition detected
+  if (tv.isCardZoomed && !prevCardZoomed && holoCard.getMesh().visible) {
+    holoCard.setVisible(true);
+  }
+  prevCardZoomed = tv.isCardZoomed;
   syncCardShareBar();
+  syncTerminalStatusBar();
   syncMobileUICompact();
 });
 
@@ -291,6 +341,7 @@ function setAboutLinkActive(active) {
 function openAbout() {
   if (aboutPoster.visible) return;
   if (tv.isCardZoomed) {
+    holoCard.setVisible(false);
     tv.zoomOutFromCard();
     setTimeout(() => {
       if (aboutPoster.visible) return;
@@ -381,6 +432,45 @@ if (permalink) {
   }
 
   document.querySelector('.start-screen__footer')?.style.setProperty('display', 'none');
+}
+
+// ─── Demo mode: ?demo — rapid card testing without CRT form ────
+const demoMode = !permalink && new URLSearchParams(location.search).has('demo');
+if (demoMode) {
+  const { CardDNA, PALETTES, HOLOS, RARITIES, generateCertId } = await import('./card-draw.js?v=22');
+  const demoNames = [
+    'atlas','nova','cipher','echo','pulse','nexus','vortex','helix',
+    'prism','flux','orbit','quasar','zenith','onyx','spark','glitch',
+    'sonic','rune','axion','phantom','neon','vector','cosmic','ember',
+    'jade','terra','bolt','sable','drift','haze','comet','titan',
+  ];
+  const demoTypes = ['individual', 'organization', 'agent'];
+  let demoIdx = 0;
+  const showDemoCard = () => {
+    const name = demoNames[demoIdx % demoNames.length];
+    const type = demoTypes[demoIdx % demoTypes.length];
+    const certId = generateCertId(name);
+    const fakeData = {
+      agentName: name,
+      certificateId: certId,
+      accountType: type,
+    };
+    holoCard.show(fakeData, true);
+    const dna = new CardDNA(name);
+    const pal = PALETTES[dna.palette];
+    const holo = HOLOS[dna.holo];
+    const rar = RARITIES[dna.rarity];
+    console.log(`[demo] ${name}.agent — ${pal.name} / ${holo.name} / ${rar.name} / ${type} — Space for next`);
+    demoIdx++;
+  };
+  showDemoCard();
+  tv.jumpToCard();
+  window.addEventListener('keydown', (e) => {
+    if (e.key === ' ' && !tv.isAboutZoomed) {
+      e.preventDefault();
+      showDemoCard();
+    }
+  });
 }
 
 // Persist completion; no floating card/info panel
@@ -474,6 +564,7 @@ ScrollTrigger.create({
     if (window.innerWidth < 768) label.classList.add('hidden');
     lastScrollProgress = Math.min(progress, 0.95);
     document.body.classList.toggle('scrolled', lastScrollProgress > 0.02);
+    document.documentElement.style.setProperty('--scroll-progress', lastScrollProgress);
     tv.animateCameraPosition(lastScrollProgress);
     syncMobileUICompact(lastScrollProgress);
   }
@@ -497,7 +588,7 @@ window.addEventListener('pointerdown', (e) => {
   syncAboutHover(e.clientX, e.clientY);
 });
 
-let aboutTouchY = null;
+let touchDragY = null;
 window.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
   if (!t) return;
@@ -505,31 +596,50 @@ window.addEventListener('touchstart', (e) => {
   updatePointer(t.clientX, t.clientY);
   aboutPoster.clearHoveredLink();
   if (aboutCursorHost) aboutCursorHost.style.cursor = '';
-  if (aboutPoster.visible) aboutTouchY = t.clientY;
+  // Track Y for drag-scroll in reading mode or about poster
+  if ((tv.crt.bootPhase === 5 && tv.crt.reviewReading) || aboutPoster.visible) {
+    touchDragY = t.clientY;
+  }
 }, { passive: true });
 
 window.addEventListener('wheel', (e) => {
+  // Scroll CRT reading view (terms/charter)
+  if (tv.crt.bootPhase === 5 && tv.crt.reviewReading) {
+    tv.crt.handleReviewInput(e.deltaY > 0 ? 'ArrowDown' : 'ArrowUp');
+    e.preventDefault();
+    return;
+  }
   if (!aboutPoster.visible) return;
   aboutPoster.scrollBy(e.deltaY);
   e.preventDefault();
 }, { passive: false });
 
 window.addEventListener('touchmove', (e) => {
-  if (!aboutPoster.visible) return;
   const t = e.touches[0];
   if (!t) return;
-  if (aboutTouchY === null) {
-    aboutTouchY = t.clientY;
+
+  // Reading mode: touch-drag scrolls CRT reading content
+  if (tv.crt.bootPhase === 5 && tv.crt.reviewReading) {
+    if (touchDragY === null) { touchDragY = t.clientY; return; }
+    const delta = touchDragY - t.clientY;
+    touchDragY = t.clientY;
+    if (Math.abs(delta) > 2) {
+      tv.crt.handleReviewInput(delta > 0 ? 'ArrowDown' : 'ArrowUp');
+    }
+    e.preventDefault();
     return;
   }
-  const delta = aboutTouchY - t.clientY;
-  aboutTouchY = t.clientY;
+
+  if (!aboutPoster.visible) return;
+  if (touchDragY === null) { touchDragY = t.clientY; return; }
+  const delta = touchDragY - t.clientY;
+  touchDragY = t.clientY;
   aboutPoster.scrollBy(delta * 1.2);
   e.preventDefault();
 }, { passive: false });
 
 window.addEventListener('touchend', () => {
-  aboutTouchY = null;
+  touchDragY = null;
 });
 
 window.addEventListener('click', (e) => {
@@ -567,6 +677,7 @@ window.addEventListener('click', (e) => {
     return;
   }
   if (intersects.includes('button')) {
+    if (isCRTInteractive()) return;
     tv.toggleNightModeTV();
     applyOuterUITheme(tv.isNightMode);
     return;
@@ -649,6 +760,7 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === 'Escape' && tv.isCardZoomed) {
     e.preventDefault();
+    holoCard.setVisible(false);
     tv.zoomOutFromCard();
     return;
   }

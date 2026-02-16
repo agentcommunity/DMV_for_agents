@@ -1,6 +1,43 @@
-# HoloCard — Holographic Agent Identity Card
+# Card System — Agent Identity Card
 
-The holographic card is the certificate issued to agents after registration at the DMV (Department of Machine Verification). It's a Three.js `ShaderMaterial` with custom GLSL that creates real-time holographic effects — rainbow iridescence, foil lines, glare tracking, sparkle, and fresnel edge glow.
+The holographic card is the certificate issued to agents after pre-registration at the DMV (Department of Machine Verification). It uses a deterministic rendering pipeline — same name always produces the same card — with CSS holographic overlays (pokemon-cards-css style) for the interactive holo effect.
+
+**CARD_VERSION: 2** — Landscape 880x630, CSS holo overlays, CardDNA system.
+
+## Architecture
+
+```
+card-draw.js (Single Source of Truth)
+├── CardDNA — deterministic trait computation from agent name
+├── renderCard() — Canvas2D landscape renderer (880x630)
+├── serializeCard() / renderFromSerialized() — save/load
+└── Shared: PALETTES, BORDERS, PATTERNS, HOLOS, RARITIES
+
+HoloCard.js (Browser — DOM overlay)
+├── DOM card: <canvas> + 4 CSS holo overlays (shine, glare, foil, sparkle)
+├── Spring physics: tilt, idle sway, ambient response
+├── Hidden Three.js mesh for TV.js raycasting & zoom
+├── World-to-screen projection for DOM positioning
+└── API: show(), update(), setPointer(), onClick(), toPNG()
+
+card-lab-v2.html (Standalone gallery/lab)
+├── Same renderCard() from card-draw.js
+├── Own inline CSS holo system (.card class)
+├── Gallery UI with controls for holo type, palette, etc.
+└── Reference implementation for holo effects
+
+api/card-renderer.js (Server — Node.js port)
+├── @napi-rs/canvas (Skia-based)
+├── Identical CardDNA + renderCard() layout
+├── Used by Vercel serverless for badge images
+└── Must stay aligned with card-draw.js
+
+api/og.js (OG Image — Vercel Edge)
+├── @vercel/og (Satori renderer, not Canvas)
+├── Simplified layout (no full card render)
+├── Same CardDNA hashing for palette/rarity/holo
+└── 1200x630 PNG for social sharing
+```
 
 ## Quick Usage
 
@@ -10,17 +47,16 @@ import { HoloCard } from './js/HoloCard.js';
 const card = new HoloCard();
 card.addToScene(scene);
 
-// Show with data
 card.show({
   agentName: 'myagent',
   certificateId: 'NOVA-A1B-2C3X',
   accountType: 'individual',
 });
 
-// In render loop — drives bob, tilt, and shader time
-card.update(deltaTime);
+// In render loop — pass camera + renderer for DOM positioning
+card.update(deltaTime, camera, renderer);
 
-// Feed mouse position for tilt (-1..1 range)
+// Mouse position for ambient tilt (-1..1 range)
 card.setPointer(normalizedX, normalizedY);
 ```
 
@@ -28,15 +64,17 @@ card.setPointer(normalizedX, normalizedY);
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `new HoloCard(options?)` | instance | Create card. Options: `position`, `rotationY`, `fontFamily` |
-| `addToScene(scene)` | void | Add front + back meshes to a Three.js scene |
-| `show(formData, instant?)` | void | Draw card content, compute rarity, reveal (GSAP fade or instant) |
-| `update(dt)` | void | Frame update: shader time, bob animation, spring tilt, back mesh sync |
-| `setPointer(nx, ny)` | void | Set tilt target from mouse/gyro. Range: -1 (left/down) to 1 (right/up) |
-| `getMesh()` | THREE.Mesh | Front mesh — use for raycasting and zoom calculations |
-| `toPNG()` | string | Export front face as PNG data-URL |
-| `getRarity()` | object | `{ name, pct, intensity, accent, rgb }` |
-| `dispose()` | void | Clean up textures, materials, geometries |
+| `new HoloCard(options?)` | instance | Create card. Options: `position`, `rotationY` |
+| `addToScene(scene)` | void | Add hidden mesh to Three.js scene |
+| `show(formData, instant?)` | void | Render card canvas, create DOM overlay, apply holo type |
+| `update(dt, camera, renderer)` | void | Frame update: bob, spring physics, DOM positioning |
+| `setPointer(nx, ny)` | void | Ambient tilt from mouse/gyro (-1..1) |
+| `getMesh()` | THREE.Mesh | Hidden mesh for raycasting and zoom |
+| `setVisible(bool)` | void | Show/hide DOM card overlay |
+| `onClick(cb)` | void | Card click handler (DOM events) |
+| `toPNG()` | string | Export canvas as PNG data-URL |
+| `getRarity()` | object | Rarity tier object |
+| `dispose()` | void | Clean up mesh + DOM |
 
 ### formData shape
 
@@ -44,178 +82,176 @@ card.setPointer(normalizedX, normalizedY);
 {
   agentName: string,       // "myagent" (displayed as "myagent.agent")
   certificateId: string,   // "NOVA-A1B-2C3X"
-  accountType?: string,    // "individual" | "org"  (default: "individual")
+  accountType?: string,    // "individual" | "organization" | "agent"
 }
 ```
 
-## Architecture
+## Card DNA
 
-```
-HoloCard
-├── frontCanvas (630x880)  →  frontTex (CanvasTexture)  →  frontMat (ShaderMaterial)  →  mesh
-├── backCanvas  (630x880)  →  backTex  (CanvasTexture)  →  backMat  (ShaderMaterial)  →  backMesh
-└── animation state (time, tilt, bob)
-```
+Every card trait is deterministically derived from the agent name via `fnv1a()` hash + `mixHash()` salts. Same name always produces the same card — no database needed.
 
-Both meshes use the same GLSL shader. The back mesh is synced to the front mesh's position/rotation + PI on Y-axis.
-
-## Holographic Shader
-
-The shader composites multiple effect layers onto the base card texture:
-
-### 1. Rainbow Iridescence
-View-angle dependent rainbow. The hue shifts as the card tilts relative to the camera:
-```glsl
-float phase = vUv.x * 2.5 + vUv.y * 1.8 + viewAngle * 4.0 + time * 0.08;
-vec3 rainbow = hsv2rgb(fract(phase), 0.75, 1.0);
+```javascript
+import { CardDNA } from './js/card-draw.js';
+const dna = new CardDNA('nexus-7');
+// dna.palette   → 0..7  (Terminal, Cyberpunk, Golden, Ocean, Volcanic, Arctic, Void, Ember)
+// dna.border    → 0..3  (Clean, Circuit, Filigree, Glitch)
+// dna.pattern   → 0..3  (Grid, Hex, Topo, Crosshatch)
+// dna.holo      → 0..3  (Rainbow, Prism, Aurora, Duochrome)
+// dna.rarity    → 0..3  (Standard, Enhanced, Rare, Legendary)
 ```
 
-### 2. Foil Line Pattern
-Horizontal + diagonal lines that shift with view angle, simulating embossed holographic foil:
-```glsl
-float hLines = sin(vUv.y * 180.0 + viewAngle * 35.0);  // horizontal
-float dLines = sin((vUv.x + vUv.y) * 100.0 + viewAngle * 25.0);  // diagonal
-```
+### Hash Salts (must be identical across all renderers)
 
-### 3. Glare Spotlight
-Radial brightness hotspot that follows the pointer position:
-```glsl
-float glare = pow(max(1.0 - length(vUv - uPointer), 0.0), 4.0);
-```
+| Trait | Salt | Modulus |
+|-------|------|---------|
+| palette | `0x9e3779b9` | 8 |
+| border | `0x517cc1b7` | 4 |
+| pattern | `0x6c62272e` | 4 |
+| holo | `0x2e1b2138` | 4 |
+| rarity | `0x27d4eb2f` | 100 |
 
-### 4. Fresnel Edge Glow
-Edges glow brighter (like real cards catching light at grazing angles):
-```glsl
-float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
-```
+## Holo Effect System
 
-### 5. Sparkle Noise
-Procedural noise creates glitter-like sparkle points:
-```glsl
-float sp = noise(uv * 50 + time) * noise(uv * 70 - time);
-sp = pow(max(sp, 0.0), 5.0) * 4.0;
-```
+The holo effect uses CSS overlays, not GLSL shaders. Four overlay divs sit on top of the card canvas:
 
-### 6. Color Dodge Blending
-All layers are composited using color-dodge blend (same technique as Pokemon holo cards CSS):
-```glsl
-vec3 result = base / (1.0 - overlay);
-```
+| Overlay | Blend Mode | Effect |
+|---------|-----------|--------|
+| `.card-shine` | `color-dodge` | Rainbow/prismatic gradient that shifts with pointer |
+| `.card-glare` | `overlay` | Radial light hotspot following pointer |
+| `.card-foil` | `overlay` | Fine diagonal line pattern |
+| `.card-sparkle` | `color-dodge` | Radial sparkle at pointer position |
 
-### Shader Uniforms
+### Holo Types
 
-| Uniform | Type | Description |
-|---------|------|-------------|
-| `uCard` | sampler2D | Card face canvas texture |
-| `uTime` | float | Elapsed time (seconds) |
-| `uPointer` | vec2 | Pointer position in UV space (0..1) |
-| `uIntensity` | float | Holographic effect strength (set by rarity) |
-| `uAccent` | vec3 | Rarity accent color (linear RGB) |
-| `uOpacity` | float | Fade-in opacity (0..1) |
+| Type | CSS Class | Visual |
+|------|-----------|--------|
+| Rainbow | (default) | Repeating rainbow `linear-gradient` at `--angle` |
+| Prism | `.holo-prism` | `conic-gradient` from pointer position |
+| Aurora | `.holo-aurora` | Northern-lights style with greens/purples |
+| Duochrome | `.holo-duochrome` | Two-color shift using palette primary + accent |
+
+### CSS Custom Properties (driven by spring physics)
+
+| Property | Range | Drives |
+|----------|-------|--------|
+| `--mx`, `--my` | 0–100% | Pointer position (shine/glare center) |
+| `--angle` | degrees | Gradient rotation |
+| `--bg-x`, `--bg-y` | % | Background shift |
+| `--card-opacity` | 0–1 | Holo overlay intensity |
+| `--pointer-from-center` | 0–1 | Distance from center (sparkle/glare intensity) |
+| `--holo-intensity` | 0–1 | Set by rarity tier |
 
 ## Rarity System
 
-Rarity is deterministic — computed from `fnv1a(certificateId) % 100`:
+Computed from `mixHash(fnv1a(name), 0x27d4eb2f) % 100`:
 
-| Rarity | Roll | Intensity | Accent Color | Visual |
-|--------|------|-----------|-------------|--------|
-| STANDARD | 0-59 (60%) | 0.25 | Green `#33ff88` | Subtle shimmer |
-| ENHANCED | 60-84 (25%) | 0.45 | Cyan `#33ddff` | Noticeable rainbow |
-| RARE | 85-94 (10%) | 0.65 | Gold `#ffaa33` | Strong prismatic |
-| LEGENDARY | 95-99 (5%) | 0.85 | Magenta `#ff44ff` | Maximum sparkle |
+| Rarity | Roll | Drop Rate | Intensity | Stars | Visual |
+|--------|------|-----------|-----------|-------|--------|
+| STANDARD | 0–49 | 50% | 0.35 | 40 | Subtle shimmer |
+| ENHANCED | 50–79 | 30% | 0.55 | 70 | Noticeable rainbow |
+| RARE | 80–94 | 15% | 0.75 | 100 | Strong prismatic + seal |
+| LEGENDARY | 95–99 | 5% | 0.95 | 150 | Maximum sparkle + seal |
 
-Rarity affects: border color, holo intensity, accent glow, rarity badge text, shader sparkle strength.
+Rarity affects: holo intensity, star field density, rarity badge, rarity seal (RARE+).
 
-## Card Design
+## Card Layout (Landscape 880x630)
 
-### Front Face
 ```
-┌─ ─────────────────────────── ─┐
-│  DEPT. OF MACHINE VERIFICATION │  header
-│─────────────────────────────── │
-│                                │
-│      ┌──────────────────┐      │
-│      │  9x9 IDENTICON   │      │  unique per agent (4-fold symmetric)
-│      │  (generated art)  │      │
-│      └──────────────────┘      │
-│                                │
-│  agentname.agent               │  name (with glow)
-│  ─────────────────────────     │
-│  CERTIFICATE ID                │
-│  NOVA-A1B-2C3X                 │  cert ID (with accent glow)
-│                                │
-│  TYPE         STATUS           │
-│  INDIVIDUAL   ● VERIFIED       │
-│                                │
-│  ┌──────┐    ISSUED 2025.02.08 │
-│  │ QR   │    EXPIRES NEVER     │
-│  │ CODE │                      │
-│  └──────┘    ★ RARE ★          │  rarity badge
-│─────────────────────────────── │
-│  dmv.agentcommunity.org        │  footer
-└─ ─────────────────────────── ─┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  ┌──────────┐  │  [chip] DEPT. OF MACHINE VERIFICATION    [RARE]  │
+│  │          │  │  ────────────────────────────────────────────     │
+│  │ IDENTICON│  │                                                   │
+│  │  190x190 │  │  agentname.agent                                  │
+│  │          │  │                                                   │
+│  └──────────┘  │  CERTIFICATE ID                                   │
+│                │  NOVA-A1B-2C3X                                    │
+│                │  |||||||||||||||||||                               │
+│                │  ─────────────────────────────────                │
+│  ┌──────┐      │  TYPE       STATUS      PROTOCOL                 │
+│  │  QR  │      │  INDIV.     ● VERIFIED  AID/1.0                  │
+│  │ CODE │      │                                                   │
+│  └──────┘      │  ISSUED     EXPIRES     REGISTRY                 │
+│  VERIFY        │  2026.02    NEVER       .agent        (seal)     │
+│─ ────────── ─ ─│─ ──────────────────────────────────── ─ ─ ─ ─ ──│
+│  |||||||||||||  │                    dmv.agentcommunity.org        │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-- Background: subtle circuit grid pattern
-- Corner bracket decorations (HUD-style)
-- Double-border (accent + dim)
-- CRT scanline overlay
+## Card Versioning & Serialization
 
-### Back Face
-- Large "DMV" watermark
-- Terms of verification text
-- Machine Readable Zone (passport-style MRZ)
-- Diamond divider with accent color
-- Dot matrix background pattern
+Cards include a version number so they can be reproduced even if the renderer changes.
 
-### Identicon
-9x9 grid with 4-fold symmetry, generated from `fnv1a(agentName)`. Each agent gets a unique geometric pattern. This area is designed to be replaceable with AI-generated art in the future.
+```javascript
+import { serializeCard, renderFromSerialized, CARD_VERSION } from './js/card-draw.js';
 
-### QR Pattern
-21x21 module QR-like pattern (v1 layout) with proper finder patterns in 3 corners and timing patterns. Data area filled deterministically from cert ID hash. Currently decorative — not scannable.
+// Serialize a card to JSON
+const json = serializeCard('nexus-7', { certId: 'MESA-DD6-660J', accountType: 'individual' });
+// → { v: 2, name: 'nexus-7', certId: '...', accountType: 'individual',
+//    dna: { palette: 0, border: 2, pattern: 1, holo: 3, rarity: 1 },
+//    holoType: 'duochrome', rarityName: 'ENHANCED', paletteName: 'Terminal' }
+
+// Render from saved JSON
+renderFromSerialized(canvas, json);
+```
+
+The `v` field tracks which renderer version produced the card. If `CARD_VERSION` is bumped (layout changes), old serialized cards can still be identified.
 
 ## Animation
 
 ### Bob
-Gentle vertical float: `sin(time * 0.8) * 0.04` world units.
+Gentle vertical float on the hidden mesh: `sin(time * 0.8) * 0.04` world units. The DOM card follows via projection.
 
-### Tilt
-Spring-interpolated rotation toward pointer:
-- Lerp factor: `0.04` (smooth, slightly laggy feel)
-- Max rotation: `0.12` radians (~7 degrees)
-- Pointer mapped to shader UV for synchronized glare movement
+### Spring Tilt
+Spring-interpolated rotation toward pointer (from card-lab-v2):
+- **Active** (mouse over card): lerp rate `0.15`, rotX/Y up to ±20°
+- **Idle** (mouse away): lerp rate `0.04`, gentle sway `sin/cos` rotation ±1.5°
+- Pointer position drives CSS custom properties for synchronized holo movement
 
 ### Fade-in
-GSAP-animated opacity from 0 to 1 over 1.2s (if GSAP available, otherwise instant).
+CSS opacity transition from 0 to 1 over 1.2s on the DOM wrapper.
+
+## Rendering Pipeline
+
+| Context | Renderer | Holo |
+|---------|----------|------|
+| Main site (`?demo`, CRT form) | HoloCard.js → card-draw.js → DOM + CSS overlays | CSS holo (shine/glare/foil/sparkle) |
+| Card lab (`card-lab-v2.html`) | Inline JS → card-draw.js → DOM + CSS overlays | CSS holo (own `.card` class) |
+| Server (badge API) | api/card-renderer.js → @napi-rs/canvas | None (static PNG) |
+| OG image (social share) | api/og.js → @vercel/og Satori | None (simplified layout) |
+
+## Keeping Renderers Aligned
+
+Three files must stay in sync:
+
+| File | Format | Must Match |
+|------|--------|------------|
+| `js/card-draw.js` | ES module (browser) | Source of truth |
+| `api/card-renderer.js` | CommonJS (Node.js) | Same CardDNA, same layout, same CARD_VERSION |
+| `api/og.js` | Edge function | Same CardDNA hashing (palette/rarity/holo) |
+
+When changing card rendering:
+1. Update `js/card-draw.js` first
+2. Bump `CARD_VERSION`
+3. Port changes to `api/card-renderer.js`
+4. Update `api/og.js` if DNA/rarity logic changed
+5. Update this document
 
 ## Permalink Flow
 
 ```
 User arrives at /c/CERT-ID/agent-name
   → Card shown instantly (jumpToCard)
-  → Camera zoomed to card face
+  → Camera zoomed to card, DOM card positioned via projection
   → "Get Yours" overlay at bottom
-  → Click card or anywhere → smooth zoom out to full scene (z=20)
-  → User can scroll down to register their own agent
+  → Click card → smooth zoom out
   → Escape key also unzooms
 ```
-
-## Reusing in Other Projects
-
-HoloCard is self-contained. To use in another Three.js project:
-
-1. Copy `js/HoloCard.js` into your project
-2. Import and instantiate — only needs `three` in your importmap
-3. Call `addToScene()`, `show()`, `update()`, `setPointer()` as needed
-4. GSAP is optional (used for fade-in only, falls back to instant)
-5. Font falls back to `"SF Mono", "Fira Code", "Courier New", monospace` if PPSupplyMono is unavailable
 
 ## Future Enhancements
 
 - Scannable QR code (requires QR encoding library)
-- AI-generated art in the identicon area (per-agent unique illustration)
-- Night mode color scheme response
-- Higher-res OG image export (separate render at 1200x1680)
+- AI-generated art in the identicon area
 - Animated entrance (card dealt in from off-screen)
-- Touch/drag rotation on mobile
+- Card flip animation (back face)
 - Particle effects for LEGENDARY rarity
+- Mobile gyroscope tilt via `setPointer()`

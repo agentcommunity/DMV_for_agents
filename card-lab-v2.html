@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Card Lab V2 · DMV</title>
+  <style>
+    @font-face {
+      font-family: 'PPSupplyMono';
+      src: url('fonts/PPSupplyMono-Regular.otf') format('opentype');
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0e0e0e;
+      color: #999;
+      font-family: 'PPSupplyMono', 'SF Mono', 'Fira Code', monospace;
+      min-height: 100vh;
+    }
+    header {
+      text-align: center;
+      padding: 40px 20px 20px;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    header h1 { font-size: 24px; color: #fff; letter-spacing: 8px; }
+    header p { font-size: 11px; color: #444; margin-top: 8px; }
+
+    .preview {
+      display: flex;
+      gap: 40px;
+      max-width: 1100px;
+      margin: 40px auto;
+      padding: 0 20px;
+      align-items: flex-start;
+    }
+    .card-wrap {
+      flex-shrink: 0;
+      perspective: 800px;
+      position: relative;
+    }
+    .card-wrap::after {
+      content: '';
+      position: absolute;
+      inset: -80px;
+      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.1)), transparent 70%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    .card {
+      width: 616px;
+      height: 440px;
+      position: relative;
+      transform-style: preserve-3d;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      will-change: transform;
+      background: #050505;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 1px rgba(255,255,255,0.1);
+      touch-action: none; /* enable touch tilt on mobile */
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .card canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* ── Holo Overlays — light-reactive (pokemon-cards-css style) ── */
+    .card {
+      --mx: 50%;
+      --my: 50%;
+      --angle: 130deg;
+      --card-opacity: 0;
+      --pointer-from-center: 0;
+      --pointer-from-left: 0.5;
+      --pointer-from-top: 0.5;
+      --bg-x: 50%;
+      --bg-y: 50%;
+    }
+
+    .card-shine, .card-glare, .card-foil, .card-sparkle {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* ── SHINE: rainbow holo, only visible when light hits ── */
+    .card-shine {
+      background-image:
+        /* Rainbow spectrum, oversized for parallax shift */
+        repeating-linear-gradient(
+          var(--angle, 130deg),
+          hsla(0,90%,60%,.4), hsla(50,90%,55%,.3),
+          hsla(100,90%,55%,.4), hsla(150,90%,55%,.3),
+          hsla(200,90%,60%,.4), hsla(250,90%,55%,.3),
+          hsla(300,90%,55%,.4), hsla(340,90%,55%,.3),
+          hsla(360,90%,60%,.4)
+        ),
+        /* Scanline texture for foil grain */
+        repeating-linear-gradient(
+          90deg,
+          rgba(0,0,0,0.2) 0px, rgba(0,0,0,0.2) 1px,
+          transparent 1px, transparent 3px
+        );
+      background-size: 400% 400%, cover;
+      /* Parallax: bg position shifts with pointer */
+      background-position:
+        calc(((50% - var(--bg-x)) * 2.6) + 50%) calc(((50% - var(--bg-y)) * 3.5) + 50%),
+        center center;
+      background-blend-mode: overlay;
+      mix-blend-mode: color-dodge;
+      filter: brightness(calc((var(--pointer-from-center) * 0.5) + 0.4))
+              contrast(2.5) saturate(0.7);
+      opacity: var(--card-opacity);
+      transition: opacity 0.4s ease;
+    }
+    /* Shine after: radial spotlight from pointer position */
+    .card-shine::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(
+        farthest-corner circle at var(--mx) var(--my),
+        hsla(0, 0%, 100%, 0.3) 5%,
+        hsla(0, 0%, 100%, 0.1) 25%,
+        transparent 60%
+      );
+      mix-blend-mode: overlay;
+      opacity: var(--card-opacity);
+    }
+
+    /* ── Prism: conic rainbow centered on pointer ── */
+    .holo-prism .card-shine {
+      background-image:
+        conic-gradient(
+          from var(--angle, 0deg) at var(--mx, 50%) var(--my, 50%),
+          hsla(0,90%,55%,.5), hsla(60,90%,55%,.35),
+          hsla(120,90%,55%,.5), hsla(180,90%,55%,.35),
+          hsla(240,90%,55%,.5), hsla(300,90%,55%,.35),
+          hsla(360,90%,55%,.5)
+        ),
+        repeating-linear-gradient(
+          90deg,
+          rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px,
+          transparent 1px, transparent 3px
+        );
+      background-size: cover, cover;
+      background-position: center, center;
+    }
+
+    /* ── Aurora: horizontal color bands ── */
+    .holo-aurora .card-shine {
+      background-image:
+        linear-gradient(
+          calc(170deg + var(--angle, 0deg) * 0.15),
+          hsla(120,80%,45%,.45) 0%, hsla(160,85%,50%,.3) 20%,
+          hsla(190,90%,55%,.35) 40%, transparent 55%,
+          hsla(260,75%,50%,.3) 70%, hsla(290,70%,45%,.25) 85%,
+          transparent 100%
+        ),
+        repeating-linear-gradient(
+          90deg,
+          rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 1px,
+          transparent 1px, transparent 4px
+        );
+      background-size: 300% 300%, cover;
+      background-position:
+        calc(((50% - var(--bg-x)) * 1.8) + 50%) calc(((50% - var(--bg-y)) * 2.0) + 50%),
+        center center;
+    }
+
+    /* ── Duochrome: two-color shift ── */
+    .holo-duochrome .card-shine {
+      background-image:
+        linear-gradient(
+          var(--angle, 130deg),
+          var(--duo-1, hsla(320,80%,50%,.5)) 0%,
+          transparent 25%, transparent 75%,
+          var(--duo-2, hsla(180,80%,50%,.5)) 100%
+        ),
+        repeating-linear-gradient(
+          calc(var(--angle, 0deg) + 45deg),
+          transparent 0px, transparent 2px,
+          rgba(255,255,255,0.05) 2px, rgba(255,255,255,0.05) 3px
+        );
+      background-size: 300% 300%, cover;
+      background-position:
+        calc(((50% - var(--bg-x)) * 3.0) + 50%) calc(((50% - var(--bg-y)) * 3.0) + 50%),
+        center center;
+    }
+
+    /* ── GLARE: white spotlight following pointer (the "light source") ── */
+    .card-glare {
+      background: radial-gradient(
+        farthest-corner circle at var(--mx, 50%) var(--my, 50%),
+        hsla(0, 0%, 100%, 0.7) 5%,
+        hsla(0, 0%, 100%, 0.5) 15%,
+        hsla(0, 0%, 100%, 0.1) 35%,
+        hsla(0, 0%, 0%, 0.3) 80%
+      );
+      mix-blend-mode: overlay;
+      /* Opacity = interaction state * (base + distance factor) */
+      opacity: calc(var(--card-opacity) * (0.25 + var(--pointer-from-center) * 0.6));
+      transition: opacity 0.35s ease;
+    }
+
+    /* ── FOIL: fine holographic lines ── */
+    .card-foil {
+      background:
+        repeating-linear-gradient(
+          calc(var(--angle, 0deg) + 90deg),
+          transparent 0px, transparent 2px,
+          rgba(255,255,255,0.06) 2px, rgba(255,255,255,0.06) 3px
+        ),
+        repeating-linear-gradient(
+          calc(var(--angle, 0deg)),
+          transparent 0px, transparent 4px,
+          rgba(255,255,255,0.02) 4px, rgba(255,255,255,0.02) 5px
+        );
+      mix-blend-mode: overlay;
+      opacity: calc(var(--card-opacity) * 0.8);
+      transition: opacity 0.4s ease;
+    }
+
+    /* ── SPARKLE: animated noise overlay for legendary ── */
+    .card-sparkle {
+      background-image: radial-gradient(
+        circle at var(--mx, 50%) var(--my, 50%),
+        hsla(0, 0%, 100%, 0.15) 0%,
+        transparent 50%
+      );
+      mix-blend-mode: color-dodge;
+      opacity: calc(var(--card-opacity) * var(--pointer-from-center) * var(--holo-intensity, 0.5));
+      transition: opacity 0.3s ease;
+    }
+
+    /* ── Controls ── */
+    .controls {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
+    .ctrl-group {
+      background: #151515;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .ctrl-group label {
+      display: block;
+      font-size: 9px;
+      color: #555;
+      letter-spacing: 3px;
+      margin-bottom: 6px;
+    }
+    .input-row { display: flex; gap: 6px; }
+    .input-row input {
+      flex: 1;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      outline: none;
+    }
+    .input-row input:focus { border-color: #555; }
+    .btn-icon {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      font-size: 16px;
+      width: 34px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-icon:hover { background: #252525; color: #fff; }
+    .pal-grid { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pal-btn {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s;
+    }
+    .pal-btn:hover { transform: scale(1.15); }
+    .pal-btn.active { border-color: #fff; transform: scale(1.15); }
+    .opt-row { display: flex; gap: 4px; flex-wrap: wrap; }
+    .opt-btn {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      color: #777;
+      font-family: inherit;
+      font-size: 10px;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .opt-btn:hover { background: #252525; color: #ccc; }
+    .opt-btn.active { background: #222; border-color: #555; color: #fff; }
+    .btn-randomize {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      letter-spacing: 2px;
+      transition: all 0.15s;
+    }
+    .btn-randomize:hover { background: #252525; color: #fff; border-color: #555; }
+    .dna-readout {
+      background: #0a0a0a;
+      border: 1px solid #1a1a1a;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 10px;
+      color: #555;
+      line-height: 1.8;
+    }
+    .dna-readout span { color: #888; }
+
+    /* ── Gallery ── */
+    .gallery {
+      max-width: 1200px;
+      margin: 60px auto;
+      padding: 0 20px 60px;
+    }
+    .gallery h2 { font-size: 14px; color: #fff; letter-spacing: 6px; text-align: center; }
+    .gallery-sub { font-size: 10px; color: #444; text-align: center; margin: 8px 0 30px; }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(308px, 1fr));
+      gap: 30px;
+      justify-items: center;
+    }
+    .gallery-item { perspective: 600px; cursor: pointer; position: relative; }
+    .gallery-item::after {
+      content: '';
+      position: absolute;
+      inset: -30px;
+      background: radial-gradient(circle, var(--card-glow, rgba(51,255,136,0.06)), transparent 70%);
+      pointer-events: none;
+      z-index: -1;
+      transition: opacity 0.3s;
+      opacity: 0.5;
+    }
+    .gallery-item:hover::after { opacity: 1; }
+    .gallery-card {
+      width: 308px; height: 220px;
+      transition: box-shadow 0.3s;
+    }
+    .gallery-card:hover {
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6), 0 0 20px var(--card-glow, rgba(51,255,136,0.12));
+    }
+    .gallery-label {
+      font-size: 9px; color: #555; text-align: center;
+      margin-top: 8px; letter-spacing: 1px; transition: color 0.3s;
+    }
+    .gallery-item:hover .gallery-label { color: #888; }
+    @keyframes cardFlip {
+      0% { transform: rotateY(0); }
+      50% { transform: rotateY(90deg) scale(0.95); }
+      100% { transform: rotateY(0); }
+    }
+    .card.flipping { animation: cardFlip 0.5s ease-in-out; }
+    @media (max-width: 720px) {
+      .preview { flex-direction: column; align-items: center; }
+      .controls { width: 100%; max-width: 400px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>CARD LAB V2</h1>
+  <p>Landscape Card Generator &middot; Department of Machine Verification</p>
+</header>
+
+<main>
+  <section class="preview">
+    <div class="card-wrap">
+      <div class="card" id="mainCard">
+        <canvas id="mainCanvas" width="880" height="630"></canvas>
+        <div class="card-shine"></div>
+        <div class="card-glare"></div>
+        <div class="card-foil"></div>
+        <div class="card-sparkle"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="ctrl-group">
+        <label>AGENT NAME</label>
+        <div class="input-row">
+          <input type="text" id="nameInput" value="nexus-7" spellcheck="false">
+          <button class="btn-icon" id="btnRandName" title="Random name">&#x27F3;</button>
+        </div>
+      </div>
+      <div class="ctrl-group">
+        <label>PALETTE</label>
+        <div class="pal-grid" id="palSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>BORDER</label>
+        <div class="opt-row" id="borderSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>PATTERN</label>
+        <div class="opt-row" id="patternSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>HOLO EFFECT</label>
+        <div class="opt-row" id="holoSel"></div>
+      </div>
+      <div class="ctrl-group">
+        <label>RARITY</label>
+        <div class="opt-row" id="raritySel"></div>
+      </div>
+      <button class="btn-randomize" id="btnRandomize">&#x27F3; RANDOMIZE ALL</button>
+      <div class="dna-readout" id="dnaReadout"></div>
+    </div>
+  </section>
+
+  <section class="gallery">
+    <h2>GALLERY</h2>
+    <p class="gallery-sub">Each agent gets unique traits. Click to preview.</p>
+    <div class="gallery-grid" id="galleryGrid"></div>
+  </section>
+</main>
+
+<script type="module">
+import {
+  CW, CH,
+  fnv1a, hexToRgb, withAlpha, seededRand, generateCertId, roundRect,
+  drawCorners, drawIdenticon, drawBarcode, drawGradientDivider,
+  renderCard,
+  PALETTES, BORDERS, PATTERNS, HOLOS, RARITIES, AGENT_NAMES,
+  CardDNA,
+} from './js/card-draw.js';
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+const state = { name: 'nexus-7', overrides: {} };
+
+function getEffectiveDNA() {
+  const dna = new CardDNA(state.name);
+  return {
+    palette:      state.overrides.palette ?? dna.palette,
+    border:       state.overrides.border ?? dna.border,
+    pattern:      state.overrides.pattern ?? dna.pattern,
+    holo:         state.overrides.holo ?? dna.holo,
+    rarity:       state.overrides.rarity ?? dna.rarity,
+    patternSeed:  dna.patternSeed,
+    borderSeed:   dna.borderSeed,
+    identiconSeed:dna.identiconSeed,
+    starSeed:     dna.starSeed,
+    constellSeed: dna.constellSeed,
+    name:         dna.name,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HOLO & INTERACTION — light-reactive (pokemon-cards-css style)
+// ═══════════════════════════════════════════════════════════════
+function applyHoloType(cardEl, dna) {
+  cardEl.classList.remove('holo-rainbow','holo-prism','holo-aurora','holo-duochrome');
+  const holoId = HOLOS[dna.holo].id;
+  if (holoId !== 'rainbow') cardEl.classList.add('holo-' + holoId);
+  cardEl.style.setProperty('--holo-intensity', RARITIES[dna.rarity].intensity);
+  if (holoId === 'duochrome') {
+    const pal = PALETTES[dna.palette];
+    cardEl.style.setProperty('--duo-1', withAlpha(pal.pri, 0.5));
+    cardEl.style.setProperty('--duo-2', withAlpha(pal.acc, 0.5));
+  }
+  const pal = PALETTES[dna.palette];
+  cardEl.closest('.card-wrap, .gallery-item')
+    ?.style.setProperty('--card-glow', withAlpha(pal.glow, 0.1));
+}
+
+// Track which cards are being interacted with
+const interactingCards = new WeakSet();
+
+// Spring-like values per card for smooth interpolation
+const cardSprings = new WeakMap();
+
+function getSpring(cardEl) {
+  if (!cardSprings.has(cardEl)) {
+    cardSprings.set(cardEl, {
+      mx: 50, my: 50, angle: 130,
+      bgX: 50, bgY: 50,
+      rotX: 0, rotY: 0,
+      opacity: 0,
+      targetMx: 50, targetMy: 50, targetAngle: 130,
+      targetBgX: 50, targetBgY: 50,
+      targetRotX: 0, targetRotY: 0,
+      targetOpacity: 0,
+    });
+  }
+  return cardSprings.get(cardEl);
+}
+
+function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
+
+function applyTilt(cardEl, clientX, clientY) {
+  const rect = cardEl.getBoundingClientRect();
+  const px = clamp((clientX - rect.left) / rect.width, 0, 1);
+  const py = clamp((clientY - rect.top) / rect.height, 0, 1);
+  const rotY = (px - 0.5) * 40;
+  const rotX = (py - 0.5) * -40;
+  const angle = Math.atan2(py - 0.5, px - 0.5) * (180 / Math.PI) + 90;
+  const bgX = 37 + (px * 26);
+  const bgY = 33 + (py * 34);
+  const spring = getSpring(cardEl);
+  spring.targetMx = px * 100;
+  spring.targetMy = py * 100;
+  spring.targetAngle = angle;
+  spring.targetBgX = bgX;
+  spring.targetBgY = bgY;
+  spring.targetRotX = rotX;
+  spring.targetRotY = rotY;
+  spring.targetOpacity = 1;
+}
+
+function resetCardSpring(cardEl) {
+  const spring = getSpring(cardEl);
+  spring.targetMx = 50;
+  spring.targetMy = 50;
+  spring.targetAngle = 130;
+  spring.targetBgX = 50;
+  spring.targetBgY = 50;
+  spring.targetRotX = 0;
+  spring.targetRotY = 0;
+  spring.targetOpacity = 0;
+}
+
+function setupCardHover(cardEl) {
+  getSpring(cardEl);
+  cardEl.addEventListener('mouseenter', () => {
+    interactingCards.add(cardEl);
+  });
+  cardEl.addEventListener('mousemove', (e) => {
+    interactingCards.add(cardEl);
+    applyTilt(cardEl, e.clientX, e.clientY);
+  });
+  cardEl.addEventListener('mouseleave', () => {
+    interactingCards.delete(cardEl);
+    resetCardSpring(cardEl);
+  });
+  cardEl.addEventListener('touchstart', (e) => {
+    interactingCards.add(cardEl);
+    const t = e.touches[0];
+    applyTilt(cardEl, t.clientX, t.clientY);
+  }, { passive: true });
+  cardEl.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    applyTilt(cardEl, t.clientX, t.clientY);
+  }, { passive: false });
+  cardEl.addEventListener('touchend', () => {
+    interactingCards.delete(cardEl);
+    resetCardSpring(cardEl);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATION LOOP — spring interpolation + idle sway
+// ═══════════════════════════════════════════════════════════════
+const allCards = [];
+
+function animateHolo() {
+  const t = performance.now() * 0.001;
+
+  for (let i = 0; i < allCards.length; i++) {
+    const cardEl = allCards[i];
+    const spring = getSpring(cardEl);
+    const isActive = interactingCards.has(cardEl);
+
+    if (!isActive) {
+      const offset = i * 1.7;
+      spring.targetRotX = Math.sin((t + offset) * 0.3) * 1.5;
+      spring.targetRotY = Math.cos((t + offset) * 0.25) * 2;
+      spring.targetBgX = 50 + Math.sin((t + offset) * 0.2) * 3;
+      spring.targetBgY = 50 + Math.cos((t + offset) * 0.15) * 3;
+      spring.targetAngle = 130 + Math.sin((t + offset) * 0.1) * 10;
+    }
+
+    const lerpRate = isActive ? 0.15 : 0.04;
+    spring.mx += (spring.targetMx - spring.mx) * lerpRate;
+    spring.my += (spring.targetMy - spring.my) * lerpRate;
+    spring.angle += (spring.targetAngle - spring.angle) * lerpRate;
+    spring.bgX += (spring.targetBgX - spring.bgX) * lerpRate;
+    spring.bgY += (spring.targetBgY - spring.bgY) * lerpRate;
+    spring.rotX += (spring.targetRotX - spring.rotX) * lerpRate;
+    spring.rotY += (spring.targetRotY - spring.rotY) * lerpRate;
+    spring.opacity += (spring.targetOpacity - spring.opacity) * (isActive ? 0.12 : 0.06);
+
+    const pointerFromCenter = clamp(
+      Math.sqrt(Math.pow((spring.mx - 50) / 50, 2) + Math.pow((spring.my - 50) / 50, 2)),
+      0, 1
+    );
+
+    cardEl.style.transform = `rotateX(${spring.rotX.toFixed(2)}deg) rotateY(${spring.rotY.toFixed(2)}deg)`;
+    cardEl.style.setProperty('--mx', spring.mx.toFixed(1) + '%');
+    cardEl.style.setProperty('--my', spring.my.toFixed(1) + '%');
+    cardEl.style.setProperty('--angle', spring.angle.toFixed(1) + 'deg');
+    cardEl.style.setProperty('--bg-x', spring.bgX.toFixed(1) + '%');
+    cardEl.style.setProperty('--bg-y', spring.bgY.toFixed(1) + '%');
+    cardEl.style.setProperty('--card-opacity', spring.opacity.toFixed(3));
+    cardEl.style.setProperty('--pointer-from-center', pointerFromCenter.toFixed(3));
+    cardEl.style.setProperty('--pointer-from-left', (spring.mx / 100).toFixed(3));
+    cardEl.style.setProperty('--pointer-from-top', (spring.my / 100).toFixed(3));
+  }
+
+  requestAnimationFrame(animateHolo);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI: CONTROLS
+// ═══════════════════════════════════════════════════════════════
+function setupControls() {
+  const nameInput = document.getElementById('nameInput');
+  const mainCard = document.getElementById('mainCard');
+  allCards.push(mainCard);
+
+  const palSel = document.getElementById('palSel');
+  PALETTES.forEach((p, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'pal-btn';
+    btn.style.background = `linear-gradient(135deg, ${p.pri} 50%, ${p.acc2} 50%)`;
+    btn.title = p.name;
+    btn.onclick = () => { state.overrides.palette = i; updateMain(); };
+    palSel.appendChild(btn);
+  });
+
+  const makeOpts = (containerId, items, key) => {
+    const el = document.getElementById(containerId);
+    items.forEach((item, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'opt-btn';
+      btn.textContent = item.name;
+      btn.onclick = () => { state.overrides[key] = i; updateMain(); };
+      el.appendChild(btn);
+    });
+  };
+  makeOpts('borderSel', BORDERS, 'border');
+  makeOpts('patternSel', PATTERNS, 'pattern');
+  makeOpts('holoSel', HOLOS, 'holo');
+  makeOpts('raritySel', RARITIES.map(r => ({ name: r.name })), 'rarity');
+
+  let debounce;
+  nameInput.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      state.name = nameInput.value.trim() || 'agent';
+      state.overrides = {};
+      updateMain();
+    }, 200);
+  });
+
+  document.getElementById('btnRandName').onclick = () => {
+    state.name = AGENT_NAMES[(Math.random() * AGENT_NAMES.length) | 0];
+    nameInput.value = state.name;
+    state.overrides = {};
+    mainCard.classList.add('flipping');
+    setTimeout(() => updateMain(), 200);
+    setTimeout(() => mainCard.classList.remove('flipping'), 500);
+  };
+
+  document.getElementById('btnRandomize').onclick = () => {
+    state.name = AGENT_NAMES[(Math.random() * AGENT_NAMES.length) | 0];
+    nameInput.value = state.name;
+    state.overrides = {};
+    mainCard.classList.add('flipping');
+    setTimeout(() => updateMain(), 200);
+    setTimeout(() => mainCard.classList.remove('flipping'), 500);
+  };
+
+  setupCardHover(mainCard);
+}
+
+function updateMain() {
+  const dna = getEffectiveDNA();
+  const canvas = document.getElementById('mainCanvas');
+  const card = document.getElementById('mainCard');
+  renderCard(canvas, state.name, dna);
+  applyHoloType(card, dna);
+  updateHighlights(dna);
+  updateReadout(dna);
+}
+
+function updateHighlights(dna) {
+  document.querySelectorAll('#palSel .pal-btn').forEach((b,i) => b.classList.toggle('active', i===dna.palette));
+  document.querySelectorAll('#borderSel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.border));
+  document.querySelectorAll('#patternSel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.pattern));
+  document.querySelectorAll('#holoSel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.holo));
+  document.querySelectorAll('#raritySel .opt-btn').forEach((b,i) => b.classList.toggle('active', i===dna.rarity));
+}
+
+function updateReadout(dna) {
+  const el = document.getElementById('dnaReadout');
+  el.innerHTML = [
+    `Palette: <span>${PALETTES[dna.palette].name}</span>`,
+    `Border: <span>${BORDERS[dna.border].name}</span>`,
+    `Pattern: <span>${PATTERNS[dna.pattern].name}</span>`,
+    `Holo: <span>${HOLOS[dna.holo].name}</span>`,
+    `Rarity: <span>${RARITIES[dna.rarity].label}</span>`,
+    `Combos: <span>2,048+</span>`,
+  ].join('<br>');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GALLERY
+// ═══════════════════════════════════════════════════════════════
+function setupGallery() {
+  const grid = document.getElementById('galleryGrid');
+  const names = ['nova','pulse','ghost','atlas','phantom','drift','flux','frost'];
+  names.forEach(name => {
+    const item = document.createElement('div');
+    item.className = 'gallery-item';
+    item.style.perspective = '600px';
+
+    const card = document.createElement('div');
+    card.className = 'card gallery-card';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 880; canvas.height = 630;
+    card.appendChild(canvas);
+
+    ['card-shine','card-glare','card-foil','card-sparkle'].forEach(cls => {
+      const div = document.createElement('div');
+      div.className = cls;
+      card.appendChild(div);
+    });
+
+    item.appendChild(card);
+
+    const label = document.createElement('div');
+    label.className = 'gallery-label';
+    label.textContent = name + '.agent';
+    item.appendChild(label);
+
+    grid.appendChild(item);
+
+    const dna = new CardDNA(name);
+    renderCard(canvas, name, dna);
+    applyHoloType(card, dna);
+    setupCardHover(card);
+    allCards.push(card);
+
+    card.addEventListener('click', () => {
+      state.name = name;
+      state.overrides = {};
+      document.getElementById('nameInput').value = name;
+      updateMain();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+async function init() {
+  try { await document.fonts.load('16px PPSupplyMono'); } catch(e) {}
+  setupControls();
+  updateMain();
+  setupGallery();
+  requestAnimationFrame(animateHolo);
+}
+init();
+</script>
+</body>
+</html>

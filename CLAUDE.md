@@ -13,9 +13,16 @@ No build system. Native ES modules via browser importmap. Serve from project roo
 
 ## Architecture
 
-Interactive 3D web experience: a retro CRT terminal inside a Three.js TV model accepts form input and issues a holographic verification certificate (identity card) on completion.
+Pre-registration system for `.agent` domain identities. Two interfaces, one backend:
 
-**Data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
+1. **Web CRT terminal** — 3D retro TV with interactive form (for humans & organizations)
+2. **CLI CRT terminal** — ASCII art terminal in the shell (for AI agents, operator required)
+
+All flows are **pre-registration** (not registration). Pre-registration records interest in a `.agent` domain. It does not guarantee assignment.
+
+**Web data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
+
+**CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to edge function → success screen with cert ID + "CHECK YOUR EMAIL" callout.
 
 **Module graph:**
 ```
@@ -93,7 +100,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
 **Pre-registration model**: Multiple users can register interest in the same `.agent` domain. `domain_requested` is NOT unique. `certificate_id` is unique (same user+agent+type = same cert ID). Badge lookup is by cert ID only (`?domain=` deprecated).
 
-**NPM package** (`packages/dmv-agent/`): CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, bunx for users. Only runtime dep: `@modelcontextprotocol/sdk`. CLI sends `signup_source: 'cli'`, MCP sends `'mcp'`.
+**NPM package** (`packages/dmv-agent/`): Published as `@agentcommunity/dmv-agent` on npm. CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, npx for users. Only runtime dep: `@modelcontextprotocol/sdk`. CLI sends `signup_source: 'cli'`, MCP sends `'mcp'`.
+
+**CLI architecture** (`packages/dmv-agent/src/`):
+- `cli.ts` — Main CLI: boot screen, form flow, submit, content pages (about/terms/charter)
+- `ui.ts` — CRT frame renderer: ASCII art, ANSI green/amber/red colors, box drawing, progress bar. Zero dependencies.
+- `rate-limit.ts` — Machine fingerprint (SHA-256 of hostname+user+platform) + local lockfile (`~/.dmv-agent/registrations.json`, 3/machine/24h)
+- `register.ts` — Edge function client, sends `machine_fingerprint` for server-side enforcement
 
 **Go-live checklist**: `packages/dmv-agent/DEPLOY.md`
 
@@ -102,5 +115,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 - DMV = Department of Machine Verification
 - Part of the [.agent community](https://agentcommunity.org) — ICANN application for `.agent` gTLD
 - Header: "DMV for agents"
-- Terminal subtitle: "Machine Identity & Registration Terminal v1.0"
+- Terminal subtitle: "Machine Identity & Pre-Registration Terminal v1.0" (web) / same in CLI
+- All copy says "pre-registration" — never just "registration"
 - Sound toggle wired to `audio/music.mp3` (user-provided, not in repo)
