@@ -1,12 +1,40 @@
 # @agentcommunity/dmv-agent
 
-Register `.agent` identities at the **Department of Machine Verification**.
+Pre-register `.agent` identities at the **Department of Machine Verification**.
 
-Pre-register a unique agent name, get a content-addressed certificate ID, and verify it cryptographically — all from the terminal or from inside Claude Code.
+Part of the [.agent community](https://agentcommunity.org) — building toward an ICANN application for the `.agent` gTLD.
+
+## Three registration paths
+
+| Path | Who | Type | Where |
+|------|-----|------|-------|
+| **CRT Terminal** (web) | Humans & organizations | Individual or Organization | [dmv.agentcommunity.org](https://dmv.agentcommunity.org) |
+| **CLI** (this package) | AI agents | Agent (operator required) | Your terminal |
+| **MCP server** | Autonomous agents | Agent (via Claude Code) | Claude Code / any MCP client |
+
+All paths hit the same backend. Pre-registration records interest in a `.agent` domain — it does not guarantee assignment.
 
 ## Quick start
 
-### Claude Code skill (recommended)
+### CLI (for agents)
+
+```bash
+# Interactive CRT terminal experience
+npx @agentcommunity/dmv-agent register
+
+# Non-interactive (for scripting / agentic workflows)
+npx @agentcommunity/dmv-agent register \
+  --name my-agent \
+  --email operator@example.com \
+  --operator "Acme Labs"
+
+# Verify a certificate ID (offline, no network)
+npx @agentcommunity/dmv-agent verify MESA-DD6-660J
+```
+
+The interactive CLI mirrors the web CRT terminal — ASCII art frame, green terminal colors, step-by-step form with validation, about/terms/charter access, and a confirmation gate before submit.
+
+### Claude Code skill
 
 Copy the skill into your project:
 
@@ -15,19 +43,7 @@ mkdir -p .claude/skills
 cp -r node_modules/@agentcommunity/dmv-agent/skills/dmv .claude/skills/
 ```
 
-Then in Claude Code, type `/dmv` to start registration.
-
-### CLI
-
-```bash
-# Register interactively
-bunx @agentcommunity/dmv-agent register
-
-# Verify a certificate ID
-bunx @agentcommunity/dmv-agent verify MESA-DD6-660J
-```
-
-`npx` works too if you don't have bun.
+Then type `/dmv` in Claude Code to start pre-registration.
 
 ### MCP server (for autonomous agents)
 
@@ -37,44 +53,83 @@ Add to your Claude Code settings (`.claude/settings.json`):
 {
   "mcpServers": {
     "dmv": {
-      "command": "bunx",
+      "command": "npx",
       "args": ["@agentcommunity/dmv-agent"]
     }
   }
 }
 ```
 
-This exposes two tools to Claude:
+Exposes two tools:
 
 | Tool | Description |
 |------|-------------|
-| `register_agent` | Register an .agent identity (agent_name, email, operator_name?, description?) |
+| `register_agent` | Pre-register an .agent identity (agent_name, email, operator_name, description?) |
 | `verify_certificate` | Check a certificate ID's Luhn mod-36 check digit |
+
+## Badges
+
+After pre-registration, embed a badge in your project. Badges verify live against the DMV database and link back to your certificate.
+
+### Flat badge (for READMEs)
+
+```markdown
+[![my-agent.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-agent)
+```
+
+Renders a shields.io-style SVG:
+- Green: registered and verified
+- Yellow-green: valid but unverified
+- Red: invalid certificate ID
+
+### Card badge (for websites)
+
+```html
+<a href="https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-agent">
+  <img src="https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card"
+       alt="my-agent.agent — DMV Certificate" />
+</a>
+```
+
+Renders a branded 280x72 SVG with dark gradient, agent name, certificate ID, and status.
+
+### Badge URL format
+
+```
+https://dmv.agentcommunity.org/badge?id=CERT-ID           # flat (default)
+https://dmv.agentcommunity.org/badge?id=CERT-ID&style=card # card
+```
+
+Badges are cached for 5 minutes. Lookup is by certificate ID only.
 
 ## How it works
 
-### Registration flow
+### Pre-registration flow
 
 ```
 Client (your machine)              Server (Supabase Edge Function)
 ─────────────────────              ────────────────────────────────
+rate limit check (local)
 validate input locally
         │
         ├── POST /register-agent ──▶  validate again
-                                      rate limit (by email + IP)
-                                      generate certificate ID
-                                      insert into database
-                                      ◀── return certificate
+        │   + machine_fingerprint      rate limit (email + IP + fingerprint)
+        │                              generate certificate ID
+        │                              insert to database
+        │                              ◀── return certificate
         │
+record attempt locally
 display result
+        │
+        └── verification email sent by server trigger ──▶ operator
 ```
 
-1. **Client-side validation** — fast feedback. Agent name: 3-32 lowercase alphanumeric + hyphens. Email: basic format check.
-2. **Server-side validation** — same checks repeated. Rejects anything the client might skip.
-3. **Rate limiting** — max 3 registrations per email per hour, max 10 per IP per hour. Enforced server-side via database queries. Cannot be bypassed by restarting the client.
-4. **Certificate ID** — generated server-side. Content-addressed via FNV-1a hash, formatted as `WORD-XXX-XXXC` with a Luhn mod-36 check digit. Deterministic: same inputs always produce the same ID.
-5. **Pre-registration** — the record is stored but marked unverified. A verification email is sent.
-6. **Verification** — clicking the email link completes registration. Until then, the name is reserved but not active.
+1. **Client-side rate limiting** — max 3 pre-registrations per machine per 24h. Machine fingerprint (SHA-256 of hostname + username + platform) tracked in `~/.dmv-agent/registrations.json`.
+2. **Client-side validation** — fast feedback. Agent name: 3-32 lowercase alphanumeric + hyphens. Email: basic format.
+3. **Server-side validation** — same checks repeated at the security boundary.
+4. **Server-side rate limiting** — max 3 per email per hour, 10 per IP per hour. Machine fingerprint also sent for server-side enforcement. Cannot be bypassed.
+5. **Certificate ID** — content-addressed via FNV-1a hash. Format: `WORD-XXX-XXXC` with Luhn mod-36 check digit. Deterministic: same inputs = same ID.
+6. **Email verification** — a verification link is sent to the operator's email. Pre-registration completes only after verification. Until then, the domain interest is recorded but not active.
 
 ### Certificate ID format
 
@@ -85,49 +140,29 @@ MESA-DD6-660J
 └──────────── word from 32-word dictionary
 ```
 
-Anyone can verify a certificate ID offline — no network call needed:
+Offline verification — no network needed:
 
 ```bash
-bunx @agentcommunity/dmv-agent verify MESA-DD6-660J
+npx @agentcommunity/dmv-agent verify MESA-DD6-660J
 # ✓ Certificate MESA-DD6-660J has a valid check digit.
 ```
-
-## Badges
-
-After registration, embed a badge in your README or website. Every badge links back to dmv.agentcommunity.org.
-
-**GitHub README (Markdown):**
-```markdown
-[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant)
-```
-
-**Website (HTML):**
-```html
-<a href="https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant">
-  <img src="https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card"
-       alt="my-assistant.agent — DMV Certificate" />
-</a>
-```
-
-Two styles: `flat` (default, shields.io-style for READMEs) and `card` (branded, 280x72 for websites). Lookup by cert ID (`?id=`) or domain name (`?domain=my-assistant`).
 
 ## Programmatic use
 
 ```ts
 import { registerAgent, verifyCertificateId } from '@agentcommunity/dmv-agent';
 
-// Register (calls edge function, no DB credentials needed)
 const result = await registerAgent({
-  agentName: 'my-assistant',
+  agentName: 'my-agent',
   email: 'operator@example.com',
-  operatorName: 'Acme Corp',       // optional
-  description: 'A helpful assistant', // optional
+  operatorName: 'Acme Labs',
+  description: 'A helpful research assistant',
 }, 'api');
 
 console.log(result.certificateId); // MESA-DD6-660J
-console.log(result.domain);       // my-assistant.agent
+console.log(result.domain);       // my-agent.agent
 
-// Verify (offline, no network)
+// Offline verification
 verifyCertificateId('MESA-DD6-660J'); // true
 ```
 
@@ -137,57 +172,73 @@ verifyCertificateId('MESA-DD6-660J'); // true
 
 ```
 ┌─────────────────┐         ┌──────────────────────────┐         ┌───────────┐
-│  Claude Code     │──stdio─▶│  dmv-agent (your machine) │──https─▶│  Supabase │
-│  (or any agent)  │         │  no secrets, just fetch() │         │  Edge Fn  │
+│  Your agent /    │──stdio─▶│  dmv-agent (local)        │──https─▶│  Supabase │
+│  Claude Code     │         │  no secrets, just fetch() │         │  Edge Fn  │
 └─────────────────┘         └──────────────────────────┘         │  (has key)│
                                                                   └───────────┘
 ```
 
-- **Edge function proxy** — all database writes go through a Supabase Edge Function that holds the service role key. Clients only know the function URL (public endpoint).
-- **Server-side rate limiting** — by email and IP, via database queries. Survives client restarts, can't be bypassed.
-- **Duplicate protection** — unique constraint on domain name. Registering `my-agent.agent` twice returns a 409.
-- **Email verification** — registration is pre-registration until the verification link is clicked. Name squatters can't activate without owning the email.
-- **Content-addressed IDs** — certificate IDs are deterministic hashes, not sequential, so they can't be enumerated or predicted.
-- **Input validation** — strict format rules enforced both client-side (fast feedback) and server-side (security boundary).
+- **Edge function proxy** — all writes go through Supabase Edge Functions that hold the service role key.
+- **Triple-layer rate limiting** — client-side (machine fingerprint, 3/24h) + server-side (email 3/hr, IP 10/hr, fingerprint).
+- **Pre-registration model** — domain is NOT unique. Multiple parties can pre-register interest in the same name. Certificate ID IS unique (same user + agent + type = same cert).
+- **Email verification** — pre-registration is pending until the operator clicks the verification link.
+- **Content-addressed IDs** — deterministic hashes, not sequential. Cannot be enumerated or predicted.
 
-## Architecture
+## API reference
 
-```
-┌──────────────────────────────────┐
-│  Published npm package           │
-│  @agentcommunity/dmv-agent       │
-│                                  │
-│  ┌─────────┐  ┌──────────────┐  │
-│  │ CLI      │  │ MCP server   │  │    ┌──────────────────────┐
-│  │ register │  │ register_agent│ ├───▶│ Supabase Edge Function│
-│  │ verify   │  │ verify_cert  │  │    │ register-agent        │
-│  └─────────┘  └──────────────┘  │    │                      │
-│                                  │    │ • validates           │
-│  ┌─────────────────────────┐    │    │ • rate limits (IP+email)│
-│  │ JS API                   │    │    │ • generates cert ID   │
-│  │ registerAgent()          │────┘    │ • inserts to DB       │
-│  │ verifyCertificateId()    │         │ • holds service key   │
-│  └─────────────────────────┘         └──────────────────────┘
-│                                               │
-│  ┌─────────────────────────┐         ┌────────▼──────────┐
-│  │ Claude Code skill        │         │   Supabase DB     │
-│  │ /dmv slash command       │         │   registrations   │
-│  └─────────────────────────┘         └───────────────────┘
-└──────────────────────────────────┘
+### POST /register-agent
+
+```json
+{
+  "agent_name": "my-agent",
+  "email": "operator@example.com",
+  "operator_name": "Acme Labs",
+  "description": "optional",
+  "registration_type": "AGENT",
+  "signup_source": "cli",
+  "machine_fingerprint": "sha256hex..."
+}
 ```
 
-- The npm package runs **locally**. It contains no database credentials.
-- All writes go through the **edge function** (server-side), which holds the service role key.
-- Certificate verification is **offline** — no network call needed.
-- The Claude Code skill is a **prompt template** that invokes the CLI.
+**201** — success:
+```json
+{
+  "certificate_id": "MESA-DD6-660J",
+  "agent_name": "my-agent",
+  "domain": "my-agent.agent",
+  "message": "Certificate MESA-DD6-660J issued...",
+  "permalink_url": "https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-agent",
+  "badge_url": "https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J"
+}
+```
+
+**409** — already registered (returns existing cert). **429** — rate limited. **400** — validation error.
+
+### GET /lookup-agent
+
+```
+?id=CERT-ID     → single registration object
+?domain=name    → array of pre-registrations for that domain
+```
+
+### GET /badge
+
+```
+?id=CERT-ID              → flat SVG (shields.io style)
+?id=CERT-ID&style=card   → branded card SVG (280x72)
+```
 
 ## Development
 
 ```bash
+cd packages/dmv-agent
 pnpm install
-pnpm build        # compile TypeScript
+pnpm build        # compile TypeScript → dist/
 pnpm dev          # watch mode
-pnpm start        # run MCP server directly
+
+# Test locally
+node dist/cli.js register
+node dist/cli.js verify MESA-DD6-660J
 ```
 
 ### Deploying edge functions
@@ -195,8 +246,6 @@ pnpm start        # run MCP server directly
 ```bash
 supabase functions deploy register-agent lookup-agent badge
 ```
-
-Three functions: `register-agent` (POST, registration proxy), `lookup-agent` (GET, public lookup), `badge` (GET, SVG generator). All read `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from Supabase's automatic env vars.
 
 See [DEPLOY.md](DEPLOY.md) for the full go-live checklist.
 

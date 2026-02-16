@@ -19,6 +19,7 @@ const REGISTER_ENDPOINT =
 export async function registerAgent(
   data: AgentRegistration,
   source: SignupSource = 'mcp',
+  machineFingerprint?: string,
 ): Promise<RegistrationResult> {
   // Client-side validation (fast feedback before network call)
   const errors = validateAgentRegistration(data);
@@ -27,7 +28,7 @@ export async function registerAgent(
     throw new Error(`Validation failed: ${msg}`);
   }
 
-  const body = {
+  const body: Record<string, unknown> = {
     agent_name: data.agentName,
     email: data.email,
     operator_name: data.operatorName || null,
@@ -35,6 +36,9 @@ export async function registerAgent(
     signup_source: source,
     registration_type: 'AGENT',
   };
+  if (machineFingerprint) {
+    body.machine_fingerprint = machineFingerprint;
+  }
 
   let res: Response;
   try {

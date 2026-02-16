@@ -699,6 +699,29 @@ export class HoloCard {
   }
 
   /**
+   * Show/hide the card meshes (used by app.js for zoom transitions).
+   */
+  setVisible(visible) {
+    // In shader-based mode, mesh visibility is the only toggle needed.
+    // No DOM overlay to manage.
+    if (!this.mesh.visible && !visible) return;
+    if (visible && this.formData) {
+      this.mesh.visible = true;
+      this.backMesh.visible = true;
+    }
+    // Don't hide on setVisible(false) — mesh stays in scene for raycasting.
+    // Zoom-out hides via camera movement, not mesh toggle.
+  }
+
+  /**
+   * Register a click callback (compatibility shim for DOM-based HoloCard API).
+   * In shader mode, clicks are handled via raycaster in app.js.
+   */
+  onClick(cb) {
+    this._clickCb = cb;
+  }
+
+  /**
    * Primary mesh (for raycasting, zoom calculations).
    */
   getMesh() {

@@ -1,92 +1,237 @@
 # DMV — Department of Machine Verification
 
-Interactive 3D web experience for machine identity registration. Retro CRT terminal inside a 3D TV accepts form input and issues a holographic verification certificate — a collectible agent identity card with rarity tiers.
+The DMV is the identity pre-registration system for the [.agent community](https://agentcommunity.org).
 
-## Run
+The .agent community is building toward an ICANN application for the `.agent` generic top-level domain (gTLD). Pre-registering now establishes early interest in your preferred `.agent` domain name — like reserving `your-name.agent` before the namespace opens.
+
+Pre-registration is not a guarantee of domain assignment. It records your interest and gives you a verifiable certificate ID.
+
+---
+
+## What is .agent?
+
+`.agent` is a proposed internet domain extension (like `.com` or `.io`) specifically for AI agents. When approved by ICANN, it will give every AI agent a unique, verifiable identity on the internet — like `atlas.agent` or `helper.agent`.
+
+The .agent community is the group building this. The DMV is where you come to stake your claim.
+
+---
+
+## Who is this for?
+
+### For individuals
+
+You're a person who builds or operates an AI agent and want to reserve a name for it.
+
+**How to pre-register:**
+1. Go to [dmv.agentcommunity.org](https://dmv.agentcommunity.org)
+2. Scroll down to the CRT terminal
+3. Select "Individual"
+4. Fill in your name, your agent's name, and your email
+5. Accept the terms and charter
+6. Check your email for the verification link
+
+You'll get a certificate ID (like `MESA-DD6-660J`) and a holographic identity card you can share.
+
+### For organizations
+
+Your company builds AI agents and wants to reserve names for them.
+
+**How to pre-register:**
+1. Go to [dmv.agentcommunity.org](https://dmv.agentcommunity.org)
+2. Scroll down to the CRT terminal
+3. Select "Organization"
+4. Fill in your organization name, agent name, and a company email
+5. Accept the terms and charter
+6. Check your email for the verification link
+
+Organization registrations require a non-consumer email domain (no gmail.com, etc.).
+
+### For AI agents
+
+Your agent can pre-register itself. The CLI is designed for agentic workflows — AI agents running in terminals, CI pipelines, or Claude Code sessions.
+
+**How to pre-register:**
+
+```bash
+npx @agentcommunity/dmv-agent register
+```
+
+This opens an interactive CRT terminal in your shell. The agent provides its name and the operator's details. The operator (the human or org responsible) must verify via email.
+
+For non-interactive use (scripting, CI, autonomous agents):
+
+```bash
+npx @agentcommunity/dmv-agent register \
+  --name my-agent \
+  --email operator@example.com \
+  --operator "Acme Labs"
+```
+
+For Claude Code or other MCP-compatible tools, add the MCP server:
+
+```json
+{
+  "mcpServers": {
+    "dmv": {
+      "command": "npx",
+      "args": ["@agentcommunity/dmv-agent"]
+    }
+  }
+}
+```
+
+See the [npm package docs](packages/dmv-agent/README.md) for full CLI, MCP, and API reference.
+
+---
+
+## After pre-registration
+
+### Your certificate
+
+Every pre-registration gets a unique certificate ID:
+
+```
+MESA-DD6-660J
+│     │    └─ check digit (Luhn mod-36)
+│     └────── hash of your registration
+└──────────── word from the DMV dictionary
+```
+
+You can verify any certificate offline:
+
+```bash
+npx @agentcommunity/dmv-agent verify MESA-DD6-660J
+```
+
+### Your holographic card
+
+The web terminal generates a holographic identity card with rarity tiers (STANDARD, ENHANCED, RARE, LEGENDARY) determined by your certificate hash. Share it via permalink:
+
+```
+https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-agent
+```
+
+### Badges for your project
+
+Show your `.agent` identity in your README or website:
+
+**Flat badge (for GitHub READMEs):**
+```markdown
+[![my-agent.agent](https://dmv.agentcommunity.org/badge?id=CERT-ID)](https://dmv.agentcommunity.org/c/CERT-ID/my-agent)
+```
+
+**Card badge (for websites):**
+```html
+<a href="https://dmv.agentcommunity.org/c/CERT-ID/my-agent">
+  <img src="https://dmv.agentcommunity.org/badge?id=CERT-ID&style=card"
+       alt="my-agent.agent — DMV Certificate" />
+</a>
+```
+
+Badges verify live against the DMV database. Green = verified, yellow-green = pending, red = invalid.
+
+---
+
+## How it works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│   CRT Terminal (web)  ──┐                                   │
+│   CLI (agents)        ──┼──▶  Supabase Edge Function        │
+│   MCP (Claude Code)   ──┘    (validates, rate limits,       │
+│                               generates cert, stores)       │
+│                                      │                      │
+│                              Database trigger fires          │
+│                                      │                      │
+│                              agentcommunity.org              │
+│                              (sends verification email,      │
+│                               creates auth user)             │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. You submit your pre-registration (web, CLI, or MCP)
+2. Server validates, rate limits, generates your certificate ID
+3. Record stored with status `pending_profile`
+4. A database trigger sends a verification email to the operator
+5. Clicking the verification link completes pre-registration
+6. Your `.agent` domain interest is recorded for when the gTLD launches
+
+**Pre-registration model:** Multiple parties can express interest in the same domain name. The certificate ID is unique to your specific registration (same inputs = same cert ID). Domain assignment happens later through the .agent community governance process.
+
+### Rate limiting
+
+To prevent abuse:
+- **Per email:** 3 pre-registrations per hour
+- **Per IP:** 10 pre-registrations per hour
+- **Per machine (CLI):** 3 per 24 hours (tracked locally + server-side fingerprint)
+
+### Security
+
+- Zero secrets in client code — all database writes go through edge functions
+- Certificate IDs are content-addressed hashes, not sequential — can't be guessed or enumerated
+- Email verification required — name squatters can't activate without owning the email
+- All data stored securely on Supabase with row-level security
+
+---
+
+## Development
+
+### Run the web terminal locally
 
 ```bash
 uv run python -m http.server 8080
 # open http://localhost:8080
 ```
 
-Scroll to zoom into TV. CRT boots, presents form. Type fields, Enter to advance. Holographic card appears on completion.
+No build system. Native ES modules via browser importmap.
 
-## Stack
+### Run the CLI locally
 
-- Three.js 0.152.2 (CDN importmap)
-- GSAP 3.12.2 + ScrollTrigger (CDN globals)
-- Inter (Google Fonts, center `.agent` wordmark only)
-- Vanilla ES modules, no build system
-
-## Structure
-
-```
-index.html              HTML shell — importmap, CDN scripts, CSS link, module entry
-css/styles.css          All styles — theme tokens, header/footer typography, center `.agent` mark, permalink overlay
-js/app.js               Entry — init TV + HoloCard, events, scroll, sound, clock, permalink routing, theme/favicon sync
-js/TV.js                3D scene — GLTF model, camera, renderer, night mode, onRender callbacks
-js/CRTTerminal.js       CRT terminal — Canvas2D, boot sequence, form, color schemes
-js/HoloCard.js          Holographic card — ShaderMaterial, front+back, rarity, identicon, QR pattern
-js/CardPoster.js        [Legacy] Original flat card, replaced by HoloCard
-js/AboutPoster.js       About panel — PlaneGeometry + CanvasTexture, toggle show/hide, theme-aware colors
-js/supabase.js          Supabase integration — registration persistence (behind feature flag)
-images/
-  favicon.ico             Light mode favicon
-  favicon_dark.ico        Dark mode favicon
-fonts/                  PPSupply font files (4 .otf)
-models/                 3D models: tv1.glb (Draco GLTF)
-audio/                 Background music (user-provided, optional)
+```bash
+cd packages/dmv-agent
+pnpm install && pnpm build
+node dist/cli.js register
 ```
 
-## Features
+### Deploy edge functions
 
-- **CRT Terminal**: 8-phase boot (off → flicker → type → form → TnC → charter → process → done), scanlines, vignette, glow
-- **Holographic Card**: Custom GLSL shader with rainbow iridescence, foil lines, glare spotlight, fresnel edge glow, sparkle noise. Front + back faces. Gentle bob + mouse/gyro tilt tracking. See [CARD.md](CARD.md).
-- **Rarity System**: Cards get STANDARD (60%), ENHANCED (25%), RARE (10%), or LEGENDARY (5%) — determined by certificate ID hash. Affects holo intensity, accent color, and badge.
-- **Permalink Sharing**: `/c/CERT-ID/agent-name` URLs show the card directly with rich social previews. "Get Yours" + "Share on X" buttons for viral loop.
-- **Night Mode**: Click TV button. Swaps exposure, fog, CRT palette (green ↔ orange), button color
-- **Sound Toggle**: Plays/pauses local background track from `audio/`
-- **UI Theme System**: Light/dark UI tokens drive text, controls, and About panel colors
-- **Center `.agent` Mark**: Inter-based `.a` core with hover-reveal `gent`; right-click downloads theme-colored `.agent` SVG
-- **Favicon Switching**: Auto-swaps between light/dark favicons with mode toggle
-- **UI Layout**: Fixed header (brand + about/CTA + sound) and footer (tagline + `by agentcommunity.org` + scroll + clock) over 3D canvas
-
-## Permalink System
-
-```
-Normal:    localhost:8080                              → scroll to TV, fill form, get card
-Permalink: localhost:8080/c/NEON-80C-898X/agent-name   → card shown instantly, "Get Yours" overlay
+```bash
+supabase functions deploy register-agent lookup-agent badge
 ```
 
-Visitors arriving via permalink see the holographic card zoomed in. They can:
-- Click/tap to zoom out and explore the full scene
-- Click "Get Yours" (header or overlay) to register their own agent
-- Click "Share on X" to share the card link
+### Project structure
 
-## Night Mode Colors
+```
+index.html                  Web terminal entry point
+css/styles.css              Styles, theme tokens, layout
+js/
+  app.js                    Entry — events, scroll, routing
+  TV.js                     Three.js scene — 3D TV model, camera, renderer
+  CRTTerminal.js            CRT terminal — Canvas2D, boot sequence, form
+  HoloCard.js               Holographic card — GLSL shader, rarity, tilt
+  AboutPoster.js             About panel
+  supabase.js               Registration API client
+packages/dmv-agent/         npm package — CLI, MCP server, JS API
+supabase/functions/         Edge functions — register, lookup, badge
+```
 
-| | Day | Night |
-|-|-----|-------|
-| CRT text | #33ff88 (green) | #ffaa33 (amber) |
-| CRT header | #88ffcc | #ffdd88 |
-| CRT dim | #1a5a3a | #cc8844 |
-| TV button | #33ff88 | #cc6622 |
-| Exposure | 3.0 | 0.6 |
-| Fog | #7a7a7a | #454546 |
+### Docs
 
-## Backend
+- [CARD.md](CARD.md) — Holographic card shader, rarity system
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Full system architecture, security model
+- [packages/dmv-agent/README.md](packages/dmv-agent/README.md) — CLI, MCP, API, badge docs
+- [packages/dmv-agent/DEPLOY.md](packages/dmv-agent/DEPLOY.md) — Go-live checklist
 
-Registration goes through the `register-agent` edge function (Supabase). On INSERT, a database trigger on the shared agentcommunity.org project handles auth user creation, magic link emails, and certificate emails automatically. DMV only INSERTs — everything else is reactive.
+---
 
-Pre-registration model: multiple users can register interest in the same `.agent` domain. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map and [DEPLOY.md](packages/dmv-agent/DEPLOY.md) for the go-live checklist.
+## Links
 
-## Docs
+- [dmv.agentcommunity.org](https://dmv.agentcommunity.org) — Live web terminal
+- [agentcommunity.org](https://agentcommunity.org) — The .agent community
+- [@agentcommunity/dmv-agent](https://www.npmjs.com/package/@agentcommunity/dmv-agent) — npm package
 
-- [CARD.md](CARD.md) — Holographic card implementation, shader effects, rarity system, reuse guide
-- [AGENTS.md](AGENTS.md) — File-by-file function reference for agents
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Full system architecture, security model, badge system
-- [DEPLOY.md](packages/dmv-agent/DEPLOY.md) — Go-live checklist and deployment guide
+## License
 
-## Browser Support
-
-ES modules + importmap required (Chrome 89+, Safari 16.4+, Firefox 108+).
+MIT
