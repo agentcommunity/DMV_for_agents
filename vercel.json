@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/badge/:path*",
+      "destination": "https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/badge/:path*"
+    },
+    {
+      "source": "/c/:certId/:agentName",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/c/:certId",
+      "destination": "/index.html"
+    }
+  ]
+}

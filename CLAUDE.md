@@ -60,7 +60,7 @@ HoloCard shader is tone-mapped, so it dims in night mode but holo effects still 
 
 ## Permalink System
 
-Hash format: `#/CERT-ID` (optionally `#/CERT-ID/agentname`).
+Path format: `/c/CERT-ID/agent-name`.
 
 In permalink mode:
 - Card shown instantly, camera jumps to it
@@ -81,7 +81,7 @@ In permalink mode:
 
 ## Static Assets
 
-All in `hle_mirror/hle.io/`: 4 font files (PPSupplyMono/Sans Regular/Ultralight .otf), `logo-white.svg`, `tv1.glb` (Draco GLTF). Nothing else should be in hle_mirror.
+`fonts/` has 4 PPSupply font files (.otf). `models/` has `tv1.glb` (Draco GLTF).
 
 ## Backend & NPM Package
 
@@ -89,7 +89,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
 **Edge functions** (`supabase/functions/`): registration proxy, lookup API, badge SVG generator. All Deno, deployed to Supabase. Zero secrets in client code — all DB writes go through edge functions.
 
-**NPM package** (`packages/dmv-agent/`): CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, bunx for users. Only runtime dep: `@modelcontextprotocol/sdk`.
+**Trigger chain**: register-agent INSERTs with `certificate_id` + `status: 'pending_profile'` + `user_id: NULL`. A database trigger (`on_dmv_registration`) on the agentcommunity.org side fires asynchronously (pg_net), creates/finds auth user, sends magic link + certificate email, and manages the `user_domains` table. DMV does NOT create auth users or send emails.
+
+**Pre-registration model**: Multiple users can register interest in the same `.agent` domain. `domain_requested` is NOT unique. `certificate_id` is unique (same user+agent+type = same cert ID). Badge lookup is by cert ID only (`?domain=` deprecated).
+
+**NPM package** (`packages/dmv-agent/`): CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, bunx for users. Only runtime dep: `@modelcontextprotocol/sdk`. CLI sends `signup_source: 'cli'`, MCP sends `'mcp'`.
 
 **Go-live checklist**: `packages/dmv-agent/DEPLOY.md`
 

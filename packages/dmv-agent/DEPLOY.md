@@ -20,33 +20,43 @@ The `registrations` table should already exist in the shared agentcommunity Supa
 ```sql
 -- Required columns (check in Supabase dashboard → Table Editor)
 registration_type   TEXT        -- 'INDIVIDUAL' | 'ORGANIZATION' | 'AGENT'
-full_name           TEXT        -- nullable, operator name
-organization_name   TEXT        -- nullable
-domain_requested    TEXT        -- e.g. 'my-agent.agent' (UNIQUE constraint)
+full_name           TEXT        -- nullable (required for INDIVIDUAL/ORGANIZATION)
+organization_name   TEXT        -- nullable (required for ORGANIZATION)
+domain_requested    TEXT        -- e.g. 'my-agent.agent' (NOT unique — pre-registration model)
 email               TEXT
-certificate_id      TEXT
-signup_source       TEXT        -- 'ui' | 'mcp' | 'api'
+certificate_id      TEXT        -- UNIQUE partial index (WHERE certificate_id IS NOT NULL)
+signup_source       TEXT        -- 'ui' | 'cli' | 'mcp' | 'api'
+status              TEXT        -- 'pending_profile' (set by register-agent)
+user_id             UUID        -- nullable (set by trigger, NOT by register-agent)
 metadata            JSONB       -- { agent_description, client_ip }
 created_at          TIMESTAMPTZ -- default now()
 ```
 
-### RLS policies needed
+### Key constraints
+
+- `domain_requested` is NOT unique — multiple users can pre-register the same `.agent` domain
+- `certificate_id` has a UNIQUE partial index — prevents same user re-registering the same agent
+- `user_id` is nullable — register-agent INSERTs with NULL, the `on_dmv_registration` trigger fills it in
+- CHECK constraints enforce `full_name` for INDIVIDUAL/ORGANIZATION and `organization_name` for ORGANIZATION
+
+### Trigger chain (managed by agentcommunity.org)
+
+On INSERT where `certificate_id IS NOT NULL`, the `on_dmv_registration` trigger fires asynchronously (pg_net) and calls the `handle-dmv-registration` edge function on the agentcommunity.org side. This:
+- Creates or finds an auth user by email
+- Sends a magic link (new users only)
+- Upserts the domain into `user_domains`
+- Sends a certificate email with badge embed codes
+- Updates or deletes the temporary registration row
+
+DMV does NOT create auth users, send emails, or write to `user_domains`.
+
+### RLS policies
 
 ```sql
 -- Anon users should NOT have direct access (all writes go through edge function)
 -- The edge function uses the service role key, which bypasses RLS
--- So the safest RLS config is: deny everything for anon
-
 ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
-
 -- No policies = deny all for anon role
--- The service role key used by the edge function bypasses RLS entirely
-```
-
-### Unique constraint on domain
-
-```sql
-ALTER TABLE registrations ADD CONSTRAINT registrations_domain_unique UNIQUE (domain_requested);
 ```
 
 ---
@@ -79,7 +89,7 @@ curl -X POST \
   -d '{"agent_name": "test-deploy", "email": "test@example.com"}'
 ```
 
-Expected: `201` with `certificate_id`, `agent_name`, `domain`, `message`.
+Expected: `201` with `certificate_id`, `agent_name`, `domain`, `registration_type`, `permalink_url`, `badge_url`, `badge_card_url`, `message`.
 
 ### Test error cases
 
@@ -91,8 +101,8 @@ curl -X POST .../register-agent -H 'Content-Type: application/json' -d '{}'
 curl -X POST .../register-agent -H 'Content-Type: application/json' \
   -d '{"agent_name": "AB", "email": "x@y.com"}'
 
-# Duplicate domain → 409 (after first successful registration)
-# Same request twice → second returns "Domain X is already registered"
+# Duplicate certificate_id → 409 (same user + same agent name + same type)
+# Returns: "Agent already registered" + certificate_id + permalink_url
 
 # Rate limit → 429 (after 3 registrations with same email within an hour)
 ```
@@ -107,7 +117,7 @@ BASE=https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1
 # Lookup by cert ID → 200 JSON
 curl "$BASE/lookup-agent?id=MESA-DD6-660J"
 
-# Lookup by domain → 200 JSON
+# Lookup by domain → 200 JSON (array — multiple pre-registrations possible)
 curl "$BASE/lookup-agent?domain=my-assistant"
 
 # Invalid cert → 400
@@ -119,7 +129,7 @@ curl "$BASE/badge?id=MESA-DD6-660J" -o badge.svg
 # Card badge SVG (for websites)
 curl "$BASE/badge?id=MESA-DD6-660J&style=card" -o badge-card.svg
 
-# Badge by domain
+# Badge by domain → 400 (deprecated, ambiguous with multiple pre-registrations)
 curl "$BASE/badge?domain=my-assistant&style=card"
 ```
 
@@ -129,13 +139,13 @@ After registration, users get these snippets:
 
 **GitHub README (Markdown):**
 ```markdown
-[![my-assistant.agent](https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant)
+[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant)
 ```
 
 **Website (HTML):**
 ```html
-<a href="https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant">
-  <img src="https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/badge?id=MESA-DD6-660J&style=card" alt="my-assistant.agent — DMV Certificate" />
+<a href="https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant">
+  <img src="https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card" alt="my-assistant.agent — DMV Certificate" />
 </a>
 ```
 
@@ -210,7 +220,7 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 - **Supabase dashboard → Edge Functions → register-agent** — invocation count, error rate, latency
 - **Supabase dashboard → Table Editor → registrations** — row count, any anomalies
 - **Rate limiting** — check if 3/email/hr and 10/IP/hr are the right thresholds (adjust in edge function if needed)
-- **Duplicate domains** — 409 responses in edge function logs mean someone tried to re-register an existing name
+- **Duplicate certs** — 409 responses mean same user tried to re-register the same agent (expected, they get their cert ID back)
 
 ### Common issues
 
@@ -218,7 +228,7 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 |---------|-------|-----|
 | `Network error: could not reach DMV registration service` | Edge function not deployed or Supabase down | `supabase functions deploy register-agent` |
 | `Registration failed (HTTP 500)` | Service role key not set or DB schema mismatch | Check Supabase dashboard → Edge Functions → Logs |
-| `Domain X is already registered` (409) | Duplicate registration attempt | Expected behavior — name is taken |
+| `Agent already registered` (409) | Same user re-registering same agent | Expected — returns cert ID + permalink for recovery |
 | `Rate limited` (429) | Too many registrations from same email/IP | Wait an hour, or adjust thresholds |
 | CLI hangs on `bunx` | Package not published or npm registry cache | Try `npx @agentcommunity/dmv-agent` or `bunx --force` |
 
@@ -228,10 +238,11 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 
 These are noted for future work, not needed for go-live:
 
-- [ ] **Link/visit tracking** — Track permalink visits (`#/CERT-ID`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
-- [ ] **Email verification flow** — Supabase auth or custom email with verification link. Currently registration is "pre-registration" with no actual email sent.
+- [ ] **Link/visit tracking** — Track permalink visits (`/c/CERT-ID/agent-name`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
+- [x] **Email verification flow** — Magic link sent by agentcommunity.org trigger (on_dmv_registration). New users get magic link + certificate email. Existing users get certificate email only.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
 - [x] **Domain lookup endpoint** — `lookup-agent` edge function (built, deploy with others)
+- [x] **Badge by cert ID** — `badge` edge function (domain lookup deprecated)
 - [ ] **Real OG images** — server-side card rendering for social media previews (front face of HoloCard as static PNG)
 - [ ] **Python SDK** — thin wrapper that shells out to `bunx` for cross-language support
 - [ ] **Admin dashboard** — view registrations, manage verifications, handle disputes
@@ -241,11 +252,11 @@ These are noted for future work, not needed for go-live:
 ## Architecture Reference
 
 ```
-User's machine                          Supabase cloud
-──────────────                          ──────────────
+User's machine                          Supabase cloud (shared agentcommunity project)
+──────────────                          ──────────────────────────────────────────────
 
  ┌───────────────────┐                  ┌──────────────────────┐
- │ Claude Code        │   POST          │ register-agent        │
+ │ Claude Code        │   POST          │ register-agent (DMV)  │
  │  /dmv skill        │──────────────▶│ validate, rate limit  │
  │  MCP tool          │                │ generate cert, INSERT │
  └───────────────────┘                  └──────────┬───────────┘
@@ -255,21 +266,34 @@ User's machine                          Supabase cloud
  │ js/supabase.js     │                              │
  └───────────────────┘                              │
                                                     ▼
+                                      ┌────────────────────────┐
+                                      │ Supabase DB             │
+                                      │ registrations table     │
+                                      └──────────┬─────────────┘
+                                                   │ AFTER INSERT trigger
+                                                   │ (certificate_id IS NOT NULL)
+                                                   ▼
+                                      ┌────────────────────────┐
+                                      │ handle-dmv-registration │
+                                      │ (agentcommunity.org)    │
+                                      │ → create/find auth user │
+                                      │ → magic link (new user) │
+                                      │ → upsert user_domains   │
+                                      │ → certificate email      │
+                                      └────────────────────────┘
+
  ┌───────────────────┐   GET           ┌──────────────────────┐
- │ GitHub README      │──────────────▶│ badge                 │
- │ <img src=badge>    │                │ SVG: flat or card     │
+ │ GitHub README      │──────────────▶│ badge (DMV)            │
+ │ <img src=badge>    │                │ SVG by cert ID only    │
  └───────────────────┘                └──────────┬───────────┘
                                                     │ reads
  ┌───────────────────┐   GET                       │
  │ Any HTTP client    │──────────────▶┌────────────▼───────────┐
- │ curl, agents, etc  │               │ lookup-agent            │
- └───────────────────┘               │ public read-only JSON   │
-                                      └──────────┬───────────┘
-                                                   │ reads
-                                      ┌────────────▼──────────┐
-                                      │ Supabase DB            │
-                                      │ registrations table    │
+ │ curl, agents, etc  │               │ lookup-agent (DMV)      │
+ └───────────────────┘               │ single (by cert ID) or  │
+                                      │ array (by domain)       │
                                       └───────────────────────┘
 ```
 
 **Zero secrets in client code. All database access goes through edge functions.**
+**DMV INSERTs, agentcommunity.org reacts (trigger chain). Clean boundary.**

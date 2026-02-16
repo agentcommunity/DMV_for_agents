@@ -1,32 +1,30 @@
-import { TV } from './TV.js?v=7';
-import { AboutPoster } from './AboutPoster.js?v=7';
-import { HoloCard } from './HoloCard.js?v=7';
-import { insertRegistration } from './supabase.js?v=7';
+import { TV } from './TV.js?v=15';
+import { AboutPoster } from './AboutPoster.js?v=15';
+import { HoloCard } from './HoloCard.js?v=15';
+import { insertRegistration } from './supabase.js?v=15';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
 
-// Formats: #/CERT-ID or #/CERT-ID/agentname (agent name optional)
+// Permalink format: /c/CERT-ID/agentname
 function parsePermalink() {
-  const hash = window.location.hash;
-  if (!hash || !hash.startsWith('#/')) return null;
-  const parts = hash.slice(2).split('/').filter(Boolean);
-  if (parts.length < 1) return null;
+  const pathMatch = window.location.pathname.match(/^\/c\/([^/]+)(?:\/([^/]+))?\/?$/);
+  if (!pathMatch) return null;
   return {
-    certificateId: decodeURIComponent(parts[0]),
-    agentName: parts[1] ? decodeURIComponent(parts[1]) : '',
+    certificateId: decodeURIComponent(pathMatch[1]),
+    agentName: pathMatch[2] ? decodeURIComponent(pathMatch[2]) : '',
   };
 }
 
-function setShareHash(certificateId) {
-  history.replaceState(null, '', `#/${encodeURIComponent(certificateId)}`);
+function setShareHash(certificateId, agentName = '') {
+  const name = encodeURIComponent(agentName || 'agent');
+  history.replaceState(null, '', `/c/${encodeURIComponent(certificateId)}/${name}`);
 }
 
 const permalink = parsePermalink();
 
 const container = document.getElementById('canvasWrapper');
 const label = document.getElementById('modeLabel');
-const startScreen = document.getElementById('startScreen');
 const hiddenInput = document.getElementById('hiddenInput');
 const aboutToggleLink = document.getElementById('aboutToggleLink');
 const aboutCursorHost = container;
@@ -34,6 +32,8 @@ const cardShareBar = document.getElementById('cardShareBar');
 const cardShareBtn = document.getElementById('cardShareBtn');
 const cardCopyBtn = document.getElementById('cardCopyBtn');
 const cardShareTicker = document.getElementById('cardShareTicker');
+const appFavicon = document.getElementById('appFavicon');
+const agentMark = document.getElementById('agentMark');
 
 const tv = new TV(container, label);
 await tv.init();
@@ -45,16 +45,134 @@ tv.setCardMesh(holoCard.getMesh());
 const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
 
+function applyOuterUITheme(isNightMode) {
+  const dark = Boolean(isNightMode);
+  document.documentElement.classList.toggle('ui-dark', dark);
+  if (appFavicon) {
+    appFavicon.href = dark ? 'images/favicon_dark.ico?v=1' : 'images/favicon.ico?v=1';
+  }
+  aboutPoster.setTheme(dark ? 'dark' : 'light');
+}
+
+function downloadAgentWordmark(isDarkTheme) {
+  const fill = isDarkTheme ? '#FFFFFF' : '#101011';
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="320" viewBox="0 0 960 320">',
+    '<rect width="100%" height="100%" fill="none"/>',
+    `<text x="50%" y="56%" text-anchor="middle" dominant-baseline="middle" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="220" font-weight="700" letter-spacing="-0.03em" fill="${fill}">.agent</text>`,
+    '</svg>',
+  ].join('');
+  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = isDarkTheme ? 'agent-wordmark-dark.svg' : 'agent-wordmark-light.svg';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+if (agentMark) {
+  agentMark.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+  });
+  agentMark.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+  agentMark.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    downloadAgentWordmark(document.documentElement.classList.contains('ui-dark'));
+  });
+}
+
+applyOuterUITheme(tv.isNightMode);
+
 let latestCardData = null;
-let isCardShareVisible = false;
 let cardShareTickerTimeout = null;
+let lastScrollProgress = 0;
+let gyroEnabled = false;
+let gyroAttempted = false;
+const coarsePointerQuery = window.matchMedia('(pointer: coarse)');
+const mobileViewportQuery = window.matchMedia('(max-width: 767px)');
+
+const isCoarsePointer = () => coarsePointerQuery.matches;
+const isMobileViewport = () => mobileViewportQuery.matches;
+const CARD_FOCUS_SAMPLES = [[0, 0], [0.18, 0], [-0.18, 0], [0, 0.18], [0, -0.18]];
+
+function syncMobileUICompact(progress = lastScrollProgress) {
+  const isSceneFocused = tv.isCardZoomed || tv.isAboutZoomed;
+  const shouldCompact = isMobileViewport() && (
+    progress > 0.72 ||
+    isSceneFocused
+  );
+  document.body.classList.toggle('scene-focused', isSceneFocused);
+  document.body.classList.toggle('mobile-ui-compact', shouldCompact);
+}
+
+function syncHiddenInputValueFromCRT() {
+  if (!hiddenInput) return;
+  const nextValue = tv.crt.bootPhase === 4 ? tv.crt.getCurrentInputValue() : '';
+  if (hiddenInput.value !== nextValue) {
+    hiddenInput.value = nextValue;
+  }
+  const caret = hiddenInput.value.length;
+  try {
+    hiddenInput.setSelectionRange(caret, caret);
+  } catch (err) {
+    // Selection APIs can throw on some mobile browsers while focus changes.
+  }
+}
+
+function focusTerminalInput() {
+  if (!hiddenInput) return;
+  syncHiddenInputValueFromCRT();
+  try {
+    hiddenInput.focus({ preventScroll: true });
+  } catch (err) {
+    hiddenInput.focus();
+  }
+}
+
+function handleDeviceOrientation(event) {
+  const gamma = Number(event.gamma);
+  const beta = Number(event.beta);
+  if (!Number.isFinite(gamma) || !Number.isFinite(beta)) return;
+
+  const nx = Math.max(-1, Math.min(1, gamma / 35));
+  const ny = Math.max(-1, Math.min(1, (beta - 42) / 42));
+  holoCard.setPointer(nx, -ny);
+}
+
+async function maybeEnableGyro() {
+  if (gyroEnabled || gyroAttempted || !isCoarsePointer()) return;
+  const orientationApi = window.DeviceOrientationEvent;
+  if (!orientationApi) return;
+  gyroAttempted = true;
+
+  try {
+    if (typeof orientationApi.requestPermission === 'function') {
+      const permission = await orientationApi.requestPermission();
+      if (permission !== 'granted') return;
+    }
+    window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
+    gyroEnabled = true;
+  } catch (err) {
+    // Permission denied or unsupported context.
+  }
+}
+
+function buildPermalinkUrl(certId, agentName = '') {
+  const name = encodeURIComponent(agentName || 'agent');
+  return `https://dmv.agentcommunity.org/c/${encodeURIComponent(certId)}/${name}`;
+}
 
 function buildSharePayload(certId, data = {}) {
   const agentName = data.agentName || 'agent';
-  const shareUrl = `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+  const shareUrl = buildPermalinkUrl(certId, agentName);
   const text = encodeURIComponent(
     `I just registered ${agentName}.agent at the Department of Machine Verification.\n\n` +
-    `Certificate: ${certId}\n\n` +
     `Get yours -> ${shareUrl}`
   );
   return { text, shareUrl };
@@ -113,8 +231,6 @@ async function copyShareLink(certId, data = {}) {
 
 function setCardShareVisible(visible) {
   if (!cardShareBar) return;
-  if (isCardShareVisible === visible) return;
-  isCardShareVisible = visible;
   cardShareBar.hidden = !visible;
   if (!visible && cardShareTicker) {
     cardShareTicker.classList.remove('is-visible', 'card-share-bar__ticker--warn');
@@ -125,9 +241,20 @@ function setCardShareVisible(visible) {
 function syncCardShareBar() {
   if (!cardShareBar) return;
   const canShare = Boolean(latestCardData?.certificateId);
+  const cardMesh = holoCard.getMesh();
   if (cardShareBtn) cardShareBtn.disabled = !canShare;
   if (cardCopyBtn) cardCopyBtn.disabled = !canShare;
-  const shouldShow = !permalink && tv.isCardZoomed && holoCard.getMesh().visible && !tv.isAboutZoomed;
+  let isCardInView = false;
+  if (cardMesh && tv.getMeshIntersectionAtNDC) {
+    for (const [x, y] of CARD_FOCUS_SAMPLES) {
+      if (tv.getMeshIntersectionAtNDC(cardMesh, x, y)) {
+        isCardInView = true;
+        break;
+      }
+    }
+  }
+  const isCardFocused = tv.isCardZoomed && isCardInView;
+  const shouldShow = canShare && !permalink && isCardFocused && cardMesh.visible && !tv.isAboutZoomed;
   setCardShareVisible(shouldShow);
 }
 
@@ -152,6 +279,7 @@ cardCopyBtn?.addEventListener('click', async (e) => {
 tv.onRender((dt) => {
   holoCard.update(dt);
   syncCardShareBar();
+  syncMobileUICompact();
 });
 
 function setAboutLinkActive(active) {
@@ -224,13 +352,12 @@ if (permalink) {
   }
 
   ctaBtn?.addEventListener('click', () => {
-    history.replaceState(null, '', window.location.pathname);
-    window.location.reload();
+    window.location.href = '/';
   });
 
   shareBtn?.addEventListener('click', () => {
     const certId = permalink.certificateId;
-    const shareUrl = `https://dmv.agentcommunity.org/#/${encodeURIComponent(certId)}`;
+    const shareUrl = buildPermalinkUrl(certId, permalink.agentName);
     const agentPart = permalink.agentName ? `${permalink.agentName}.agent` : 'an agent';
     const text = encodeURIComponent(
       `Check out ${agentPart} - verified at the Department of Machine Verification.\n\n` +
@@ -260,7 +387,7 @@ if (permalink) {
 tv.crt.onComplete = async (data) => {
   let current = { ...data };
   latestCardData = current;
-  setShareHash(current.certificateId);
+  setShareHash(current.certificateId, current.agentName);
   holoCard.show(current);
 
   try {
@@ -273,7 +400,7 @@ tv.crt.onComplete = async (data) => {
       };
       latestCardData = current;
       tv.crt.setCertificateId(current.certificateId);
-      setShareHash(current.certificateId);
+      setShareHash(current.certificateId, current.agentName);
       holoCard.show(current, true);
     }
   } catch (err) {
@@ -309,7 +436,7 @@ if (!permalink && aboutToggleLink) {
   });
 }
 
-const audio = new Audio('audio/music.mp3');
+const audio = new Audio(encodeURI('audio/pat102 - electro dance.mp3'));
 audio.loop = true;
 let soundOn = false;
 const soundToggle = document.getElementById('soundToggle');
@@ -345,9 +472,13 @@ ScrollTrigger.create({
   end: 'bottom bottom',
   onUpdate: ({ progress }) => {
     if (window.innerWidth < 768) label.classList.add('hidden');
-    tv.animateCameraPosition(Math.min(progress, 0.95));
+    lastScrollProgress = Math.min(progress, 0.95);
+    document.body.classList.toggle('scrolled', lastScrollProgress > 0.02);
+    tv.animateCameraPosition(lastScrollProgress);
+    syncMobileUICompact(lastScrollProgress);
   }
 });
+syncMobileUICompact();
 
 function updatePointer(clientX, clientY) {
   tv.setMousePosition(clientX, clientY);
@@ -366,12 +497,15 @@ window.addEventListener('pointerdown', (e) => {
   syncAboutHover(e.clientX, e.clientY);
 });
 
+let aboutTouchY = null;
 window.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
   if (!t) return;
+  maybeEnableGyro();
   updatePointer(t.clientX, t.clientY);
   aboutPoster.clearHoveredLink();
   if (aboutCursorHost) aboutCursorHost.style.cursor = '';
+  if (aboutPoster.visible) aboutTouchY = t.clientY;
 }, { passive: true });
 
 window.addEventListener('wheel', (e) => {
@@ -380,19 +514,11 @@ window.addEventListener('wheel', (e) => {
   e.preventDefault();
 }, { passive: false });
 
-let aboutTouchY = null;
-window.addEventListener('touchstart', (e) => {
-  if (!aboutPoster.visible) return;
-  const t = e.touches[0];
-  if (!t) return;
-  aboutTouchY = t.clientY;
-}, { passive: true });
-
 window.addEventListener('touchmove', (e) => {
   if (!aboutPoster.visible) return;
   const t = e.touches[0];
   if (!t) return;
-  if (aboutTouchY == null) {
+  if (aboutTouchY === null) {
     aboutTouchY = t.clientY;
     return;
   }
@@ -407,6 +533,7 @@ window.addEventListener('touchend', () => {
 });
 
 window.addEventListener('click', (e) => {
+  maybeEnableGyro();
   if (e.target.closest('.card-share-bar')) return;
   if (e.target.closest('.permalink-overlay')) return;
 
@@ -416,6 +543,18 @@ window.addEventListener('click', (e) => {
       return;
     }
     return;
+  }
+
+  if (tv.crt.inputActive && isCoarsePointer() && !tv.isCardZoomed) {
+    const crtPoint = tv.getCRTSurfacePointAt(e.clientX, e.clientY);
+    if (crtPoint) {
+      const handled = tv.crt.handlePointerTap(crtPoint.x, crtPoint.y, crtPoint.altY);
+      if (tv.crt.bootPhase === 4) {
+        focusTerminalInput();
+        return;
+      }
+      if (handled) return;
+    }
   }
 
   const intersects = tv.getIntersectsAt(e.clientX, e.clientY);
@@ -429,21 +568,38 @@ window.addEventListener('click', (e) => {
   }
   if (intersects.includes('button')) {
     tv.toggleNightModeTV();
-    startScreen.classList.toggle('night-mode', tv.isNightMode);
+    applyOuterUITheme(tv.isNightMode);
     return;
   }
 
-  if (tv.crt.inputActive) {
-    hiddenInput.focus();
-  }
+  if (tv.crt.inputActive && !isCoarsePointer()) focusTerminalInput();
 });
 
 const checkFocus = setInterval(() => {
-  if (tv.crt.inputActive) {
-    hiddenInput.focus();
+  if (tv.crt.inputActive && !isCoarsePointer()) {
+    focusTerminalInput();
     clearInterval(checkFocus);
   }
 }, 200);
+
+hiddenInput?.addEventListener('input', () => {
+  if (!tv.crt.inputActive || tv.crt.bootPhase !== 4) return;
+  tv.crt.setCurrentInputValue(hiddenInput.value);
+});
+
+hiddenInput?.addEventListener('keydown', (e) => {
+  if (!tv.crt.inputActive || tv.crt.bootPhase !== 4) return;
+  e.stopPropagation();
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  tv.crt.handleKey('Enter');
+  if (tv.crt.bootPhase === 4) {
+    focusTerminalInput();
+    return;
+  }
+  syncHiddenInputValueFromCRT();
+  hiddenInput.blur();
+});
 
 const passthroughKeys = new Set([
   'Backspace', 'Enter',
@@ -505,6 +661,13 @@ window.addEventListener('keydown', (e) => {
   } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
     tv.crt.handleKey(e.key);
   }
+
+  if (tv.crt.bootPhase === 4) {
+    focusTerminalInput();
+  }
 });
 
-window.addEventListener('resize', () => tv.resize());
+window.addEventListener('resize', () => {
+  tv.resize();
+  syncMobileUICompact();
+});

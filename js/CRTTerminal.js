@@ -19,10 +19,12 @@ export class CRTTerminal {
       green: {
         bg: '#0a0d0a', text: '#33ff88', dim: '#1a5a3a',
         cursor: '#33ff88', header: '#88ffcc', flickerRGB: '51, 255, 136',
+        glowBlur: 2, rollAlpha: 0.03, burnAlpha: 0.03,
       },
       orange: {
         bg: '#0d0908', text: '#ffaa33', dim: '#cc8844',
         cursor: '#ffaa33', header: '#ffdd88', flickerRGB: '255, 170, 51',
+        glowBlur: 5, rollAlpha: 0.18, burnAlpha: 0.07,
       },
     };
 
@@ -33,6 +35,9 @@ export class CRTTerminal {
     this.cursorColor = '#33ff88';
     this.headerColor = '#88ffcc';
     this.flickerRGB = '51, 255, 136';
+    this.glowBlur = 2;
+    this.rollAlpha = 0.03;
+    this.burnAlpha = 0.03;
 
     // Text state
     this.lines = [];           // { text, color, typed (chars revealed so far) }
@@ -149,6 +154,16 @@ export class CRTTerminal {
 
     // Scanline + noise
     this.time = 0;
+
+    // Interactive hit targets rebuilt every frame by draw().
+    this.tapTargets = [];
+
+    // Device detection
+    this.isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+
+    // Enter-to-begin gate (between boot text and type selector)
+    this._waitingForEnter = false;
+    this._enterPromptIndex = null;
   }
 
   // FNV-1a 32-bit hash
@@ -199,6 +214,9 @@ export class CRTTerminal {
     this.cursorColor = p.cursor;
     this.headerColor = p.header;
     this.flickerRGB = p.flickerRGB;
+    this.glowBlur = p.glowBlur;
+    this.rollAlpha = p.rollAlpha;
+    this.burnAlpha = p.burnAlpha;
     // Remap colors on existing lines
     const remap = { [oldText]: p.text, [oldDim]: p.dim, [oldHeader]: p.header };
     for (const line of this.lines) {
@@ -234,6 +252,13 @@ export class CRTTerminal {
   // --- Phase 3: Type Selector ---
 
   startTypeSelector() {
+    // Remove "Press ENTER" prompt if present
+    if (this._enterPromptIndex != null) {
+      this.lines.splice(this._enterPromptIndex);
+      this._enterPromptIndex = null;
+    }
+    this._waitingForEnter = false;
+
     this.bootPhase = 3;
     this.selectorIndex = 0;
     this.inputActive = true;
@@ -306,7 +331,7 @@ export class CRTTerminal {
   }
 
   drawTypeSelector(ctx, startY) {
-    const boxWidth = 340;
+    const boxWidth = 400;
     const boxHeight = 60;
     const gap = 16;
     const x = this.padding + 16;
@@ -321,21 +346,33 @@ export class CRTTerminal {
       ctx.lineWidth = isHighlighted ? 2 : 1;
       ctx.strokeRect(x, y, boxWidth, boxHeight);
 
+      // Arrow indicator for highlighted option
+      if (isHighlighted) {
+        ctx.font = `${this.fontSize}px "Courier New", monospace`;
+        ctx.fillStyle = textColor;
+        ctx.shadowColor = textColor;
+        ctx.shadowBlur = this.glowBlur;
+        ctx.fillText('▶', x - 18, y + 14);
+        ctx.shadowBlur = 0;
+      }
+
       ctx.font = `${this.fontSize}px "Courier New", monospace`;
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
-      ctx.shadowBlur = isHighlighted ? 4 : 0;
+      ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
 
       if (i === 0) {
         ctx.fillText('  [1]  ORGANIZATION', x + 12, y + 14);
         ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
         ctx.fillStyle = this.dimColor;
         ctx.fillText('       Register a company or team', x + 12, y + 38);
+        this._addTapTarget('type_org', x, y, boxWidth, boxHeight);
       } else {
         ctx.fillText('  [2]  INDIVIDUAL', x + 12, y + 14);
         ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
         ctx.fillStyle = this.dimColor;
         ctx.fillText('       Register yourself', x + 12, y + 38);
+        this._addTapTarget('type_individual', x, y, boxWidth, boxHeight);
       }
       ctx.shadowBlur = 0;
 
@@ -344,7 +381,8 @@ export class CRTTerminal {
 
     ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Press 1/2 or Arrow keys + Enter', x + 12, y + 8);
+    const hintText = this.isMobile ? '  Tap to select' : '  ↑/↓ Navigate  ·  Enter to select';
+    ctx.fillText(hintText, x + 12, y + 8);
   }
 
   drawDoneButtons(ctx, startY) {
@@ -371,9 +409,11 @@ export class CRTTerminal {
       ctx.font = `${this.fontSize}px "Courier New", monospace`;
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
-      ctx.shadowBlur = isHighlighted ? 4 : 0;
+      ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
       ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
       ctx.shadowBlur = 0;
+
+      this._addTapTarget(i === 0 ? 'done_view' : 'done_share', x, y, boxWidth, boxHeight);
 
       y += boxHeight + gap;
     }
@@ -480,6 +520,16 @@ export class CRTTerminal {
     return '';
   }
 
+  setCurrentInputValue(value) {
+    if (this.bootPhase !== 4 || this.currentField < 0 || this.currentField >= this.fields.length) {
+      return false;
+    }
+    const normalizedValue = typeof value === 'string' ? value : String(value ?? '');
+    this.fields[this.currentField].value = normalizedValue;
+    this.validationError = null;
+    return true;
+  }
+
   // --- Phase 5: Review & Submit ---
 
   startReview() {
@@ -513,13 +563,164 @@ export class CRTTerminal {
     ctx.font = `${this.fontSize}px "Courier New", monospace`;
     ctx.fillStyle = this.headerColor;
     ctx.shadowColor = this.headerColor;
-    ctx.shadowBlur = 4;
+    ctx.shadowBlur = this.glowBlur;
     ctx.fillText('  SUBMIT REGISTRATION', x + 12, startY + 16);
     ctx.shadowBlur = 0;
 
     ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Press Enter', x + 12, startY + 34);
+    ctx.fillText('  Tap or press Enter', x + 12, startY + 34);
+
+    this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
+  }
+
+  drawReviewButtons(ctx, startY) {
+    const boxWidth = 212;
+    const boxHeight = 52;
+    const gap = 14;
+    const x = this.padding + 12;
+    const y = startY;
+    const buttons = [
+      { key: '1', title: 'TERMS', subtitle: 'Read conditions', action: 'review_tnc' },
+      { key: '2', title: 'CHARTER', subtitle: 'Read community', action: 'review_charter' },
+    ];
+
+    for (let i = 0; i < buttons.length; i++) {
+      const btn = buttons[i];
+      const bx = x + i * (boxWidth + gap);
+
+      ctx.strokeStyle = this.dimColor;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, y, boxWidth, boxHeight);
+
+      ctx.font = `${this.fontSize - 2}px "Courier New", monospace`;
+      ctx.fillStyle = this.textColor;
+      ctx.shadowColor = this.textColor;
+      ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
+      ctx.fillText(`  [${btn.key}] ${btn.title}`, bx + 8, y + 11);
+      ctx.shadowBlur = 0;
+
+      ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+      ctx.fillStyle = this.dimColor;
+      ctx.fillText(`  ${btn.subtitle}`, bx + 8, y + 31);
+
+      this._addTapTarget(btn.action, bx, y, boxWidth, boxHeight);
+    }
+  }
+
+  drawReadingTouchHints(ctx) {
+    const closeW = 252;
+    const closeH = 34;
+    const closeX = this.w - this.padding - closeW;
+    const closeY = this.padding - 30;
+
+    // Top and bottom zones for touch scrolling while reading.
+    this._addTapTarget('review_scroll_up', 0, 0, this.w, this.h * 0.28);
+    this._addTapTarget('review_scroll_down', 0, this.h * 0.72, this.w, this.h * 0.28);
+
+    ctx.strokeStyle = this.dimColor;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(closeX, closeY, closeW, closeH);
+    ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+    ctx.fillStyle = this.dimColor;
+    ctx.fillText('  Q / ESC / TAP = CLOSE', closeX + 10, closeY + 10);
+    this._addTapTarget('review_close', closeX, closeY, closeW, closeH);
+  }
+
+  _addTapTarget(action, x, y, w, h) {
+    if (!action) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) return;
+    this.tapTargets.push({ action, x, y, w, h });
+  }
+
+  _findTapAction(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    for (let i = this.tapTargets.length - 1; i >= 0; i--) {
+      const t = this.tapTargets[i];
+      if (x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h) {
+        return t.action;
+      }
+    }
+    return null;
+  }
+
+  _runTapAction(action) {
+    if (!action) return false;
+    if (action === 'enter_begin') {
+      if (this._waitingForEnter) {
+        this.startTypeSelector();
+      }
+      return true;
+    }
+    if (action === 'type_org') {
+      this.selectorIndex = 0;
+      this.selectAccountType();
+      return true;
+    }
+    if (action === 'type_individual') {
+      this.selectorIndex = 1;
+      this.selectAccountType();
+      return true;
+    }
+    if (action === 'review_tnc') {
+      this.handleReviewInput('1');
+      return true;
+    }
+    if (action === 'review_charter') {
+      this.handleReviewInput('2');
+      return true;
+    }
+    if (action === 'review_submit') {
+      this.handleReviewInput('Enter');
+      return true;
+    }
+    if (action === 'review_scroll_up') {
+      this.handleReviewInput('ArrowUp');
+      return true;
+    }
+    if (action === 'review_scroll_down') {
+      this.handleReviewInput('ArrowDown');
+      return true;
+    }
+    if (action === 'review_close') {
+      this.handleReviewInput('Escape');
+      return true;
+    }
+    if (action === 'done_view') {
+      this.handleDoneInput('1');
+      return true;
+    }
+    if (action === 'done_share') {
+      this.handleDoneInput('2');
+      return true;
+    }
+    return false;
+  }
+
+  handlePointerTap(x, y, altY = null) {
+    if (!this.inputActive) return false;
+
+    if (this.bootPhase === 4) {
+      return false;
+    }
+
+    const candidates = [{ x, y }];
+    if (Number.isFinite(altY) && Math.abs(altY - y) > 0.5) {
+      candidates.push({ x, y: altY });
+    }
+
+    for (const point of candidates) {
+      const action = this._findTapAction(point.x, point.y);
+      if (this._runTapAction(action)) return true;
+    }
+
+    // Fallback for meshes/materials where UV X may be mirrored.
+    for (const point of candidates) {
+      const action = this._findTapAction(this.w - point.x, point.y);
+      if (this._runTapAction(action)) return true;
+    }
+
+    return false;
   }
 
   handleReviewInput(key) {
@@ -607,6 +808,11 @@ export class CRTTerminal {
     if (!this.inputActive) return;
 
     switch (this.bootPhase) {
+      case 2:
+        if (this._waitingForEnter && key === 'Enter') {
+          this.startTypeSelector();
+        }
+        break;
       case 3: this.handleTypeSelector(key); break;
       case 4: this.handleFormInput(key); break;
       case 5: this.handleReviewInput(key); break;
@@ -668,8 +874,12 @@ export class CRTTerminal {
       }
       const allTyped = this.lines.length >= this.bootLines.length &&
         this.lines.every(l => l.typed >= l.text.length);
-      if (allTyped) {
-        this.startTypeSelector();
+      if (allTyped && !this._waitingForEnter) {
+        this._waitingForEnter = true;
+        this.inputActive = true;
+        this._enterPromptIndex = this.lines.length;
+        const promptText = this.isMobile ? '  ▶ Tap to begin' : '  ▶ Press [ENTER] to begin';
+        this.lines.push({ text: promptText, color: this.headerColor, typed: 0 });
       }
     } else if (this.bootPhase === 6) {
       // Processing animation
@@ -750,6 +960,7 @@ export class CRTTerminal {
     const ctx = this.ctx;
     const w = this.w;
     const h = this.h;
+    this.tapTargets = [];
 
     ctx.fillStyle = this.bgColor;
     ctx.fillRect(0, 0, w, h);
@@ -772,7 +983,7 @@ export class CRTTerminal {
 
     // Subtle background glow
     const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w * 0.7);
-    grad.addColorStop(0, `rgba(${this.flickerRGB}, 0.03)`);
+    grad.addColorStop(0, `rgba(${this.flickerRGB}, ${this.burnAlpha})`);
     grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
@@ -797,6 +1008,7 @@ export class CRTTerminal {
     let selectorStartLine = -1;
     let doneButtonsY = null;
     let submitButtonY = null;
+    let reviewButtonsY = null;
 
     if (this.bootPhase === 3) {
       for (let i = 0; i < this.lines.length; i++) {
@@ -813,6 +1025,16 @@ export class CRTTerminal {
 
       if (i === selectorStartLine) {
         selectorStartY = y;
+      }
+
+      if (
+        this.bootPhase === 5 &&
+        !this.reviewReading &&
+        (line.text === '  [1] Terms & Conditions (read)' || line.text === '  [2] Community Charter  (read)')
+      ) {
+        if (reviewButtonsY === null) reviewButtonsY = y - 2;
+        y += this.lineHeight;
+        continue;
       }
 
       // Skip placeholder lines for type selector (phase 3)
@@ -835,28 +1057,37 @@ export class CRTTerminal {
         continue;
       }
 
+      // Enter prompt: pulsing blink + full-screen tap target
+      const isEnterPrompt = this.bootPhase === 2 && this._waitingForEnter && i === this._enterPromptIndex;
+      if (isEnterPrompt && line.typed >= line.text.length) {
+        this._addTapTarget('enter_begin', 0, 0, w, h);
+        ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 0.06));
+      }
+
       if (y > -this.lineHeight && y < h) {
         if (line.answerStart != null && line.typed >= line.text.length) {
           const promptPart = line.text.substring(0, line.answerStart);
           const answerPart = line.text.substring(line.answerStart);
           ctx.shadowColor = line.color;
-          ctx.shadowBlur = 4;
+          ctx.shadowBlur = this.glowBlur;
           ctx.fillStyle = line.color;
           ctx.fillText(promptPart, this.padding, y);
           const promptW = ctx.measureText(promptPart).width;
           ctx.shadowColor = this.dimColor;
-          ctx.shadowBlur = 2;
+          ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
           ctx.fillStyle = this.dimColor;
           ctx.fillText(answerPart, this.padding + promptW, y);
           ctx.shadowBlur = 0;
         } else {
           ctx.shadowColor = line.color;
-          ctx.shadowBlur = 4;
+          ctx.shadowBlur = this.glowBlur;
           ctx.fillStyle = line.color;
           ctx.fillText(displayText, this.padding, y);
           ctx.shadowBlur = 0;
         }
       }
+
+      if (isEnterPrompt) ctx.globalAlpha = 1;
 
       // Active input line (form phase)
       if (this.bootPhase === 4 && this.inputActive && i === this.lines.length - 1 &&
@@ -865,7 +1096,7 @@ export class CRTTerminal {
         const promptWidth = ctx.measureText(displayText).width;
         ctx.fillStyle = this.textColor;
         ctx.shadowColor = this.textColor;
-        ctx.shadowBlur = 4;
+        ctx.shadowBlur = this.glowBlur;
         ctx.fillText(inputText, this.padding + promptWidth, y);
         ctx.shadowBlur = 0;
 
@@ -879,7 +1110,7 @@ export class CRTTerminal {
           ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
           ctx.fillStyle = this.headerColor;
           ctx.shadowColor = this.headerColor;
-          ctx.shadowBlur = 3;
+          ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
           ctx.fillText(`    ✗ ${this.validationError}`, this.padding, y + this.lineHeight);
           ctx.shadowBlur = 0;
           ctx.font = `${this.fontSize}px "Courier New", monospace`;
@@ -897,6 +1128,14 @@ export class CRTTerminal {
     // Submit button overlay
     if (this.bootPhase === 5 && !this.reviewReading && submitButtonY !== null) {
       this.drawSubmitButton(ctx, submitButtonY);
+    }
+
+    if (this.bootPhase === 5 && !this.reviewReading && reviewButtonsY !== null) {
+      this.drawReviewButtons(ctx, reviewButtonsY);
+    }
+
+    if (this.bootPhase === 5 && this.reviewReading) {
+      this.drawReadingTouchHints(ctx);
     }
 
     // Done buttons overlay
@@ -935,7 +1174,7 @@ export class CRTTerminal {
       ctx.fillRect(0, y, w, 1);
     }
     const rollY = (this.time * 1.5) % (h + 100) - 50;
-    ctx.fillStyle = `rgba(${this.flickerRGB}, 0.03)`;
+    ctx.fillStyle = `rgba(${this.flickerRGB}, ${this.rollAlpha})`;
     ctx.fillRect(0, rollY, w, 40);
   }
 

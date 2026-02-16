@@ -15,25 +15,27 @@ Scroll to zoom into TV. CRT boots, presents form. Type fields, Enter to advance.
 
 - Three.js 0.152.2 (CDN importmap)
 - GSAP 3.12.2 + ScrollTrigger (CDN globals)
+- Inter (Google Fonts, center `.agent` wordmark only)
 - Vanilla ES modules, no build system
 
 ## Structure
 
 ```
 index.html              HTML shell — importmap, CDN scripts, CSS link, module entry
-css/styles.css          All styles — grid layout, toggle, fonts, permalink overlay (1rem = 10px base)
-js/app.js               Entry — init TV + HoloCard, events, scroll, sound, clock, permalink routing
+css/styles.css          All styles — theme tokens, header/footer typography, center `.agent` mark, permalink overlay
+js/app.js               Entry — init TV + HoloCard, events, scroll, sound, clock, permalink routing, theme/favicon sync
 js/TV.js                3D scene — GLTF model, camera, renderer, night mode, onRender callbacks
 js/CRTTerminal.js       CRT terminal — Canvas2D, boot sequence, form, color schemes
 js/HoloCard.js          Holographic card — ShaderMaterial, front+back, rarity, identicon, QR pattern
 js/CardPoster.js        [Legacy] Original flat card, replaced by HoloCard
-js/AboutPoster.js       About panel — PlaneGeometry + CanvasTexture, toggle show/hide
+js/AboutPoster.js       About panel — PlaneGeometry + CanvasTexture, toggle show/hide, theme-aware colors
 js/supabase.js          Supabase integration — registration persistence (behind feature flag)
-hle_mirror/             Static assets only:
-  hle.io/models/tv1.glb   3D TV model (Draco GLTF)
-  hle.io/img/logo-white.svg
-  hle.io/_nuxt/assets/fonts/SupplyFree/  (4 .otf files)
-audio/music.mp3         Background music (user-provided, optional)
+images/
+  favicon.ico             Light mode favicon
+  favicon_dark.ico        Dark mode favicon
+fonts/                  PPSupply font files (4 .otf)
+models/                 3D models: tv1.glb (Draco GLTF)
+audio/                 Background music (user-provided, optional)
 ```
 
 ## Features
@@ -41,16 +43,19 @@ audio/music.mp3         Background music (user-provided, optional)
 - **CRT Terminal**: 8-phase boot (off → flicker → type → form → TnC → charter → process → done), scanlines, vignette, glow
 - **Holographic Card**: Custom GLSL shader with rainbow iridescence, foil lines, glare spotlight, fresnel edge glow, sparkle noise. Front + back faces. Gentle bob + mouse/gyro tilt tracking. See [CARD.md](CARD.md).
 - **Rarity System**: Cards get STANDARD (60%), ENHANCED (25%), RARE (10%), or LEGENDARY (5%) — determined by certificate ID hash. Affects holo intensity, accent color, and badge.
-- **Permalink Sharing**: `#/CERT-ID` URLs show the card directly. "Get Yours" + "Share on X" buttons for viral loop.
+- **Permalink Sharing**: `/c/CERT-ID/agent-name` URLs show the card directly with rich social previews. "Get Yours" + "Share on X" buttons for viral loop.
 - **Night Mode**: Click TV button. Swaps exposure, fog, CRT palette (green ↔ orange), button color
-- **Sound Toggle**: Plays/pauses `audio/music.mp3`
-- **UI**: Fixed header (brand + about/CTA + sound) and footer (tagline + scroll indicator + clock) over 3D canvas
+- **Sound Toggle**: Plays/pauses local background track from `audio/`
+- **UI Theme System**: Light/dark UI tokens drive text, controls, and About panel colors
+- **Center `.agent` Mark**: Inter-based `.a` core with hover-reveal `gent`; right-click downloads theme-colored `.agent` SVG
+- **Favicon Switching**: Auto-swaps between light/dark favicons with mode toggle
+- **UI Layout**: Fixed header (brand + about/CTA + sound) and footer (tagline + `by agentcommunity.org` + scroll + clock) over 3D canvas
 
 ## Permalink System
 
 ```
-Normal:    localhost:8080                   → scroll to TV, fill form, get card
-Permalink: localhost:8080/#/NEON-80C-898X   → card shown instantly, "Get Yours" overlay
+Normal:    localhost:8080                              → scroll to TV, fill form, get card
+Permalink: localhost:8080/c/NEON-80C-898X/agent-name   → card shown instantly, "Get Yours" overlay
 ```
 
 Visitors arriving via permalink see the holographic card zoomed in. They can:
@@ -69,10 +74,18 @@ Visitors arriving via permalink see the holographic card zoomed in. They can:
 | Exposure | 3.0 | 0.6 |
 | Fog | #7a7a7a | #454546 |
 
+## Backend
+
+Registration goes through the `register-agent` edge function (Supabase). On INSERT, a database trigger on the shared agentcommunity.org project handles auth user creation, magic link emails, and certificate emails automatically. DMV only INSERTs — everything else is reactive.
+
+Pre-registration model: multiple users can register interest in the same `.agent` domain. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map and [DEPLOY.md](packages/dmv-agent/DEPLOY.md) for the go-live checklist.
+
 ## Docs
 
 - [CARD.md](CARD.md) — Holographic card implementation, shader effects, rarity system, reuse guide
 - [AGENTS.md](AGENTS.md) — File-by-file function reference for agents
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Full system architecture, security model, badge system
+- [DEPLOY.md](packages/dmv-agent/DEPLOY.md) — Go-live checklist and deployment guide
 
 ## Browser Support
 

@@ -4,7 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DMV - Department of Machine Verification</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <meta name="description" content="Register your .agent identity at the Department of Machine Verification. Part of the .agent community.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="DMV - Department of Machine Verification">
+  <meta property="og:description" content="Register your .agent identity at the Department of Machine Verification. Part of the .agent community.">
+  <meta property="og:image" content="https://dmv.agentcommunity.org/api/og">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:url" content="https://dmv.agentcommunity.org">
+  <meta property="og:site_name" content="DMV - Department of Machine Verification">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="DMV - Department of Machine Verification">
+  <meta name="twitter:description" content="Register your .agent identity. Part of the .agent community.">
+  <meta name="twitter:image" content="https://dmv.agentcommunity.org/api/og">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/x-icon" href="images/favicon.ico?v=1" id="appFavicon">
+  <link rel="stylesheet" href="css/styles.css?v=12">
 </head>
 <body>
   <div id="scroller">
@@ -19,7 +36,7 @@
                   d="M35 72L30.1455 68.8748L29.8662 74.6415L35 72ZM35 3L29.8221 0.446117L30.1993 6.20728L35 3ZM30.5539 71.2847C20.7118 70.305 13.4635 66.05 8.66893 59.9053C3.86743 53.7518 1.5 45.6676 1.5 37H0.5C0.5 45.8421 2.91483 54.1565 7.88054 60.5205C12.8532 66.8933 20.357 71.2746 30.4548 72.2798L30.5539 71.2847ZM1.5 37C1.5 19.9994 14.1641 5.95586 30.573 3.78986L30.4421 2.79846C13.5424 5.02925 0.5 19.4911 0.5 37H1.5Z"
                   fill="#101011" />
               </svg>
-              <p class="nightmode-label__text p2">Switch Day 'N' Night</p>
+              <p class="nightmode-label__text">Switch Day 'N' Night</p>
             </div>
           </div>
         </div>
@@ -28,27 +45,33 @@
           <div class="start-header__left">
             <div class="header-brand">
               <span class="header-brand__title">DMV for agents</span>
-              <a href="#" class="header-link p2" id="aboutToggleLink" aria-expanded="false">About</a>
+              <a href="#" class="header-link" id="aboutToggleLink" aria-expanded="false">About</a>
             </div>
           </div>
           <div class="start-header__center">
-            <img class="start-header__logo" src="hle_mirror/hle.io/img/logo-white.svg" alt="DMV">
+            <a class="agent-mark" id="agentMark" href="https://agentcommunity.org" target="_blank" rel="noopener noreferrer" aria-label=".agent wordmark">
+              <span class="agent-mark__core">.a</span>
+              <span class="agent-mark__suffix">gent</span>
+            </a>
           </div>
           <div class="start-header__right">
             <button class="toggle" id="soundToggle">
-              <span class="p2">Sound</span>
+              <span class="toggle__label">Sound</span>
               <span class="toggle__track"><span class="toggle__thumb" id="soundThumb"></span></span>
             </button>
           </div>
         </header>
 
         <footer class="start-screen__footer">
-          <div class="footer__left p2">Department of Machine Verification — Identity Registration</div>
+          <div class="footer__left">
+            <span class="footer__title">Department of Machine Verification — Identity Registration</span>
+            <a class="footer__byline" href="https://agentcommunity.org" target="_blank" rel="noopener noreferrer">by agentcommunity.org</a>
+          </div>
           <div class="footer__center">
-            <p class="scroll-down p2"><span>Scroll Down</span><span class="scroll-down__icon"></span></p>
+            <p class="scroll-down"><span>Scroll Down</span><span class="scroll-down__icon"></span></p>
           </div>
           <div class="footer__right">
-            <p class="clock p2" id="clockEl">12 : 00 am</p>
+            <p class="clock" id="clockEl">12 : 00 am</p>
           </div>
         </footer>
       </div>
@@ -87,7 +110,8 @@
   </div>
 
   <!-- Hidden input for capturing keystrokes when terminal is active -->
-  <input id="hiddenInput" type="text" autocomplete="off" />
+  <input id="hiddenInput" type="text" autocomplete="off" autocapitalize="off"
+    autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" />
 
   <script type="importmap">
   {
@@ -99,6 +123,6 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
-  <script type="module" src="js/app.js?v=7"></script>
+  <script type="module" src="js/app.js?v=15"></script>
 </body>
 </html>

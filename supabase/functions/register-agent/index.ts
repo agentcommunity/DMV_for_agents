@@ -66,8 +66,23 @@ function validateRequest(body: Record<string, unknown>): string | null {
   if (!EMAIL_REGEX.test(email)) return 'Invalid email format'
 
   const source = body.signup_source as string
-  if (source && !['ui', 'mcp', 'api'].includes(source)) {
-    return 'signup_source must be ui, mcp, or api'
+  if (source && !['ui', 'cli', 'mcp', 'api'].includes(source)) {
+    return 'signup_source must be ui, cli, mcp, or api'
+  }
+
+  const regType = body.registration_type as string
+  if (regType && !['AGENT', 'INDIVIDUAL', 'ORGANIZATION'].includes(regType)) {
+    return 'registration_type must be AGENT, INDIVIDUAL, or ORGANIZATION'
+  }
+
+  // full_name required for INDIVIDUAL and ORGANIZATION
+  if ((regType === 'INDIVIDUAL' || regType === 'ORGANIZATION') && !body.operator_name) {
+    return 'operator_name (full_name) is required for INDIVIDUAL and ORGANIZATION registrations'
+  }
+
+  // organization_name required for ORGANIZATION
+  if (regType === 'ORGANIZATION' && !body.organization_name) {
+    return 'organization_name is required for ORGANIZATION registrations'
   }
 
   return null
@@ -179,6 +194,12 @@ Deno.serve(async (req) => {
   const certificateId = generateCertificateId(certFields, registrationType.toLowerCase())
   const domain = agentName + '.agent'
 
+  // Permalink + badge URLs (badges routed through our domain via Vercel rewrite)
+  const DMV_BASE = 'https://dmv.agentcommunity.org'
+  const permalinkUrl = `${DMV_BASE}/c/${encodeURIComponent(certificateId)}/${encodeURIComponent(agentName)}`
+  const badgeUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}`
+  const badgeCardUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}&style=card`
+
   // Insert
   const { error: insertError } = await supabase
     .from('registrations')
@@ -190,6 +211,7 @@ Deno.serve(async (req) => {
       email,
       certificate_id: certificateId,
       signup_source: signupSource,
+      status: 'pending_profile',
       metadata: {
         agent_description: description,
         client_ip: ip,
@@ -197,10 +219,14 @@ Deno.serve(async (req) => {
     })
 
   if (insertError) {
-    // Duplicate domain → friendly message
+    // Duplicate certificate_id — same user already registered this agent
     if (insertError.code === '23505') {
       return new Response(
-        JSON.stringify({ error: `Domain ${domain} is already registered` }),
+        JSON.stringify({
+          error: 'Agent already registered',
+          certificate_id: certificateId,
+          permalink_url: permalinkUrl,
+        }),
         { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       )
     }
@@ -216,10 +242,13 @@ Deno.serve(async (req) => {
       certificate_id: certificateId,
       agent_name: agentName,
       domain,
+      registration_type: registrationType,
+      permalink_url: permalinkUrl,
+      badge_url: badgeUrl,
+      badge_card_url: badgeCardUrl,
       message:
         `Certificate ${certificateId} issued for ${domain}. ` +
-        `A verification email will be sent to ${email}. ` +
-        `Please click the link to complete verification.`,
+        `Check your email for your .agent credentials.`,
     }),
     { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
   )

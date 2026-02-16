@@ -113,13 +113,13 @@ async function doRegister(
   try {
     const result = await registerAgent(
       { agentName, email, operatorName, description },
-      'api',
+      'cli',
     );
     console.error(`\n  ✓ ${result.message}`);
     console.error(`  Certificate: ${result.certificateId}`);
     console.error(`  Domain:      ${result.domain}`);
     console.error(
-      `  View:        dmv.agentcommunity.org/#/${encodeURIComponent(result.certificateId)}/${encodeURIComponent(result.agentName)}\n`,
+      `  View:        dmv.agentcommunity.org/c/${encodeURIComponent(result.certificateId)}/${encodeURIComponent(result.agentName)}\n`,
     );
   } catch (err) {
     console.error(`\n  ✗ ${(err as Error).message}\n`);

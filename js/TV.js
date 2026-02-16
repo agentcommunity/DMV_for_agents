@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { CRTTerminal } from './CRTTerminal.js?v=7';
+import { CRTTerminal } from './CRTTerminal.js?v=13';
 
 const gsap = window.gsap;
 
@@ -188,7 +188,7 @@ export class TV {
     }
 
     return new Promise((resolve, reject) => {
-      this.gltfLoader.load('hle_mirror/hle.io/models/tv1.glb', (gltf) => {
+      this.gltfLoader.load('models/tv1.glb', (gltf) => {
         this.model = gltf.scene;
         this.triggerEl = this.model.getObjectByName('Cube001');
         this.screen = this.model.getObjectByName('Glass');
@@ -527,6 +527,38 @@ export class TV {
     this.raycaster.setFromCamera(this._NDC, this.camera);
     const hits = this.raycaster.intersectObject(mesh, false);
     return hits.length > 0 ? hits[0] : null;
+  }
+
+  getMeshIntersectionAtNDC(mesh, ndcX = 0, ndcY = 0) {
+    if (!mesh || !this.camera) return null;
+    const x = Number.isFinite(ndcX) ? ndcX : 0;
+    const y = Number.isFinite(ndcY) ? ndcY : 0;
+    this.raycaster.setFromCamera({ x, y }, this.camera);
+    const hits = this.raycaster.intersectObject(mesh, false);
+    return hits.length > 0 ? hits[0] : null;
+  }
+
+  getCRTSurfacePointAt(clientX, clientY) {
+    if (!this.screen || !this.crt || !this.crtTexture) return null;
+    const hit = this.getMeshIntersectionAt(this.screen, clientX, clientY);
+    if (!hit?.uv) return null;
+
+    const uv = hit.uv.clone
+      ? hit.uv.clone()
+      : new THREE.Vector2(hit.uv.x, hit.uv.y);
+
+    this.crtTexture.updateMatrix();
+    uv.applyMatrix3(this.crtTexture.matrix);
+
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
+    const u = clamp01(uv.x);
+    const v = clamp01(uv.y);
+
+    return {
+      x: u * this.crt.w,
+      y: (1 - v) * this.crt.h,
+      altY: v * this.crt.h,
+    };
   }
 
   onRender(cb) {

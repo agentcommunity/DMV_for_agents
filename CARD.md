@@ -191,7 +191,7 @@ GSAP-animated opacity from 0 to 1 over 1.2s (if GSAP available, otherwise instan
 ## Permalink Flow
 
 ```
-User arrives at #/CERT-ID
+User arrives at /c/CERT-ID/agent-name
   → Card shown instantly (jumpToCard)
   → Camera zoomed to card face
   → "Get Yours" overlay at bottom

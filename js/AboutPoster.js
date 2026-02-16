@@ -15,12 +15,13 @@ export class AboutPoster {
     this.canvas.height = this.canvasH;
     this.ctx = this.canvas.getContext('2d');
 
-    // Scroll state for the white wall text
+    // Scroll state for the about wall text
     this.scrollOffset = 0;
     this.maxScroll = 0;
     this.viewportTop = 108;
     this.viewportBottom = this.canvasH - 24;
     this.viewportHeight = this.viewportBottom - this.viewportTop;
+    this.theme = 'light';
     this.linkHitboxes = [];
     this.hoveredLinkUrl = null;
     this.links = [
@@ -82,6 +83,13 @@ export class AboutPoster {
     });
   }
 
+  setTheme(mode) {
+    const theme = mode === 'dark' ? 'dark' : 'light';
+    if (theme === this.theme) return;
+    this.theme = theme;
+    this.draw();
+  }
+
   scrollBy(delta) {
     if (!Number.isFinite(delta) || this.maxScroll <= 0) return false;
     const next = Math.max(0, Math.min(this.maxScroll, this.scrollOffset + delta));
@@ -125,9 +133,9 @@ export class AboutPoster {
   getLinkAtUV(uv) {
     if (!uv) return null;
     const x = uv.x * this.canvasW;
-    const yFromTop = (1 - uv.y) * this.canvasH;
-    const yRaw = uv.y * this.canvasH;
-    return this.getLinkAtCanvasPoint(x, yFromTop) || this.getLinkAtCanvasPoint(x, yRaw);
+    const yFlipped = (1 - uv.y) * this.canvasH;
+    const yDirect = uv.y * this.canvasH;
+    return this.getLinkAtCanvasPoint(x, yFlipped) || this.getLinkAtCanvasPoint(x, yDirect);
   }
 
   setHoveredLinkFromUV(uv) {
@@ -170,6 +178,25 @@ export class AboutPoster {
       || '"PPSupplyMonoRegular", monospace';
     const uiMonoLight = rootStyle.getPropertyValue('--floating-ui-font-mono-light').trim()
       || '"PPSupplyMonoUltralight", "PPSupplyMonoRegular", monospace';
+    const cssColor = (name, fallback) => rootStyle.getPropertyValue(name).trim() || fallback;
+    const colors = {
+      title: cssColor('--about-title', 'rgba(255, 255, 255, 0.95)'),
+      titleGlow: cssColor('--about-title-glow', 'rgba(255, 255, 255, 0.3)'),
+      divider: cssColor('--about-divider', 'rgba(255, 255, 255, 0.15)'),
+      lineShadow: cssColor('--about-line-shadow', 'rgba(255, 255, 255, 0.15)'),
+      bodyStrong: cssColor('--about-body-strong', 'rgba(255, 255, 255, 0.85)'),
+      bodyDim: cssColor('--about-body-dim', 'rgba(255, 255, 255, 0.62)'),
+      bodySoft: cssColor('--about-body-soft', 'rgba(255, 255, 255, 0.54)'),
+      section: cssColor('--about-section', 'rgba(255, 255, 255, 0.88)'),
+      list: cssColor('--about-list', 'rgba(255, 255, 255, 0.74)'),
+      link: cssColor('--about-link', 'rgba(136, 255, 204, 0.86)'),
+      linkHover: cssColor('--about-link-hover', 'rgba(184, 255, 224, 0.98)'),
+      linkGlow: cssColor('--about-link-glow', 'rgba(136, 255, 204, 0.65)'),
+      note: cssColor('--about-note', 'rgba(255, 255, 255, 0.34)'),
+      scrollTrack: cssColor('--about-scroll-track', 'rgba(255, 255, 255, 0.12)'),
+      scrollThumb: cssColor('--about-scroll-thumb', 'rgba(255, 255, 255, 0.42)'),
+      scrollLabel: cssColor('--about-scroll-label', 'rgba(255, 255, 255, 0.38)'),
+    };
 
     const titleFont = `600 42px ${uiSans}`;
     const bodyFont = `24px ${uiMonoLight}`;
@@ -178,13 +205,13 @@ export class AboutPoster {
 
     // Fixed header
     ctx.font = titleFont;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-    ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
+    ctx.fillStyle = colors.title;
+    ctx.shadowColor = colors.titleGlow;
     ctx.shadowBlur = 12;
     ctx.fillText('ABOUT', 40, 40);
     ctx.shadowBlur = 0;
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillStyle = colors.divider;
     ctx.fillRect(40, 92, w - 80, 1);
 
     // Scrollable body region
@@ -198,7 +225,7 @@ export class AboutPoster {
     const drawLines = (lines, font, color, lineHeight, gapAfter = 12, shadow = 0) => {
       ctx.font = font;
       ctx.fillStyle = color;
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.15)';
+      ctx.shadowColor = shadow > 0 ? colors.lineShadow : 'transparent';
       ctx.shadowBlur = shadow;
       for (const line of lines) {
         const drawY = y - this.scrollOffset;
@@ -218,7 +245,7 @@ export class AboutPoster {
         '.agent community.',
       ],
       bodyFont,
-      'rgba(255, 255, 255, 0.85)',
+      colors.bodyStrong,
       34,
       14,
       6
@@ -232,7 +259,7 @@ export class AboutPoster {
         'verified, and trusted.',
       ],
       bodyFont,
-      'rgba(255, 255, 255, 0.62)',
+      colors.bodyDim,
       34,
       14,
       6
@@ -244,7 +271,7 @@ export class AboutPoster {
         'certificates that establish:',
       ],
       bodyFont,
-      'rgba(255, 255, 255, 0.85)',
+      colors.bodyStrong,
       34,
       12,
       6
@@ -257,7 +284,7 @@ export class AboutPoster {
         '  - Membership in the agent community',
       ],
       smallFont,
-      'rgba(255, 255, 255, 0.54)',
+      colors.bodySoft,
       30,
       18,
       0
@@ -266,7 +293,7 @@ export class AboutPoster {
     drawLines(
       ['WHAT YOU GET'],
       sectionFont,
-      'rgba(255, 255, 255, 0.88)',
+      colors.section,
       30,
       8,
       2
@@ -279,7 +306,7 @@ export class AboutPoster {
         '  - Badge endpoint for README and websites',
       ],
       smallFont,
-      'rgba(255, 255, 255, 0.74)',
+      colors.list,
       28,
       16,
       0
@@ -288,7 +315,7 @@ export class AboutPoster {
     drawLines(
       ['HOW IT WORKS'],
       sectionFont,
-      'rgba(255, 255, 255, 0.88)',
+      colors.section,
       30,
       8,
       2
@@ -306,7 +333,7 @@ export class AboutPoster {
         'registration metadata through open endpoints.',
       ],
       smallFont,
-      'rgba(255, 255, 255, 0.7)',
+      colors.list,
       28,
       16,
       0
@@ -315,7 +342,7 @@ export class AboutPoster {
     drawLines(
       ['LINKS'],
       sectionFont,
-      'rgba(255, 255, 255, 0.88)',
+      colors.section,
       30,
       8,
       2
@@ -328,8 +355,8 @@ export class AboutPoster {
       const isHovered = this.hoveredLinkUrl === link.url;
       const drawY = y - this.scrollOffset;
       if (drawY > this.viewportTop - 30 && drawY < this.viewportBottom + 20) {
-        ctx.fillStyle = isHovered ? 'rgba(184, 255, 224, 0.98)' : 'rgba(136, 255, 204, 0.86)';
-        ctx.shadowColor = isHovered ? 'rgba(136, 255, 204, 0.65)' : 'transparent';
+        ctx.fillStyle = isHovered ? colors.linkHover : colors.link;
+        ctx.shadowColor = isHovered ? colors.linkGlow : 'transparent';
         ctx.shadowBlur = isHovered ? 8 : 0;
         ctx.fillText(link.label, linkX, drawY);
         ctx.shadowBlur = 0;
@@ -354,7 +381,7 @@ export class AboutPoster {
         'Full verification coming soon.',
       ],
       smallFont,
-      'rgba(255, 255, 255, 0.34)',
+      colors.note,
       28,
       0,
       0
@@ -378,19 +405,19 @@ export class AboutPoster {
       const trackY = this.viewportTop + 8;
       const trackH = this.viewportHeight - 16;
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.fillStyle = colors.scrollTrack;
       ctx.fillRect(trackX, trackY, 2, trackH);
 
       const thumbH = Math.max(44, trackH * (trackH / (trackH + this.maxScroll)));
       const thumbTravel = trackH - thumbH;
       const thumbY = trackY + (this.scrollOffset / this.maxScroll) * thumbTravel;
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+      ctx.fillStyle = colors.scrollThumb;
       ctx.fillRect(trackX - 1, thumbY, 4, thumbH);
 
       if (this.scrollOffset < this.maxScroll - 2) {
         ctx.font = `12px ${uiMono}`;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
+        ctx.fillStyle = colors.scrollLabel;
         ctx.fillText('SCROLL', w - 76, h - 20);
       }
     }

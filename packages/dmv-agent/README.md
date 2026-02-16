@@ -98,12 +98,12 @@ After registration, embed a badge in your README or website. Every badge links b
 
 **GitHub README (Markdown):**
 ```markdown
-[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant)
+[![my-assistant.agent](https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J)](https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant)
 ```
 
 **Website (HTML):**
 ```html
-<a href="https://dmv.agentcommunity.org/#/MESA-DD6-660J/my-assistant">
+<a href="https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-assistant">
   <img src="https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card"
        alt="my-assistant.agent — DMV Certificate" />
 </a>
