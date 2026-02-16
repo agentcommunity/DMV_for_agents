@@ -21,6 +21,7 @@
 }
 
 :root {
+  --scroll-progress: 0;
   --font-mono-regular: "PPSupplyMonoRegular";
   --font-sans-regular: "PPSupplySansRegular";
   --font-mono-light: "PPSupplyMonoUltralight";
@@ -337,9 +338,12 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   letter-spacing: 0.07em;
   color: var(--ui-text-secondary);
   animation: scrollColorCycle 4s ease-in-out infinite;
+  transform: translateY(calc(var(--scroll-progress, 0) * 6rem));
+  opacity: calc(1 - var(--scroll-progress, 0) * 3);
 }
 .scroll-down__icon {
-  display: block; width: 1px; height: 2.8rem;
+  display: block; width: 1px;
+  height: calc(5.6rem * max(0, 1 - var(--scroll-progress, 0) * 3));
   background: currentColor;
   animation: scrollBounce 2s ease-in-out infinite;
 }
@@ -365,8 +369,7 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 
 body.scene-focused .footer__center { opacity: 0; }
 body.scene-focused .scroll-down { pointer-events: none; }
-.scroll-down { transition: opacity 0.6s ease; }
-body.scrolled .scroll-down { opacity: 0; pointer-events: none; }
+body.scrolled .scroll-down { pointer-events: none; }
 
 /* === Permalink overlay === */
 .permalink-overlay {
@@ -552,7 +555,7 @@ body.scrolled .scroll-down { opacity: 0; pointer-events: none; }
 
   .start-screen__footer {
     padding: 1.2rem var(--container-padding) calc(1.2rem + env(safe-area-inset-bottom));
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: 1fr auto 1fr;
     column-gap: 0.8rem;
   }
 
@@ -574,7 +577,7 @@ body.scrolled .scroll-down { opacity: 0; pointer-events: none; }
   }
 
   .scroll-down__icon {
-    height: 1.8rem;
+    height: calc(3.6rem * max(0, 1 - var(--scroll-progress, 0) * 3));
   }
 
   .clock {
@@ -592,10 +595,6 @@ body.scrolled .scroll-down { opacity: 0; pointer-events: none; }
   body.mobile-ui-compact .scroll-down,
   body.mobile-ui-compact .clock {
     font-size: 0.92rem;
-  }
-
-  body.mobile-ui-compact .scroll-down__icon {
-    height: 1.3rem;
   }
 
   .card-share-bar {
@@ -630,6 +629,44 @@ body.scrolled .scroll-down { opacity: 0; pointer-events: none; }
   .permalink-overlay__cert {
     font-size: 1.2rem;
   }
+}
+
+/* === Terminal status bar (mobile CRT escape hatch) === */
+.terminal-status-bar {
+  --tsb-color: rgba(51, 255, 136, 0.85);
+  --tsb-glow: rgba(51, 255, 136, 0.4);
+  --tsb-border: rgba(51, 255, 136, 0.18);
+  --tsb-bg: rgba(10, 13, 10, 0.92);
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 205;
+  display: flex;
+  align-items: center;
+  padding: 0.8rem var(--container-padding);
+  padding-bottom: calc(0.8rem + env(safe-area-inset-bottom));
+  background: var(--tsb-bg);
+  border-top: 1px solid var(--tsb-border);
+  font-family: "Courier New", monospace;
+  font-size: 1.2rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tsb-color);
+  cursor: pointer;
+  pointer-events: auto;
+  text-shadow: 0 0 6px var(--tsb-glow);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+:root.ui-dark .terminal-status-bar {
+  --tsb-color: rgba(255, 170, 51, 0.85);
+  --tsb-glow: rgba(255, 170, 51, 0.4);
+  --tsb-border: rgba(255, 170, 51, 0.18);
+  --tsb-bg: rgba(13, 9, 8, 0.92);
+}
+.terminal-status-bar:active {
+  opacity: 0.7;
 }
 
 /* Force-hide elements with [hidden] even when inline styles override */

@@ -21,7 +21,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/x-icon" href="images/favicon.ico?v=1" id="appFavicon">
-  <link rel="stylesheet" href="css/styles.css?v=12">
+  <link rel="stylesheet" href="css/styles.css?v=21">
 </head>
 <body>
   <div id="scroller">
@@ -109,6 +109,11 @@
     <p class="card-share-bar__ticker" id="cardShareTicker" hidden aria-live="polite"></p>
   </div>
 
+  <!-- Terminal status bar — mobile escape hatch (CRT-themed) -->
+  <div id="terminalStatusBar" class="terminal-status-bar" hidden>
+    <span id="terminalStatusText">&uarr; ZOOM OUT</span>
+  </div>
+
   <!-- Hidden input for capturing keystrokes when terminal is active -->
   <input id="hiddenInput" type="text" autocomplete="off" autocapitalize="off"
     autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" />
@@ -123,6 +128,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
-  <script type="module" src="js/app.js?v=15"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script type="module" src="js/app.js?v=21"></script>
 </body>
 </html>

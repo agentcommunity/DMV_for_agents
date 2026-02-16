@@ -62,6 +62,7 @@ export class CRTTerminal {
 
     // Review/submit state (phase 5)
     this.reviewReading = null;  // null | 'tnc' | 'charter'
+    this._readingOverscroll = 0; // overscroll counter for dismiss gesture
     this._certLineIndex = null;
 
     // TnC text
@@ -89,7 +90,6 @@ export class CRTTerminal {
       '     capability, reliability, or fitness for purpose.',
       '',
       '  ──────────────────────────────',
-      '  [Q/Esc] Return   [↑/↓] Scroll',
     ];
 
     // Charter text
@@ -119,7 +119,6 @@ export class CRTTerminal {
       '       of your verification certificate.',
       '',
       '  ──────────────────────────────',
-      '  [Q/Esc] Return   [↑/↓] Scroll',
     ];
 
     // Completion callback
@@ -139,9 +138,17 @@ export class CRTTerminal {
       { text: '  Machine Identity & Registration Terminal v1.0', color: this.dimColor },
       { text: '  ─────────────────────────────────', color: this.dimColor },
       { text: '', color: this.textColor },
-      { text: '  Initializing registration terminal...', color: this.textColor },
-      { text: '  Connection secure. Ready for input.', color: this.textColor },
-      { text: '', color: this.textColor },
+      { text: '  Initializing registration terminal...', color: this.dimColor, bootFiller: true },
+      { text: '  Connection secure.', color: this.dimColor, bootFiller: true },
+      { text: '  Ready for input.', color: this.textColor, bootFiller: true },
+      { text: '', color: this.textColor, bootFiller: true },
+      { text: '  agents need namespace', color: this.textColor, namespaceLine: true, bootFiller: true },
+      { text: '', color: this.textColor, bootFiller: true },
+      { text: '  Join the community & pre-register', color: this.dimColor, bootFiller: true },
+      { text: '  your dream .agent name', color: this.dimColor, bootFiller: true },
+      { text: '', color: this.textColor, bootFiller: true },
+      { text: '  Operated by agentcommunity.org', color: this.dimColor, bootFiller: true },
+      { text: '', color: this.textColor, bootFiller: true },
     ];
 
     // ID generation — content-addressed via FNV-1a hash
@@ -160,6 +167,10 @@ export class CRTTerminal {
 
     // Device detection
     this.isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+
+    // Type selector flash (mobile tap feedback)
+    this._selectorFlashTimer = 0;
+    this._selectorFlashIndex = -1;
 
     // Enter-to-begin gate (between boot text and type selector)
     this._waitingForEnter = false;
@@ -259,6 +270,12 @@ export class CRTTerminal {
     }
     this._waitingForEnter = false;
 
+    // Remove contextual boot filler lines
+    this.lines = this.lines.filter(l => !l.bootFiller);
+    while (this.lines.length > 0 && this.lines[this.lines.length - 1].text === '') {
+      this.lines.pop();
+    }
+
     this.bootPhase = 3;
     this.selectorIndex = 0;
     this.inputActive = true;
@@ -304,11 +321,7 @@ export class CRTTerminal {
       ];
     }
 
-    // Remove boot filler + selector placeholder lines
-    this.lines = this.lines.filter(l =>
-      l.text !== '  Initializing registration terminal...' &&
-      l.text !== '  Connection secure. Ready for input.'
-    );
+    // Remove selector placeholder lines
     if (this._selectorStartIndex != null) {
       const selectorHeader = this.lines.findIndex(l => l.text === '  Select account type:');
       if (selectorHeader >= 0) {
@@ -339,11 +352,18 @@ export class CRTTerminal {
 
     for (let i = 0; i < 2; i++) {
       const isHighlighted = this.selectorIndex === i;
-      const borderColor = isHighlighted ? this.headerColor : this.dimColor;
-      const textColor = isHighlighted ? this.textColor : this.dimColor;
+      const isFlashing = this._selectorFlashTimer > 0 && this._selectorFlashIndex === i;
+      const borderColor = isFlashing ? this.headerColor : (isHighlighted ? this.headerColor : this.dimColor);
+      const textColor = isFlashing ? this.headerColor : (isHighlighted ? this.textColor : this.dimColor);
+
+      // Flash fill — bright tint behind the selected option
+      if (isFlashing) {
+        ctx.fillStyle = `rgba(${this.flickerRGB}, 0.12)`;
+        ctx.fillRect(x, y, boxWidth, boxHeight);
+      }
 
       ctx.strokeStyle = borderColor;
-      ctx.lineWidth = isHighlighted ? 2 : 1;
+      ctx.lineWidth = (isHighlighted || isFlashing) ? 2 : 1;
       ctx.strokeRect(x, y, boxWidth, boxHeight);
 
       // Arrow indicator for highlighted option
@@ -574,6 +594,35 @@ export class CRTTerminal {
     this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
   }
 
+  drawFormNextButton(ctx, inputY) {
+    // Position below the input (+ error space), same spot SUBMIT will occupy
+    const errorOffset = this.validationError ? this.lineHeight : 0;
+    const btnY = inputY + this.lineHeight + errorOffset + 12;
+
+    if (this.isMobile) {
+      const boxWidth = 340;
+      const boxHeight = 44;
+      const x = this.padding + 16;
+
+      ctx.strokeStyle = this.dimColor;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, btnY, boxWidth, boxHeight);
+
+      ctx.font = `${this.fontSize}px "Courier New", monospace`;
+      ctx.fillStyle = this.textColor;
+      ctx.shadowColor = this.textColor;
+      ctx.shadowBlur = this.glowBlur;
+      ctx.fillText('  NEXT \u25B8', x + 12, btnY + 14);
+      ctx.shadowBlur = 0;
+
+      this._addTapTarget('form_next', x, btnY, boxWidth, boxHeight);
+    } else {
+      ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+      ctx.fillStyle = this.dimColor;
+      ctx.fillText('  Enter to continue', this.padding, btnY);
+    }
+  }
+
   drawReviewButtons(ctx, startY) {
     const boxWidth = 212;
     const boxHeight = 52;
@@ -608,23 +657,34 @@ export class CRTTerminal {
     }
   }
 
-  drawReadingTouchHints(ctx) {
-    const closeW = 252;
-    const closeH = 34;
-    const closeX = this.w - this.padding - closeW;
-    const closeY = this.padding - 30;
+  drawReadingHints(ctx) {
+    this._addTapTarget('review_scroll_up', 0, 0, this.w, this.h * 0.3);
+    this._addTapTarget('review_scroll_down', 0, this.h * 0.65, this.w, this.h * 0.35);
 
-    // Top and bottom zones for touch scrolling while reading.
-    this._addTapTarget('review_scroll_up', 0, 0, this.w, this.h * 0.28);
-    this._addTapTarget('review_scroll_down', 0, this.h * 0.72, this.w, this.h * 0.28);
+    if (this.isMobile) {
+      // Show overscroll-to-dismiss hint when near the top
+      if (this.manualScrollY !== null && this.manualScrollY <= this.lineHeight * 2) {
+        const progress = Math.min(1, this._readingOverscroll / 12);
+        // Fade background at top for readability
+        const fadeGrad = ctx.createLinearGradient(0, 0, 0, this.padding + 10);
+        fadeGrad.addColorStop(0, this.bgColor);
+        fadeGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = fadeGrad;
+        ctx.fillRect(0, 0, this.w, this.padding + 10);
 
-    ctx.strokeStyle = this.dimColor;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(closeX, closeY, closeW, closeH);
-    ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
-    ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Q / ESC / TAP = CLOSE', closeX + 10, closeY + 10);
-    this._addTapTarget('review_close', closeX, closeY, closeW, closeH);
+        ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+        ctx.globalAlpha = 0.35 + 0.65 * progress;
+        ctx.fillStyle = this.dimColor;
+        ctx.fillText('\u2191 scroll up to return', this.padding, this.padding - 6);
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      const hintX = this.padding;
+      const hintY = this.padding - 6;
+      ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+      ctx.fillStyle = this.dimColor;
+      ctx.fillText('[Q / Esc] Close   [\u2191/\u2193] Scroll', hintX, hintY);
+    }
   }
 
   _addTapTarget(action, x, y, w, h) {
@@ -652,14 +712,24 @@ export class CRTTerminal {
       }
       return true;
     }
+    if (action === 'form_next') {
+      this.handleFormInput('Enter');
+      return true;
+    }
     if (action === 'type_org') {
       this.selectorIndex = 0;
-      this.selectAccountType();
+      if (this._selectorFlashTimer <= 0) {
+        this._selectorFlashIndex = 0;
+        this._selectorFlashTimer = 12;
+      }
       return true;
     }
     if (action === 'type_individual') {
       this.selectorIndex = 1;
-      this.selectAccountType();
+      if (this._selectorFlashTimer <= 0) {
+        this._selectorFlashIndex = 1;
+        this._selectorFlashTimer = 12;
+      }
       return true;
     }
     if (action === 'review_tnc') {
@@ -700,13 +770,21 @@ export class CRTTerminal {
   handlePointerTap(x, y, altY = null) {
     if (!this.inputActive) return false;
 
-    if (this.bootPhase === 4) {
-      return false;
-    }
-
     const candidates = [{ x, y }];
     if (Number.isFinite(altY) && Math.abs(altY - y) > 0.5) {
       candidates.push({ x, y: altY });
+    }
+
+    if (this.bootPhase === 4) {
+      for (const point of candidates) {
+        const action = this._findTapAction(point.x, point.y);
+        if (action === 'form_next' && this._runTapAction(action)) return true;
+      }
+      for (const point of candidates) {
+        const action = this._findTapAction(this.w - point.x, point.y);
+        if (action === 'form_next' && this._runTapAction(action)) return true;
+      }
+      return false;
     }
 
     for (const point of candidates) {
@@ -729,17 +807,31 @@ export class CRTTerminal {
       if (key === 'q' || key === 'Q' || key === 'Escape') {
         this.reviewReading = null;
         this.manualScrollY = null;
-        // Remove reading lines
+        this._readingOverscroll = 0;
         if (this._readingStartIndex != null) {
           this.lines.splice(this._readingStartIndex);
           this._readingStartIndex = null;
         }
-        // Review prompt lines are still in place — no need to re-add
       } else if (key === 'ArrowUp') {
         if (this.manualScrollY !== null) {
-          this.manualScrollY = Math.max(0, this.manualScrollY - this.lineHeight * 2);
+          if (this.manualScrollY <= 0) {
+            this._readingOverscroll++;
+            if (this._readingOverscroll >= 12) {
+              this.reviewReading = null;
+              this.manualScrollY = null;
+              this._readingOverscroll = 0;
+              if (this._readingStartIndex != null) {
+                this.lines.splice(this._readingStartIndex);
+                this._readingStartIndex = null;
+              }
+            }
+          } else {
+            this._readingOverscroll = 0;
+            this.manualScrollY = Math.max(0, this.manualScrollY - this.lineHeight * 2);
+          }
         }
       } else if (key === 'ArrowDown') {
+        this._readingOverscroll = 0;
         if (this.manualScrollY !== null) {
           const totalHeight = this.lines.length * this.lineHeight + this.padding * 2;
           const maxScroll = Math.max(0, totalHeight - this.h + 40);
@@ -759,6 +851,7 @@ export class CRTTerminal {
     // Read TnC
     if (key === '1') {
       this.reviewReading = 'tnc';
+      this._readingOverscroll = 0;
       this._readingStartIndex = this.lines.length;
       for (const line of this.tncText) {
         this.lines.push({ text: line, color: this.dimColor, typed: 999 });
@@ -772,6 +865,7 @@ export class CRTTerminal {
     // Read Charter
     if (key === '2') {
       this.reviewReading = 'charter';
+      this._readingOverscroll = 0;
       this._readingStartIndex = this.lines.length;
       for (const line of this.charterText) {
         this.lines.push({ text: line, color: this.dimColor, typed: 999 });
@@ -855,6 +949,16 @@ export class CRTTerminal {
     this.cursorTimer++;
     if (this.cursorTimer % 30 === 0) this.cursorVisible = !this.cursorVisible;
 
+    // Type selector flash timer (mobile tap feedback)
+    if (this._selectorFlashTimer > 0) {
+      this._selectorFlashTimer--;
+      if (this._selectorFlashTimer <= 0) {
+        this.selectorIndex = this._selectorFlashIndex;
+        this._selectorFlashIndex = -1;
+        this.selectAccountType();
+      }
+    }
+
     // Boot sequence state machine
     if (this.bootPhase === 1) {
       this.bootTimer++;
@@ -869,7 +973,7 @@ export class CRTTerminal {
       this.bootTimer++;
       if (this.bootTimer % 3 === 0 && this.bootLineIndex < this.bootLines.length) {
         const bl = this.bootLines[this.bootLineIndex];
-        this.lines.push({ text: bl.text, color: bl.color, typed: 0 });
+        this.lines.push({ ...bl, typed: 0 });
         this.bootLineIndex++;
       }
       const allTyped = this.lines.length >= this.bootLines.length &&
@@ -1009,6 +1113,7 @@ export class CRTTerminal {
     let doneButtonsY = null;
     let submitButtonY = null;
     let reviewButtonsY = null;
+    let formNextY = null;
 
     if (this.bootPhase === 3) {
       for (let i = 0; i < this.lines.length; i++) {
@@ -1065,7 +1170,9 @@ export class CRTTerminal {
       }
 
       if (y > -this.lineHeight && y < h) {
-        if (line.answerStart != null && line.typed >= line.text.length) {
+        if (line.namespaceLine) {
+          this._drawNamespaceLine(ctx, line, y);
+        } else if (line.answerStart != null && line.typed >= line.text.length) {
           const promptPart = line.text.substring(0, line.answerStart);
           const answerPart = line.text.substring(line.answerStart);
           ctx.shadowColor = line.color;
@@ -1115,6 +1222,7 @@ export class CRTTerminal {
           ctx.shadowBlur = 0;
           ctx.font = `${this.fontSize}px "Courier New", monospace`;
         }
+        formNextY = y;
       }
 
       y += this.lineHeight;
@@ -1123,6 +1231,11 @@ export class CRTTerminal {
     // Type selector overlay
     if (this.bootPhase === 3 && selectorStartY !== null) {
       this.drawTypeSelector(ctx, selectorStartY);
+    }
+
+    // Form next button overlay
+    if (this.bootPhase === 4 && formNextY !== null) {
+      this.drawFormNextButton(ctx, formNextY);
     }
 
     // Submit button overlay
@@ -1135,7 +1248,7 @@ export class CRTTerminal {
     }
 
     if (this.bootPhase === 5 && this.reviewReading) {
-      this.drawReadingTouchHints(ctx);
+      this.drawReadingHints(ctx);
     }
 
     // Done buttons overlay
@@ -1165,6 +1278,46 @@ export class CRTTerminal {
     if (Math.random() > 0.97) {
       ctx.fillStyle = `rgba(${this.flickerRGB}, ${Math.random() * 0.02})`;
       ctx.fillRect(0, Math.random() * h, w, 2);
+    }
+  }
+
+  _drawNamespaceLine(ctx, line, y) {
+    const displayText = line.text.substring(0, line.typed);
+    // "  agents need names" = 19 chars (bold), "pace" = 4 chars (dim + underline)
+    const splitAt = 19;
+
+    if (line.typed <= splitAt) {
+      ctx.fillStyle = line.color;
+      ctx.shadowColor = line.color;
+      ctx.shadowBlur = this.glowBlur;
+      ctx.fillText(displayText, this.padding, y);
+      ctx.shadowBlur = 0;
+    } else {
+      const namesPart = line.text.substring(0, splitAt);
+      ctx.fillStyle = line.color;
+      ctx.shadowColor = line.color;
+      ctx.shadowBlur = this.glowBlur;
+      ctx.fillText(namesPart, this.padding, y);
+      const namesW = ctx.measureText(namesPart).width;
+
+      const pacePart = displayText.substring(splitAt);
+      ctx.fillStyle = this.dimColor;
+      ctx.shadowColor = this.dimColor;
+      ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
+      ctx.fillText(pacePart, this.padding + namesW, y);
+      const paceW = ctx.measureText(pacePart).width;
+      ctx.shadowBlur = 0;
+
+      // Underline under "pace"
+      if (pacePart.length > 0) {
+        const underY = y + this.fontSize + 2;
+        ctx.strokeStyle = this.dimColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(this.padding + namesW, underY);
+        ctx.lineTo(this.padding + namesW + paceW, underY);
+        ctx.stroke();
+      }
     }
   }
 
