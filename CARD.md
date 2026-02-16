@@ -34,6 +34,8 @@ card.setPointer(normalizedX, normalizedY);
 | `update(dt)` | void | Frame update: shader time, bob animation, spring tilt, back mesh sync |
 | `setPointer(nx, ny)` | void | Set tilt target from mouse/gyro. Range: -1 (left/down) to 1 (right/up) |
 | `getMesh()` | THREE.Mesh | Front mesh — use for raycasting and zoom calculations |
+| `setVisible(bool)` | void | Compatibility shim for app.js zoom transitions (mesh stays visible for raycasting) |
+| `onClick(cb)` | void | Compatibility shim — stores callback. In shader mode, clicks handled via TV.js raycaster |
 | `toPNG()` | string | Export front face as PNG data-URL |
 | `getRarity()` | object | `{ name, pct, intensity, accent, rgb }` |
 | `dispose()` | void | Clean up textures, materials, geometries |

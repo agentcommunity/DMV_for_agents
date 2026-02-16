@@ -102,17 +102,30 @@ The Department of Machine Verification is the identity registration system for t
  └──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Five ways to register
+## Five ways to pre-register
 
-| Method | How | Who it's for |
-|--------|-----|-------------|
-| **Web terminal** | Visit dmv.agentcommunity.org, complete CRT form | Humans exploring |
-| **CLI** | `bunx @agentcommunity/dmv-agent register` | Developers in a terminal |
-| **MCP tool** | Claude calls `register_agent` tool via stdio | Autonomous agents |
-| **JS API** | `import { registerAgent }` from the package | Agent frameworks |
-| **Claude Code skill** | `/dmv` slash command | Claude Code users |
+| Method | How | Who it's for | Registration type |
+|--------|-----|-------------|-------------------|
+| **Web terminal** | Visit dmv.agentcommunity.org, complete CRT form | Humans & organizations | Individual / Organization |
+| **CLI** | `npx @agentcommunity/dmv-agent register` | AI agents (operator required) | Agent |
+| **MCP tool** | Claude calls `register_agent` tool via stdio | Autonomous agents | Agent |
+| **JS API** | `import { registerAgent }` from the package | Agent frameworks | Agent |
+| **Claude Code skill** | `/dmv` slash command | Claude Code users | Agent |
 
 All five paths call the same edge function. Zero database credentials on the client.
+
+The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `npx @agentcommunity/dmv-agent register --name <agent> --email <email> --operator <name>`.
+
+### Rate limiting (triple-layer for CLI)
+
+| Layer | Scope | Limit |
+|-------|-------|-------|
+| Client-side lockfile | Per machine (SHA-256 fingerprint) | 3 per 24h |
+| Server-side (email) | Per email address | 3 per hour |
+| Server-side (IP) | Per IP address | 10 per hour |
+| Server-side (fingerprint) | Per machine fingerprint | Sent with request |
+
+Client-side tracking stored in `~/.dmv-agent/registrations.json`.
 
 ## Repository structure
 
@@ -142,9 +155,11 @@ threejs_box_design_dmv/
 │
 ├── packages/dmv-agent/           NPM package: @agentcommunity/dmv-agent
 │   ├── src/
-│   │   ├── cli.ts                CLI binary (register, verify, serve)
+│   │   ├── cli.ts                CLI binary — CRT terminal UI, boot screen, form flow
+│   │   ├── ui.ts                  CRT frame renderer, ANSI colors, box drawing (zero deps)
+│   │   ├── rate-limit.ts          Machine fingerprint, local lockfile, 3/24h limit
 │   │   ├── mcp-server.ts         MCP server (register_agent, verify_certificate)
-│   │   ├── register.ts           Core registration (validate → POST to edge fn)
+│   │   ├── register.ts           Core registration (validate → POST to edge fn + fingerprint)
 │   │   ├── certificate.ts        FNV-1a hash + Luhn mod-36 cert ID generation
 │   │   ├── validate.ts           Agent name, email validation
 │   │   ├── types.ts              TypeScript interfaces
