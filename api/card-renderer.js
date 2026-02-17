@@ -5,8 +5,11 @@
 // IMPORTANT: This must stay aligned with js/card-draw.js (browser version).
 // Both use CARD_VERSION=2, landscape 880x630, identical CardDNA hashing.
 
-const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
-const path = require('path');
+import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Register PPSupplyMono font (relative to project root in Vercel)
 try {
@@ -708,7 +711,7 @@ function renderCard(canvas, name, dna, options) {
   return { certId, pal, rarity, dna };
 }
 
-module.exports = {
+export {
   createCanvas,
   withAlpha,
   roundRect,
