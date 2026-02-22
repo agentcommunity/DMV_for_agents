@@ -21,7 +21,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/x-icon" href="images/favicon.ico?v=1" id="appFavicon">
-  <link rel="stylesheet" href="css/styles.css?v=23">
+  <link rel="stylesheet" href="css/styles.css?v=24">
 </head>
 <body>
   <div id="scroller">
@@ -114,6 +114,9 @@
     <span id="terminalStatusText">&uarr; ZOOM OUT</span>
   </div>
 
+  <!-- Announcements for screen readers (CRT state changes, validation errors) -->
+  <div id="crtAnnouncements" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
   <!-- Hidden input for capturing keystrokes when terminal is active -->
   <input id="hiddenInput" type="text" autocomplete="off" autocapitalize="off"
     autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" />
@@ -128,7 +131,6 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script type="module" src="js/app.js?v=23"></script>
+  <script type="module" src="js/app.js?v=24"></script>
 </body>
 </html>

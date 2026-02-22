@@ -23,3 +23,5 @@ If the Supabase backend changes, update the rewrite destination in `vercel.json`
 - [ ] **Inline certificate cards** — Show cards on agentcommunity.org members dashboard domains section
 - [ ] **Individual endorsements** — Different DocuSeal link than org
 - [ ] **Fold DMV into monorepo** — If shared components emerge with agentcommunity.org
+- [ ] **Dynamic sitemap.xml** — Generate from registered agent permalinks. Requires edge function or build-time DB query to enumerate `/c/CERT-ID/agent-name` URLs
+- [ ] **JSON-LD structured data** — `Organization` + `WebApplication` on homepage, per-agent `Person`/`SoftwareApplication` markup on permalink pages

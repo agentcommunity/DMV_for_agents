@@ -1,4 +1,4 @@
-import { TV } from './TV.js?v=21';
+import { TV } from './TV.js?v=22';
 import { AboutPoster } from './AboutPoster.js?v=15';
 import { HoloCard } from './HoloCard.js?v=23';
 import { insertRegistration } from './supabase.js?v=15';
@@ -36,6 +36,7 @@ const appFavicon = document.getElementById('appFavicon');
 const agentMark = document.getElementById('agentMark');
 const terminalStatusBar = document.getElementById('terminalStatusBar');
 const terminalStatusText = document.getElementById('terminalStatusText');
+const crtAnnouncements = document.getElementById('crtAnnouncements');
 
 const tv = new TV(container, label);
 await tv.init();
@@ -320,6 +321,26 @@ terminalStatusBar?.addEventListener('click', (e) => {
 });
 
 let prevCardZoomed = false;
+let prevCrtPhase = -1;
+let prevCrtError = null;
+let prevCrtField = -1;
+
+function announce(message) {
+  if (!crtAnnouncements || !message) return;
+  // Clear then set to ensure repeated identical messages are announced
+  crtAnnouncements.textContent = '';
+  requestAnimationFrame(() => { crtAnnouncements.textContent = message; });
+}
+
+const PHASE_LABELS = {
+  2: 'Terminal booting',
+  3: 'Select account type: individual or organization',
+  4: 'Form input',
+  5: 'Review your information',
+  6: 'Processing registration',
+  7: 'Registration complete',
+};
+
 tv.onRender((dt) => {
   holoCard.update(dt, tv.camera, tv.renderer);
   // Show DOM card when zoom-in transition detected
@@ -327,6 +348,26 @@ tv.onRender((dt) => {
     holoCard.setVisible(true);
   }
   prevCardZoomed = tv.isCardZoomed;
+
+  // Announce CRT state changes for screen readers
+  const phase = tv.crt.bootPhase;
+  if (phase !== prevCrtPhase) {
+    const label = PHASE_LABELS[phase];
+    if (label) announce(label);
+    prevCrtPhase = phase;
+    prevCrtField = -1;
+  }
+  if (phase === 4) {
+    const err = tv.crt.validationError;
+    if (err && err !== prevCrtError) announce(err);
+    prevCrtError = err;
+    const fi = tv.crt.currentField;
+    if (fi !== prevCrtField && fi >= 0 && tv.crt.fields?.[fi]) {
+      announce(tv.crt.fields[fi].prompt);
+      prevCrtField = fi;
+    }
+  }
+
   syncCardShareBar();
   syncTerminalStatusBar();
   syncMobileUICompact();

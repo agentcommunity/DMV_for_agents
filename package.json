@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Root deps for Vercel Edge Functions (OG image generation)",
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.61",
     "@vercel/og": "^0.6.0"
   }
 }
