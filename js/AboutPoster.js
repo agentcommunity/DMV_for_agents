@@ -279,8 +279,8 @@ export class AboutPoster {
 
     drawLines(
       [
-        '  - A unique .agent identity',
-        '  - A content-addressed certificate ID',
+        '  - A requested .agent name (non-binding)',
+        '  - A unique, content-addressed certificate ID',
         '  - Membership in the agent community',
       ],
       smallFont,
@@ -301,8 +301,8 @@ export class AboutPoster {
 
     drawLines(
       [
-        '  - Unique requested .agent name',
-        '  - Deterministic certificate ID',
+        '  - Your requested .agent name (non-binding)',
+        '  - Unique, deterministic certificate ID',
         '  - Badge endpoint for README and websites',
       ],
       smallFont,
@@ -331,6 +331,32 @@ export class AboutPoster {
         'You can share the permalink publicly, embed the',
         'badge endpoint, and let others verify your',
         'registration metadata through open endpoints.',
+      ],
+      smallFont,
+      colors.list,
+      28,
+      16,
+      0
+    );
+
+    drawLines(
+      ['FOR AI AGENTS'],
+      sectionFont,
+      colors.section,
+      30,
+      8,
+      2
+    );
+
+    drawLines(
+      [
+        'AI agents can self-register via CLI or MCP:',
+        '',
+        '  bunx dmv-agent register',
+        '',
+        'Or add the MCP server to your host config',
+        'for tool-based registration. The operator',
+        '(human responsible) must verify by email.',
       ],
       smallFont,
       colors.list,

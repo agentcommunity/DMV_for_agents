@@ -53,34 +53,23 @@ Your agent can pre-register itself. The CLI is designed for agentic workflows �
 **How to pre-register:**
 
 ```bash
-npx @agentcommunity/dmv-agent register
+bunx dmv-agent register
 ```
 
-This opens an interactive CRT terminal in your shell. The agent provides its name and the operator's details. The operator (the human or org responsible) must verify via email.
+This opens an interactive CRT terminal in your shell. The agent provides its name and the operator's details. The operator (the human or org responsible) must verify via email — this is anti-bot, not anti-agent.
 
 For non-interactive use (scripting, CI, autonomous agents):
 
 ```bash
-npx @agentcommunity/dmv-agent register \
+bunx dmv-agent register \
   --name my-agent \
   --email operator@example.com \
   --operator "Acme Labs"
 ```
 
-For Claude Code or other MCP-compatible tools, add the MCP server:
+If `bunx` is not available, use `npx @agentcommunity/dmv-agent register`.
 
-```json
-{
-  "mcpServers": {
-    "dmv": {
-      "command": "npx",
-      "args": ["@agentcommunity/dmv-agent"]
-    }
-  }
-}
-```
-
-See the [npm package docs](packages/dmv-agent/README.md) for full CLI, MCP, and API reference.
+After registration, share your identity and set up AID for discovery — see the [npm package docs](packages/dmv-agent/README.md) for the full guide. An MCP server is also available for persistent tool access in agent hosts.
 
 ---
 
@@ -100,7 +89,7 @@ MESA-DD6-660J
 You can verify any certificate offline:
 
 ```bash
-npx @agentcommunity/dmv-agent verify MESA-DD6-660J
+bunx dmv-agent verify MESA-DD6-660J
 ```
 
 ### Your holographic card

@@ -28,6 +28,7 @@ All flows are **pre-registration** (not registration). Pre-registration records 
 ```
 app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canvas as Three.js texture)
         ├─► HoloCard.js                (holographic card, self-contained module)
+        ├─► WallSign.js                (wall sign above TV, fluorescent flicker animation)
         └─► AboutPoster.js             (about panel)
 ```
 
@@ -35,6 +36,7 @@ app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canv
 - `TV.js` — Three.js scene: GLTF model loading (Draco), camera, renderer, night mode toggle, raycaster, card/about zoom/unzoom, `onRender(cb)` callbacks, render loop with delta time.
 - `CRTTerminal.js` — Pure Canvas2D, no Three.js dependency. 8-phase boot state machine (off, flicker, boot text, type selector, form, review/submit, processing, done), conditional form fields with validation, color scheme swapping, CRT visual effects.
 - `HoloCard.js` — Self-contained holographic card module. Custom ShaderMaterial (GLSL) with rainbow iridescence, foil lines, glare, fresnel, sparkle. Front + back faces with Canvas2D content. Rarity system, identicon, QR pattern. Bob + tilt animation. See [CARD.md](CARD.md).
+- `WallSign.js` — Wall sign above the TV. PlaneGeometry + CanvasTexture with "DEPT. OF MACHINE VERIFICATION" title and "SELF-SERVE KIOSK" subtitle. Fluorescent tube flicker-on animation (GSAP timeline) fires ~1.2s after page load (not scroll-linked). Ambient flicker loop (random subtle opacity dips every 4-7s) runs after startup. Theme-aware via CSS custom properties. Self-contained with `dispose()` cleanup.
 - `CardPoster.js` — **Legacy.** Original flat card, replaced by HoloCard.js.
 - `AboutPoster.js` — PlaneGeometry + CanvasTexture. UI-style about text, toggle show/hide.
 
@@ -42,6 +44,18 @@ app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canv
 - Three.js 0.152.2 via importmap
 - GSAP 3.12.2 + ScrollTrigger via `<script>` tags (accessed as `window.gsap` in modules)
 - Draco decoder from Three.js CDN
+
+## Agent-Facing Content
+
+Multiple surfaces carry agent-onboarding content (register → share → AID → contribute). When editing one, keep the others consistent:
+
+- **SKILL.md** (`packages/dmv-agent/skills/dmv/SKILL.md`) — richest version, the "welcome packet". 7 sections including AID setup guide.
+- **llms.txt** — medium richness, linked from `<link rel="alternate">` in index.html. Includes registration, sharing, AID, contribute.
+- **README.md** (`packages/dmv-agent/README.md`) — "For AI agents" section with quick AID hint.
+- **Hidden HTML** (`index.html`, `<div hidden data-agent-info>`) — lightest distillation for agents parsing page source.
+- **Meta tags** (`index.html`, `<meta name="agent:*">`) — CLI command + MCP config for agent tooling discovery.
+
+CLI-first everywhere. MCP is available but secondary — `bunx dmv-agent register` over MCP config.
 
 ## Critical Constraints
 
@@ -85,6 +99,7 @@ In permalink mode:
 - **New color schemes:** Add to `CRTTerminal.palettes`, call `setColorScheme('name')`.
 - **Scroll-triggered events:** Add thresholds in `TV.animateCameraPosition(progress)` or use `tv.on('animationEnd', cb)`.
 - **Zoom transitions:** When transitioning between zoomed states (card → about), unzoom first with a delay, then zoom to new target.
+- **Wall sign tuning:** Flicker timing lives in `WallSign.flickerOn()` (GSAP timeline keyframes). Ambient flicker interval is in `_startAmbientFlicker()` (4-7s range, opacity dip to 0.92). Startup delay is the `setTimeout` in app.js (~1.2s). Sign position is `mesh.position.set(0, 3.0, -0.5)`.
 
 ## Static Assets
 
@@ -100,7 +115,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
 **Pre-registration model**: Multiple users can register interest in the same `.agent` domain. `domain_requested` is NOT unique. `certificate_id` is unique (same user+agent+type = same cert ID). Badge lookup is by cert ID only (`?domain=` deprecated).
 
-**NPM package** (`packages/dmv-agent/`): Published as `@agentcommunity/dmv-agent` on npm. CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, npx for users. Only runtime dep: `@modelcontextprotocol/sdk`. CLI sends `signup_source: 'cli'`, MCP sends `'mcp'`.
+**NPM package** (`packages/dmv-agent/`): Published as `@agentcommunity/dmv-agent` on npm, also available as `dmv-agent` (unscoped alias in `packages/dmv-agent-alias/`). CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, `bunx dmv-agent` for users. Only runtime dep: `@modelcontextprotocol/sdk`. CLI sends `signup_source: 'cli'`, MCP sends `'mcp'`.
 
 **CLI architecture** (`packages/dmv-agent/src/`):
 - `cli.ts` — Main CLI: boot screen, form flow, submit, content pages (about/terms/charter)
