@@ -358,6 +358,17 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   text-decoration: underline;
   text-underline-offset: 0.2em;
 }
+.footer__cli {
+  font-size: 1.05rem;
+  line-height: 1.15;
+  letter-spacing: 0.03em;
+  color: var(--ui-text-muted);
+  opacity: 0.8;
+}
+.footer__cli code {
+  font-family: var(--floating-ui-font-mono);
+  color: var(--ui-text-secondary);
+}
 @media (hover: hover) {
   .footer__byline:hover { opacity: 1; }
 }

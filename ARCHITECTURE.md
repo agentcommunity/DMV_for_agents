@@ -23,9 +23,10 @@ The Department of Machine Verification is the identity registration system for t
  │  └──────────────────────────────────────────────┘  │               │
  │                                                      │               │
  │  ┌──────────────────────────────────────────────┐  │               │
- │  │  NPM Package — @agentcommunity/dmv-agent      │  │               │
+ │  │  NPM Package — dmv-agent (alias for             │  │               │
+ │  │    @agentcommunity/dmv-agent)                   │  │               │
  │  │                                                │  │               │
- │  │  CLI:  bunx @agentcommunity/dmv-agent          │  │               │
+ │  │  CLI:  bunx dmv-agent                          │  │               │
  │  │    register   → interactive terminal flow      │  │               │
  │  │    verify     → offline check digit validation │  │               │
  │  │    (default)  → start MCP server               │  │               │
@@ -107,14 +108,14 @@ The Department of Machine Verification is the identity registration system for t
 | Method | How | Who it's for | Registration type |
 |--------|-----|-------------|-------------------|
 | **Web terminal** | Visit dmv.agentcommunity.org, complete CRT form | Humans & organizations | Individual / Organization |
-| **CLI** | `npx @agentcommunity/dmv-agent register` | AI agents (operator required) | Agent |
+| **CLI** | `bunx dmv-agent register` | AI agents (operator required) | Agent |
 | **MCP tool** | Claude calls `register_agent` tool via stdio | Autonomous agents | Agent |
 | **JS API** | `import { registerAgent }` from the package | Agent frameworks | Agent |
 | **Claude Code skill** | `/dmv` slash command | Claude Code users | Agent |
 
 All five paths call the same edge function. Zero database credentials on the client.
 
-The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `npx @agentcommunity/dmv-agent register --name <agent> --email <email> --operator <name>`.
+The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `bunx dmv-agent register --name <agent> --email <email> --operator <name>`.
 
 ### Rate limiting (triple-layer for CLI)
 
@@ -169,7 +170,12 @@ threejs_box_design_dmv/
 │   ├── README.md                 Package docs (quick start, API, security, architecture)
 │   └── DEPLOY.md                 Go-live checklist (DB, edge fns, npm publish, monitoring)
 │
-├── llms.txt                      LLM-readable site description
+├── packages/dmv-agent-alias/     NPM package: dmv-agent (unscoped alias)
+│   ├── bin/dmv-agent.js          Thin wrapper — re-exports @agentcommunity/dmv-agent CLI
+│   ├── package.json              Depends on @agentcommunity/dmv-agent
+│   └── README.md                 Short docs pointing to main package
+│
+├── llms.txt                      LLM-readable site description (agent onboarding, AID guide, sharing)
 ├── CLAUDE.md                     Instructions for Claude Code agents
 ├── AGENTS.md                     Terse code reference for agents
 └── ARCHITECTURE.md               ← this file
@@ -253,6 +259,20 @@ The DMV is one piece of a larger ecosystem:
 | **DMV** | Pre-registration terminal + badge + API (this repo) | dmv.agentcommunity.org |
 
 The DMV serves as the **identity layer for the pre-ICANN era**. Before `.agent` domains exist in DNS, the DMV certificate ID is the verifiable agent identity. When `.agent` launches, DMV registrations feed into the official DNS-based AID system.
+
+## Agent-facing content surfaces
+
+Every surface an agent might touch gives them the full story — what the DMV is, how to register, what to do after (share, set up AID), and how to contribute. Progressively lighter distillations of the same content:
+
+| Surface | Richness | Where | Audience |
+|---------|----------|-------|----------|
+| **SKILL.md** (welcome packet) | Full — 7 sections, AID setup guide, tweet templates | `packages/dmv-agent/skills/dmv/SKILL.md` | Claude Code `/dmv` skill |
+| **llms.txt** | Rich — registration, sharing, AID, contribute | `/llms.txt` (linked from `<link rel="alternate">`) | Any LLM reading the site |
+| **README.md** | Medium — "For AI agents" section, quick AID hint | `packages/dmv-agent/README.md` | Agents reading npm package docs |
+| **Hidden HTML** | Light — register command, AID record, key links | `index.html` `<div hidden data-agent-info>` | Agents parsing page source |
+| **Meta tags** | Minimal — CLI command, MCP config | `index.html` `<meta name="agent:*">` | Agent tooling / discovery |
+
+CLI-first everywhere. MCP is available but secondary — for one-time registration, `bunx dmv-agent register` is simpler than configuring an MCP server.
 
 ## Tech stack
 

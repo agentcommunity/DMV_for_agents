@@ -1,6 +1,7 @@
 import { TV } from './TV.js?v=22';
-import { AboutPoster } from './AboutPoster.js?v=15';
+import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=23';
+import { WallSign } from './WallSign.js?v=1';
 import { insertRegistration } from './supabase.js?v=15';
 
 const gsap = window.gsap;
@@ -58,6 +59,9 @@ holoCard.onClick(() => {
 const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
 
+const wallSign = new WallSign(tv.getScene());
+setTimeout(() => wallSign.flickerOn(), 1200);
+
 function applyOuterUITheme(isNightMode) {
   const dark = Boolean(isNightMode);
   document.documentElement.classList.toggle('ui-dark', dark);
@@ -65,6 +69,7 @@ function applyOuterUITheme(isNightMode) {
     appFavicon.href = dark ? 'images/favicon_dark.ico?v=1' : 'images/favicon.ico?v=1';
   }
   aboutPoster.setTheme(dark ? 'dark' : 'light');
+  wallSign.setTheme();
 }
 
 function downloadAgentWordmark(isDarkTheme) {
