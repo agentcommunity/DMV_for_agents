@@ -175,6 +175,13 @@ export class CRTTerminal {
     // Enter-to-begin gate (between boot text and type selector)
     this._waitingForEnter = false;
     this._enterPromptIndex = null;
+
+    // Dirty flag — skip draw() when nothing changed
+    this.dirty = true;
+    this.needsTextureUpload = false;
+
+    // Model loading bar (-1 = not loading, 0..1 = progress)
+    this.loadProgress = -1;
   }
 
   // FNV-1a 32-bit hash
@@ -215,6 +222,19 @@ export class CRTTerminal {
     return `${word}-${hex.slice(0, 3)}-${hex.slice(3)}${check}`;
   }
 
+  setLoadProgress(p) {
+    const clamped = Math.max(0, Math.min(1, p));
+    if (this.loadProgress !== clamped) {
+      this.loadProgress = clamped;
+      this.dirty = true;
+    }
+  }
+
+  loadComplete() {
+    this.loadProgress = -1;
+    this.dirty = true;
+  }
+
   setColorScheme(name) {
     const p = this.palettes[name];
     if (!p) return;
@@ -236,6 +256,7 @@ export class CRTTerminal {
     for (const line of this.bootLines) {
       if (remap[line.color]) line.color = remap[line.color];
     }
+    this.dirty = true;
   }
 
   turnOn() {
@@ -244,6 +265,7 @@ export class CRTTerminal {
     this.bootPhase = 1;
     this.bootTimer = 0;
     this.flickerCount = 0;
+    this.dirty = true;
   }
 
   getFormData() {
@@ -288,6 +310,7 @@ export class CRTTerminal {
   }
 
   handleTypeSelector(key) {
+    this.dirty = true;
     if (key === '1') {
       this.selectorIndex = 0;
       this.selectAccountType();
@@ -492,6 +515,7 @@ export class CRTTerminal {
 
   handleFormInput(key) {
     if (this.currentField < 0 || this.currentField >= this.fields.length) return;
+    this.dirty = true;
     const f = this.fields[this.currentField];
 
     if (key === 'Enter') {
@@ -547,6 +571,7 @@ export class CRTTerminal {
     const normalizedValue = typeof value === 'string' ? value : String(value ?? '');
     this.fields[this.currentField].value = normalizedValue;
     this.validationError = null;
+    this.dirty = true;
     return true;
   }
 
@@ -802,6 +827,7 @@ export class CRTTerminal {
   }
 
   handleReviewInput(key) {
+    this.dirty = true;
     // Reading mode
     if (this.reviewReading) {
       if (key === 'q' || key === 'Q' || key === 'Escape') {
@@ -880,6 +906,7 @@ export class CRTTerminal {
   // --- Phase 7: Done (View / Share) ---
 
   handleDoneInput(key) {
+    this.dirty = true;
     if (key === '1' && this.onViewCert) {
       this.doneIndex = 0;
       this.onViewCert();
@@ -934,6 +961,7 @@ export class CRTTerminal {
   setCertificateId(certificateId) {
     if (!certificateId) return;
     this._certificateId = certificateId;
+    this.dirty = true;
     if (this._certLineIndex == null) return;
     const line = this.lines[this._certLineIndex];
     if (!line) return;
@@ -947,11 +975,15 @@ export class CRTTerminal {
   update() {
     this.time++;
     this.cursorTimer++;
-    if (this.cursorTimer % 30 === 0) this.cursorVisible = !this.cursorVisible;
+    if (this.cursorTimer % 30 === 0) {
+      this.cursorVisible = !this.cursorVisible;
+      this.dirty = true;
+    }
 
     // Type selector flash timer (mobile tap feedback)
     if (this._selectorFlashTimer > 0) {
       this._selectorFlashTimer--;
+      this.dirty = true;
       if (this._selectorFlashTimer <= 0) {
         this.selectorIndex = this._selectorFlashIndex;
         this._selectorFlashIndex = -1;
@@ -962,6 +994,7 @@ export class CRTTerminal {
     // Boot sequence state machine
     if (this.bootPhase === 1) {
       this.bootTimer++;
+      this.dirty = true;
       if (this.bootTimer % 4 === 0) this.flickerCount++;
       if (this.flickerCount > 8) {
         this.bootPhase = 2;
@@ -971,6 +1004,7 @@ export class CRTTerminal {
       }
     } else if (this.bootPhase === 2) {
       this.bootTimer++;
+      this.dirty = true;
       if (this.bootTimer % 3 === 0 && this.bootLineIndex < this.bootLines.length) {
         const bl = this.bootLines[this.bootLineIndex];
         this.lines.push({ ...bl, typed: 0 });
@@ -986,6 +1020,7 @@ export class CRTTerminal {
         this.lines.push({ text: promptText, color: this.headerColor, typed: 0 });
       }
     } else if (this.bootPhase === 6) {
+      this.dirty = true;
       // Processing animation
       this.processProgress = Math.min((this.processProgress || 0) + 0.8, 100);
       if (this.processProgress >= 100) {
@@ -1054,10 +1089,20 @@ export class CRTTerminal {
     for (const line of this.lines) {
       if (line.typed < line.text.length) {
         line.typed = Math.min(line.typed + this.typeSpeed, line.text.length);
+        this.dirty = true;
       }
     }
 
-    this.draw();
+    // Scanline animation: mark dirty every 3rd frame when CRT is on
+    if (this.isOn && this.time % 3 === 0) {
+      this.dirty = true;
+    }
+
+    if (this.dirty) {
+      this.draw();
+      this.dirty = false;
+      this.needsTextureUpload = true;
+    }
   }
 
   draw() {
@@ -1068,6 +1113,43 @@ export class CRTTerminal {
 
     ctx.fillStyle = this.bgColor;
     ctx.fillRect(0, 0, w, h);
+
+    // Loading bar (shown before CRT boots, while model loads)
+    if (this.loadProgress >= 0 && !this.isOn) {
+      const barW = w * 0.4;
+      const barH = 12;
+      const barX = (w - barW) / 2;
+      const barY = h / 2 + 20;
+      const rgb = this.flickerRGB;
+
+      ctx.font = `16px "Courier New", monospace`;
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = `rgba(${rgb}, 0.7)`;
+      ctx.textAlign = 'center';
+      ctx.fillText('LOADING TERMINAL', w / 2, barY - 30);
+      ctx.textAlign = 'left';
+
+      // Track background
+      ctx.fillStyle = `rgba(${rgb}, 0.1)`;
+      ctx.fillRect(barX, barY, barW, barH);
+      // Filled portion
+      ctx.fillStyle = `rgba(${rgb}, 0.5)`;
+      ctx.fillRect(barX, barY, barW * this.loadProgress, barH);
+
+      // Percentage
+      ctx.fillStyle = `rgba(${rgb}, 0.5)`;
+      ctx.font = `14px "Courier New", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${Math.floor(this.loadProgress * 100)}%`, w / 2, barY + barH + 8);
+      ctx.textAlign = 'left';
+
+      // Minimal scanlines for CRT feel
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+      for (let sy = 0; sy < h; sy += 3) {
+        ctx.fillRect(0, sy, w, 1);
+      }
+      return;
+    }
 
     if (!this.isOn) return;
 

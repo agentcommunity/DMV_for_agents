@@ -27,7 +27,7 @@ export default function middleware(request) {
   const title = `${displayName} — DMV Certificate ${certId}`;
   const description = `${displayName} is verified at the Department of Machine Verification. Certificate ID: ${certId}. Get yours at dmv.agentcommunity.org`;
   const permalink = `${DMV_BASE}/c/${encodeURIComponent(certId)}/${encodeURIComponent(agentName || 'agent')}`;
-  const ogImage = `${DMV_BASE}/api/og?id=${encodeURIComponent(certId)}&name=${encodeURIComponent(agentName)}`;
+  const ogImage = `${DMV_BASE}/api/card?id=${encodeURIComponent(certId)}&name=${encodeURIComponent(agentName)}`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -39,7 +39,7 @@ export default function middleware(request) {
   <meta property="og:title" content="${esc(title)}">
   <meta property="og:description" content="${esc(description)}">
   <meta property="og:image" content="${esc(ogImage)}">
-  <meta property="og:image:width" content="1200">
+  <meta property="og:image:width" content="880">
   <meta property="og:image:height" content="630">
   <meta property="og:url" content="${esc(permalink)}">
   <meta property="og:site_name" content="DMV - Department of Machine Verification">

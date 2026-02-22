@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { CRTTerminal } from './CRTTerminal.js?v=13';
+import { CRTTerminal } from './CRTTerminal.js?v=14';
 
 const gsap = window.gsap;
 
@@ -188,7 +188,9 @@ export class TV {
     }
 
     return new Promise((resolve, reject) => {
+      this.crt.setLoadProgress(0);
       this.gltfLoader.load('models/tv1.glb', (gltf) => {
+        this.crt.loadComplete();
         this.model = gltf.scene;
         this.triggerEl = this.model.getObjectByName('Cube001');
         this.screen = this.model.getObjectByName('Glass');
@@ -210,7 +212,14 @@ export class TV {
           }
         }
         resolve();
-      }, undefined, reject);
+      }, (xhr) => {
+        if (xhr.lengthComputable && xhr.total > 0) {
+          this.crt.setLoadProgress(xhr.loaded / xhr.total);
+        }
+      }, (err) => {
+        this.crt.loadComplete();
+        reject(err);
+      });
     });
   }
 
@@ -568,9 +577,12 @@ export class TV {
   _render() {
     const dt = this._clock.getDelta();
 
-    // Update CRT terminal canvas every frame
+    // Update CRT terminal canvas (only uploads texture when content changed)
     this.crt.update();
-    this.crtTexture.needsUpdate = true;
+    if (this.crt.needsTextureUpload) {
+      this.crtTexture.needsUpdate = true;
+      this.crt.needsTextureUpload = false;
+    }
 
     // Fire render callbacks (used by HoloCard etc.)
     for (const cb of this._renderCallbacks) cb(dt);
