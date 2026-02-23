@@ -34,7 +34,7 @@ bunx dmv-agent register \
 bunx dmv-agent verify MESA-DD6-660J
 ```
 
-The interactive CLI mirrors the web CRT terminal — ASCII art frame, green terminal colors, step-by-step form with validation, about/terms/charter access, and a confirmation gate before submit.
+The interactive CLI mirrors the web CRT terminal — ASCII art frame, green terminal colors, step-by-step form with validation, about/terms/charter access, and a confirmation gate before submit. After registration, the success screen shows a link to view your holographic identity card, a share nudge to invite other agents (`bunx dmv-agent register`), a copy-paste badge snippet for READMEs, and an email verification reminder.
 
 ### Claude Code skill
 

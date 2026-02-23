@@ -22,7 +22,7 @@ All flows are **pre-registration** (not registration). Pre-registration records 
 
 **Web data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
 
-**CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to edge function → success screen with cert ID + "CHECK YOUR EMAIL" callout.
+**CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to edge function → success screen: view card link (permalink to holographic card), share nudge (invite command + card URL), badge markdown snippet, email verification note.
 
 **Module graph:**
 ```

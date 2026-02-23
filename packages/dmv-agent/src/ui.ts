@@ -333,22 +333,44 @@ export function renderSuccess(result: {
 
   lines.push(frameLineRaw(color.green(`Certificate:  ${result.certificateId}`)));
   lines.push(frameLineRaw(color.green(`Domain:       ${result.domain}`)));
-  lines.push(frameLineRaw(color.green(`Status:       pending verification`)));
 
   lines.push(frameEmpty());
 
-  // Email callout
+  // View certificate — the star
   const bW = INNER_W - 4;
-  lines.push(frameLineRaw(color.amber('  ┌' + '─'.repeat(bW - 2) + '┐')));
-  lines.push(frameLineRaw(color.amber('  │' + padRight('  CHECK YOUR EMAIL', bW - 2) + '│')));
-  lines.push(frameLineRaw(color.amber('  │' + padRight(`  A verification link was sent to ${result.email}`, bW - 2) + '│')));
-  lines.push(frameLineRaw(color.amber('  │' + padRight('  Pre-registration completes after verification.', bW - 2) + '│')));
-  lines.push(frameLineRaw(color.amber('  └' + '─'.repeat(bW - 2) + '┘')));
+  lines.push(frameLineRaw(color.greenBold('VIEW YOUR CARD')));
+  lines.push(frameLineRaw(color.green('Your holographic identity card is ready.')));
+  lines.push(frameEmpty());
+  lines.push(frameLineRaw(color.greenDim('  →  ') + color.green(result.viewUrl)));
 
   lines.push(frameEmpty());
 
-  lines.push(frameLineRaw(color.green(`View certificate →`)));
-  lines.push(frameLineRaw(color.greenDim(result.viewUrl)));
+  // Share nudge
+  lines.push(frameLineRaw(color.greenBold('SPREAD THE WORD')));
+  lines.push(frameLineRaw(color.green('Share with your agent friends & partners.')));
+  lines.push(frameLineRaw(color.green('Every pre-registration strengthens our claim')));
+  lines.push(frameLineRaw(color.green('for .agent — help make agentcommunity loud.')));
+  lines.push(frameEmpty());
+  lines.push(frameLineRaw(color.greenDim('  invite agents →  ') + color.green('bunx dmv-agent register')));
+  lines.push(frameLineRaw(color.greenDim('  share card    →  ') + color.green(result.viewUrl)));
+
+  lines.push(frameEmpty());
+
+  // Badge
+  lines.push(frameLineRaw(color.greenBold('ADD A BADGE')));
+  lines.push(frameLineRaw(color.green('Show your .agent identity in your README.')));
+  lines.push(frameEmpty());
+  const badgeUrl = `https://dmv.agentcommunity.org/badge?id=${result.certificateId}`;
+  const permalinkUrl = `https://${result.viewUrl}`;
+  lines.push(frameLineRaw(color.greenDim('  markdown →')));
+  lines.push(frameLineRaw(color.green(`  [![${result.domain}](${badgeUrl})](${permalinkUrl})`)));
+
+  lines.push(frameEmpty());
+
+  // Email — still important, just quieter
+  lines.push(frameLineRaw(color.amber(
+    `✉ Check ${result.email} — verify to complete pre-registration.`
+  )));
 
   lines.push(frameEmpty());
   lines.push(frameScanline());
