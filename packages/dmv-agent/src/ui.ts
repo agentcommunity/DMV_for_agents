@@ -367,6 +367,15 @@ export function renderSuccess(result: {
 
   lines.push(frameEmpty());
 
+  // Save card
+  lines.push(frameLineRaw(color.greenBold('SAVE CARD')));
+  lines.push(frameLineRaw(color.green('Download your holographic card as a PNG.')));
+  lines.push(frameEmpty());
+  const cardImageUrl = `https://dmv.agentcommunity.org/api/card?id=${encodeURIComponent(result.certificateId)}&name=${encodeURIComponent(result.domain.replace('.agent', ''))}`;
+  lines.push(frameLineRaw(color.greenDim('  download →  ') + color.green(cardImageUrl)));
+
+  lines.push(frameEmpty());
+
   // Email — still important, just quieter
   lines.push(frameLineRaw(color.amber(
     `✉ Check ${result.email} — verify to complete pre-registration.`

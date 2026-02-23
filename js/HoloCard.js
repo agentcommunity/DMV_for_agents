@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { CardDNA, renderCard, PALETTES, RARITIES, HOLOS, hexToRgb, withAlpha, CW, CH } from './card-draw.js?v=22';
+import { CardDNA, renderCard, setQREncoder, PALETTES, RARITIES, HOLOS, hexToRgb, withAlpha, CW, CH } from './card-draw.js?v=23';
+import { generateQRMatrix } from './qr-encode.js?v=1';
+
+// Wire QR encoder into card-draw before first render
+setQREncoder(generateQRMatrix);
 
 /* ═══════════════════════════════════════════════════════════════════
    HoloCard — DOM overlay card with CSS holo effects
@@ -370,6 +374,10 @@ export class HoloCard {
 
   toPNG() {
     return this.canvas ? this.canvas.toDataURL('image/png') : '';
+  }
+
+  getCanvas() {
+    return this.canvas;
   }
 
   getRarity() {

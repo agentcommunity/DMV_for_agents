@@ -1,6 +1,6 @@
 import { TV } from './TV.js?v=22';
 import { AboutPoster } from './AboutPoster.js?v=16';
-import { HoloCard } from './HoloCard.js?v=23';
+import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
 import { insertRegistration } from './supabase.js?v=15';
 
@@ -32,6 +32,7 @@ const aboutCursorHost = container;
 const cardShareBar = document.getElementById('cardShareBar');
 const cardShareBtn = document.getElementById('cardShareBtn');
 const cardCopyBtn = document.getElementById('cardCopyBtn');
+const cardSaveBtn = document.getElementById('cardSaveBtn');
 const cardShareTicker = document.getElementById('cardShareTicker');
 const appFavicon = document.getElementById('appFavicon');
 const cliSnippet = document.getElementById('cliSnippet');
@@ -353,6 +354,7 @@ function syncCardShareBar() {
   const cardMesh = holoCard.getMesh();
   if (cardShareBtn) cardShareBtn.disabled = !canShare;
   if (cardCopyBtn) cardCopyBtn.disabled = !canShare;
+  if (cardSaveBtn) cardSaveBtn.disabled = !canShare;
   let isCardInView = false;
   if (cardMesh && tv.getMeshIntersectionAtNDC) {
     for (const [x, y] of CARD_FOCUS_SAMPLES) {
@@ -393,6 +395,27 @@ cardCopyBtn?.addEventListener('click', async (e) => {
   }
   const copied = await copyShareLink(latestCardData.certificateId, latestCardData);
   setCardShareTicker(copied ? 'Link copied' : 'Copy failed', copied ? 'ok' : 'warn');
+});
+
+function downloadCard() {
+  const canvas = holoCard.getCanvas();
+  if (!canvas) return;
+  const name = latestCardData?.agentName || 'agent';
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.agent-card.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
+cardSaveBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  downloadCard();
 });
 
 terminalStatusBar?.addEventListener('click', (e) => {
@@ -518,6 +541,7 @@ if (permalink) {
   const certLabel = document.getElementById('permalinkCert');
   const ctaBtn = document.getElementById('permalinkCta');
   const shareBtn = document.getElementById('permalinkShare');
+  const saveBtn = document.getElementById('permalinkSave');
 
   if (agentLabel) {
     agentLabel.textContent = permalink.agentName ? `${permalink.agentName}.agent` : '';
@@ -552,6 +576,8 @@ if (permalink) {
     });
   });
 
+  saveBtn?.addEventListener('click', () => downloadCard());
+
   if (aboutToggleLink) {
     aboutToggleLink.textContent = 'Get Yours';
     aboutToggleLink.classList.add('header-cta');
@@ -572,7 +598,7 @@ if (permalink) {
 // ─── Demo mode: ?demo — rapid card testing without CRT form ────
 const demoMode = !permalink && new URLSearchParams(location.search).has('demo');
 if (demoMode) {
-  const { CardDNA, PALETTES, HOLOS, RARITIES, generateCertId } = await import('./card-draw.js?v=22');
+  const { CardDNA, PALETTES, HOLOS, RARITIES, generateCertId } = await import('./card-draw.js?v=23');
   const demoNames = [
     'atlas','nova','cipher','echo','pulse','nexus','vortex','helix',
     'prism','flux','orbit','quasar','zenith','onyx','spark','glitch',
@@ -590,6 +616,7 @@ if (demoMode) {
       certificateId: certId,
       accountType: type,
     };
+    latestCardData = fakeData;
     holoCard.show(fakeData, true);
     const dna = new CardDNA(name);
     const pal = PALETTES[dna.palette];

@@ -99,27 +99,27 @@ export function drawIdenticon(ctx, x, y, size, seed, color1, color2) {
   }
 }
 
-function drawQR(ctx, x, y, size, seed, color) {
-  const n = 21, c = size / n, rand = seededRand(seed);
+function drawQR(ctx, x, y, size, url, color) {
+  const { matrix, size: n } = _qrEncoder(url);
+  const c = size / n;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(x-2, y-2, size+4, size+4);
-  const dot = (mx, my) => ctx.fillRect(x+mx*c, y+my*c, c, c);
-  const finder = (fx, fy) => {
-    ctx.fillStyle = color;
-    for (let i = 0; i < 7; i++) { dot(fx+i,fy); dot(fx+i,fy+6); dot(fx,fy+i); dot(fx+6,fy+i); }
-    for (let i = 2; i < 5; i++) for (let j = 2; j < 5; j++) dot(fx+i, fy+j);
-  };
-  finder(0,0); finder(n-7,0); finder(0,n-7);
   ctx.fillStyle = color;
-  ctx.globalAlpha = 0.65;
-  for (let my = 0; my < n; my++)
+  for (let my = 0; my < n; my++) {
     for (let mx = 0; mx < n; mx++) {
-      if ((mx<8&&my<8)||(mx>=n-7&&my<8)||(mx<8&&my>=n-7)) continue;
-      if (mx===6||my===6) continue;
-      if (rand() > 0.5) dot(mx, my);
+      if (matrix[my][mx]) ctx.fillRect(x+mx*c, y+my*c, c, c);
     }
-  ctx.globalAlpha = 1;
+  }
 }
+
+// QR encoder reference — must be set via setQREncoder() before rendering
+let _qrEncoder = null;
+
+/**
+ * Inject the QR encoder function (generateQRMatrix from qr-encode.js).
+ * Must be called before renderCard(). Keeps card-draw.js free of import side effects.
+ */
+export function setQREncoder(fn) { _qrEncoder = fn; }
 
 function drawStarField(ctx, w, h, seed, color1, color2, count) {
   const rand = seededRand(seed);
@@ -593,6 +593,7 @@ export function renderCard(canvas, name, dna, options) {
   const pattern = PATTERNS[dna.pattern];
   const certId = opts.certId || generateCertId(name);
   const accountType = (opts.accountType || 'individual').toUpperCase();
+  const baseUrl = opts.baseUrl || 'https://dmv.agentcommunity.org';
   const displayName = name + '.agent';
 
   // ── Background ──
@@ -714,17 +715,18 @@ export function renderCard(canvas, name, dna, options) {
   roundRect(ctx, iconX - 6, iconY - 6, iconSize + 12, iconSize + 12, 4); ctx.stroke();
   drawIdenticon(ctx, iconX, iconY, iconSize, dna.identiconSeed, pal.pri, pal.acc);
 
-  // QR — bottom-left corner, above footer
+  // QR — bottom-left corner, above footer (scannable permalink URL)
   const qrSize = 86;
   const qrX = INSET + 6;
   const qrY = footDivY - qrSize - 14;
-  drawQR(ctx, qrX, qrY, qrSize, fnv1a(name + ':qr'), '#ffffff');
+  const qrUrl = `${baseUrl}/c/${encodeURIComponent(certId)}/${encodeURIComponent(name)}`;
+  drawQR(ctx, qrX, qrY, qrSize, qrUrl, '#ffffff');
 
   // QR label
   ctx.font = `8px ${FONT}`;
   ctx.fillStyle = withAlpha('#ffffff', 0.35);
   ctx.textAlign = 'left';
-  ctx.fillText('VERIFY', qrX, qrY + qrSize + 10);
+  ctx.fillText('SCAN', qrX, qrY + qrSize + 10);
 
   // ═══ RIGHT COLUMN ═══
 
