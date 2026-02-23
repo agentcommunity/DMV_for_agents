@@ -22,12 +22,12 @@ All flows are **pre-registration** (not registration). Pre-registration records 
 
 **Web data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
 
-**CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to edge function → success screen: view card link (permalink to holographic card), share nudge (invite command + card URL), badge markdown snippet, email verification note.
+**CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to edge function → success screen: view card link (permalink to holographic card), share nudge (invite command + card URL), save card (direct PNG download URL), badge markdown snippet, email verification note.
 
 **Module graph:**
 ```
 app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canvas as Three.js texture)
-        ├─► HoloCard.js                (holographic card, self-contained module)
+        ├─► HoloCard.js ──► card-draw.js ──► qr-encode.js
         ├─► WallSign.js                (wall sign above TV, fluorescent flicker animation)
         └─► AboutPoster.js             (about panel)
 ```
@@ -35,7 +35,7 @@ app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canv
 - `app.js` — Entry point. Wires TV + HoloCard + AboutPoster, events (scroll, click, keyboard, resize, gyro), sound toggle, clock, permalink routing. Top-level await, no exports.
 - `TV.js` — Three.js scene: GLTF model loading (Draco), camera, renderer, night mode toggle, raycaster, card/about zoom/unzoom, `onRender(cb)` callbacks, render loop with delta time.
 - `CRTTerminal.js` — Pure Canvas2D, no Three.js dependency. 8-phase boot state machine (off, flicker, boot text, type selector, form, review/submit, processing, done), conditional form fields with validation, color scheme swapping, CRT visual effects.
-- `HoloCard.js` — Self-contained holographic card module. Custom ShaderMaterial (GLSL) with rainbow iridescence, foil lines, glare, fresnel, sparkle. Front + back faces with Canvas2D content. Rarity system, identicon, QR pattern. Bob + tilt animation. See [CARD.md](CARD.md).
+- `HoloCard.js` — Self-contained holographic card module. Custom ShaderMaterial (GLSL) with rainbow iridescence, foil lines, glare, fresnel, sparkle. Front + back faces with Canvas2D content. Rarity system, identicon, scannable QR code (real encoder). Bob + tilt animation. See [CARD.md](CARD.md).
 - `WallSign.js` — Wall sign above the TV. PlaneGeometry + CanvasTexture with "DEPT. OF MACHINE VERIFICATION" title and "SELF-SERVE KIOSK" subtitle. Fluorescent tube flicker-on animation (GSAP timeline) fires ~1.2s after page load (not scroll-linked). Ambient flicker loop (random subtle opacity dips every 4-7s) runs after startup. Theme-aware via CSS custom properties. Self-contained with `dispose()` cleanup.
 - `CardPoster.js` — **Legacy.** Original flat card, replaced by HoloCard.js.
 - `AboutPoster.js` — PlaneGeometry + CanvasTexture. UI-style about text, toggle show/hide.
@@ -86,10 +86,37 @@ Path format: `/c/CERT-ID/agent-name`.
 In permalink mode:
 - Card shown instantly, camera jumps to it
 - Header "About" swapped to green "Get Yours" CTA
-- Bottom overlay: "Get Yours" + "Share on X" buttons with backdrop blur
+- Bottom overlay: "Get Yours" + "Share on X" + "Save Card" buttons with backdrop blur
 - Click anywhere or Escape to zoom out to full scene view
 - Footer hidden to avoid overlap with overlay
 - Scroll still wired — visitors can explore after unzooming
+
+## QR Code Encoder
+
+`js/qr-encode.js` is a minimal, zero-dependency QR encoder (byte mode, ECL L, versions 1-6, Reed-Solomon over GF(2^8), 8 mask patterns with penalty scoring). It exports `generateQRMatrix(text)` → `{ matrix: boolean[][], size: number }`.
+
+- **Browser**: HoloCard.js imports `generateQRMatrix` and injects it into card-draw.js via `setQREncoder()` at module load time. card-draw.js has no direct import — the encoder is injected to avoid side effects.
+- **Server**: api/card-renderer.js imports `generateQRMatrix` directly from `api/qr-encode.js` (a copy of the same file).
+- **QR content**: Encodes the full permalink URL `{baseUrl}/c/{certId}/{name}`. Label on card: "SCAN".
+- **Barcodes**: Remain Code 128B encoding cert ID text and domain name (not URLs — URLs are too long for readable barcode bars at current dimensions).
+
+When changing the QR encoder, update both `js/qr-encode.js` and `api/qr-encode.js`.
+
+## Card Download
+
+"Save Card" buttons appear in two places:
+- `#cardShareBar` — the floating bar shown when the card is zoomed (post-registration or `?demo` mode)
+- `#permalinkOverlay` — the overlay on permalink pages
+
+Both call `downloadCard()` in app.js which uses `canvas.toBlob()` → hidden anchor click → downloads as `{name}.agent-card.png`.
+
+## OG Image Strategy
+
+Two different endpoints serve social previews:
+- **`/api/card`** — Full Canvas2D render (880x630, @napi-rs/canvas). Heavy cold start (~5-10s). Used for `og:image` (iMessage, Facebook, LinkedIn have longer timeouts).
+- **`/api/og`** — Lightweight Satori edge function (1200x630). Near-zero cold start. Used for `twitter:image` (Twitter's crawler times out at ~4s).
+
+`middleware.js` rewrites `/c/CERT-ID/name` requests and splits `og:image` vs `twitter:image` to the appropriate endpoint.
 
 ## Key Patterns
 
@@ -100,6 +127,7 @@ In permalink mode:
 - **Scroll-triggered events:** Add thresholds in `TV.animateCameraPosition(progress)` or use `tv.on('animationEnd', cb)`.
 - **Zoom transitions:** When transitioning between zoomed states (card → about), unzoom first with a delay, then zoom to new target.
 - **Wall sign tuning:** Flicker timing lives in `WallSign.flickerOn()` (GSAP timeline keyframes). Ambient flicker interval is in `_startAmbientFlicker()` (4-7s range, opacity dip to 0.92). Startup delay is the `setTimeout` in app.js (~1.2s). Sign position is `mesh.position.set(0, 3.0, -0.5)`.
+- **Demo mode (`?demo`):** Cycles cards with Space bar. Sets `latestCardData` so share/copy/save buttons work. No CRT form needed.
 
 ## Static Assets
 

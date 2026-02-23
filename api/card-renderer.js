@@ -8,6 +8,7 @@
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { generateQRMatrix } from './qr-encode.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -114,26 +115,17 @@ function drawIdenticon(ctx, x, y, size, seed, color1, color2) {
   }
 }
 
-function drawQR(ctx, x, y, size, seed, color) {
-  const n = 21, c = size / n, rand = seededRand(seed);
+function drawQR(ctx, x, y, size, url, color) {
+  const { matrix, size: n } = generateQRMatrix(url);
+  const c = size / n;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(x-2, y-2, size+4, size+4);
-  const dot = (mx, my) => ctx.fillRect(x+mx*c, y+my*c, c, c);
-  const finder = (fx, fy) => {
-    ctx.fillStyle = color;
-    for (let i = 0; i < 7; i++) { dot(fx+i,fy); dot(fx+i,fy+6); dot(fx,fy+i); dot(fx+6,fy+i); }
-    for (let i = 2; i < 5; i++) for (let j = 2; j < 5; j++) dot(fx+i, fy+j);
-  };
-  finder(0,0); finder(n-7,0); finder(0,n-7);
   ctx.fillStyle = color;
-  ctx.globalAlpha = 0.65;
-  for (let my = 0; my < n; my++)
+  for (let my = 0; my < n; my++) {
     for (let mx = 0; mx < n; mx++) {
-      if ((mx<8&&my<8)||(mx>=n-7&&my<8)||(mx<8&&my>=n-7)) continue;
-      if (mx===6||my===6) continue;
-      if (rand() > 0.5) dot(mx, my);
+      if (matrix[my][mx]) ctx.fillRect(x+mx*c, y+my*c, c, c);
     }
-  ctx.globalAlpha = 1;
+  }
 }
 
 // Code 128B barcode encoder
@@ -277,6 +269,29 @@ const BORDERS = [
         ctx.quadraticCurveTo(cx+ddx*12, cy+ddy*12, cx+ddx*s*0.55, cy+ddy*12);
         ctx.stroke();
         ctx.lineWidth = 1.5;
+        // Diamond decoration at corner
+        ctx.fillStyle = pal.acc2;
+        const dx2 = cx+ddx*8, dy2 = cy+ddy*8;
+        ctx.beginPath();
+        ctx.moveTo(dx2, dy2-4); ctx.lineTo(dx2+4, dy2);
+        ctx.lineTo(dx2, dy2+4); ctx.lineTo(dx2-4, dy2);
+        ctx.closePath(); ctx.fill();
+        // Midpoint accent dots
+        ctx.fillStyle = pal.acc;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.arc(cx+ddx*s*0.5, cy+ddy*3, 1.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx+ddx*3, cy+ddy*s*0.5, 1.5, 0, Math.PI*2); ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+      // Edge midpoint diamonds
+      const dc = 8;
+      [[x+w/2,y],[x+w/2,y+h],[x,y+h/2],[x+w,y+h/2]].forEach(([cx2,cy2], idx) => {
+        ctx.strokeStyle = idx % 2 === 0 ? pal.acc : pal.acc2;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx2,cy2-dc); ctx.lineTo(cx2+dc,cy2);
+        ctx.lineTo(cx2,cy2+dc); ctx.lineTo(cx2-dc,cy2);
+        ctx.closePath(); ctx.stroke();
       });
     }
   },
@@ -289,9 +304,37 @@ const BORDERS = [
       ctx.strokeRect(x+3, y+2, w, h);
       ctx.strokeStyle = '#0000ff'; ctx.lineWidth = 1.5;
       ctx.strokeRect(x-2, y-1, w, h);
+      ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 0.5;
+      ctx.strokeRect(x+1, y-2, w, h);
       ctx.globalAlpha = 1;
       ctx.strokeStyle = pal.acc; ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, w, h);
+      // Edge distortion
+      const drawEdge = (x1,y1,x2,y2,horiz) => {
+        ctx.beginPath(); ctx.moveTo(x1,y1);
+        let c = horiz ? x1 : y1;
+        const end = horiz ? x2 : y2;
+        const dir = end > c ? 1 : -1;
+        while ((dir>0 ? c<end : c>end)) {
+          const seg = 12 + rand()*40;
+          c = dir>0 ? Math.min(c+seg,end) : Math.max(c-seg,end);
+          const shift = rand()>0.6 ? (rand()-0.5)*12 : 0;
+          if (horiz) ctx.lineTo(c, y1+shift); else ctx.lineTo(x1+shift, c);
+        }
+        ctx.stroke();
+      };
+      drawEdge(x,y,x+w,y,true); drawEdge(x+w,y,x+w,y+h,false);
+      drawEdge(x+w,y+h,x,y+h,true); drawEdge(x,y+h,x,y,false);
+      // Glitch bar artifacts
+      for (let i = 0; i < 12; i++) {
+        const gy2 = y + rand()*h;
+        const gw2 = 40+rand()*140;
+        const gx2 = x + (rand()-0.3)*(w-gw2*0.5);
+        const gh2 = 1 + rand()*3;
+        ctx.fillStyle = rand() > 0.5 ? pal.acc : pal.acc2;
+        ctx.globalAlpha = 0.03 + rand()*0.06;
+        ctx.fillRect(gx2, gy2, gw2, gh2);
+        ctx.globalAlpha = 1;
+      }
     }
   },
 ];
@@ -310,6 +353,15 @@ const PATTERNS = [
       }
       for (let y2 = PAD; y2 < h-PAD; y2 += sp) {
         ctx.beginPath(); ctx.moveTo(PAD, y2); ctx.lineTo(w-PAD, y2); ctx.stroke();
+      }
+      if (pal) {
+        ctx.fillStyle = pal.acc2; ctx.globalAlpha = 0.15;
+        for (let x2 = PAD; x2 < w-PAD; x2 += sp*3) {
+          for (let y2 = PAD; y2 < h-PAD; y2 += sp*3) {
+            ctx.beginPath(); ctx.arc(x2, y2, 2, 0, Math.PI*2); ctx.fill();
+          }
+        }
+        ctx.globalAlpha = 1;
       }
     }
   },
@@ -434,6 +486,7 @@ function renderCard(canvas, name, dna, options) {
   const pattern = PATTERNS[dna.pattern];
   const certId = opts.certId || generateCertId(name);
   const accountType = (opts.accountType || 'individual').toUpperCase();
+  const baseUrl = opts.baseUrl || 'https://dmv.agentcommunity.org';
   const displayName = name + '.agent';
 
   // ── Background ──
@@ -555,16 +608,17 @@ function renderCard(canvas, name, dna, options) {
   roundRect(ctx, iconX - 6, iconY - 6, iconSize + 12, iconSize + 12, 4); ctx.stroke();
   drawIdenticon(ctx, iconX, iconY, iconSize, dna.identiconSeed, pal.pri, pal.acc);
 
-  // QR
+  // QR — scannable permalink URL
   const qrSize = 86;
   const qrX = INSET + 6;
   const qrY = footDivY - qrSize - 14;
-  drawQR(ctx, qrX, qrY, qrSize, fnv1a(name + ':qr'), '#ffffff');
+  const qrUrl = `${baseUrl}/c/${encodeURIComponent(certId)}/${encodeURIComponent(name)}`;
+  drawQR(ctx, qrX, qrY, qrSize, qrUrl, '#ffffff');
 
   ctx.font = `8px ${FONT}`;
   ctx.fillStyle = withAlpha('#ffffff', 0.35);
   ctx.textAlign = 'left';
-  ctx.fillText('VERIFY', qrX, qrY + qrSize + 10);
+  ctx.fillText('SCAN', qrX, qrY + qrSize + 10);
 
   // ═══ RIGHT COLUMN ═══
 

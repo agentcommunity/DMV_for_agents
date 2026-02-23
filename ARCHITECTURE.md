@@ -274,6 +274,46 @@ Every surface an agent might touch gives them the full story — what the DMV is
 
 CLI-first everywhere. MCP is available but secondary — for one-time registration, `bunx dmv-agent register` is simpler than configuring an MCP server.
 
+## Text surface alignment guardrail
+
+To prevent copy drift across user-facing surfaces, the repo includes a text audit harness:
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| Audit library | `scripts/text-surfaces/audit-lib.mjs` | Defines surfaces, claims, critical rules, accepted exceptions |
+| CLI runner | `scripts/text-surfaces/run-audit.mjs` | Prints report (`--json`, `--strict`, `--out`) |
+| Tests | `tests/text-surfaces.test.mjs` | Enforces critical invariants + card field parity |
+| Human docs | `docs/text-surface-audit.md` | Usage, rationale, maintenance notes |
+
+### Audit model
+
+- **Surfaces**: web CRT, share/permalink UI, client/server card renderers, metadata/OG, README/docs, CLI, MCP, API responses.
+- **Claims**: pre-registration, non-binding language, verification email, certificate/permalink/badge/share terms, AID, audience cues, terms/charter.
+- **Critical rules**:
+  - Core docs must communicate non-binding pre-registration.
+  - Agent runtime surfaces must mention verification email.
+  - Share surfaces must include permalink format.
+  - Client/server card field labels must stay identical.
+
+### Accepted exceptions (intentional divergence)
+
+1. `status-language-drift`
+   - DB row starts `pending_profile` until email verification.
+   - Card text remains `VERIFIED` by design (public artifact, no DB status crawl at card render time).
+2. `web-crt-email-reminder-gap`
+   - Web CRT completion avoids extra verification copy.
+   - Verification/link/badge details are handled via follow-up email flow.
+
+These are configured in `ACCEPTED_EXCEPTIONS` inside `scripts/text-surfaces/audit-lib.mjs`.
+
+### Operational commands
+
+```bash
+npm run text:audit      # human-readable matrix
+npm run text:audit:json # machine-readable output
+npm run text:check      # strict tests (CI-safe)
+```
+
 ## Tech stack
 
 | Layer | Technology | Notes |

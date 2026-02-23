@@ -29,6 +29,7 @@ card-lab-v2.html (Standalone gallery/lab)
 api/card-renderer.js (Server — Node.js port)
 ├── @napi-rs/canvas (Skia-based)
 ├── Identical CardDNA + renderCard() layout
+├── Imports generateQRMatrix from api/qr-encode.js
 ├── Used by Vercel serverless for badge images
 └── Must stay aligned with card-draw.js
 
@@ -73,6 +74,7 @@ card.setPointer(normalizedX, normalizedY);
 | `setVisible(bool)` | void | Show/hide DOM card overlay |
 | `onClick(cb)` | void | Card click handler (DOM events) |
 | `toPNG()` | string | Export canvas as PNG data-URL |
+| `getCanvas()` | HTMLCanvasElement | Raw canvas for `toBlob()` / download |
 | `getRarity()` | object | Rarity tier object |
 | `dispose()` | void | Clean up mesh + DOM |
 
@@ -171,7 +173,7 @@ Rarity affects: holo intensity, star field density, rarity badge, rarity seal (R
 │  │  QR  │      │  INDIV.     ● VERIFIED  AID/1.0                  │
 │  │ CODE │      │                                                   │
 │  └──────┘      │  ISSUED     EXPIRES     REGISTRY                 │
-│  VERIFY        │  2026.02    NEVER       .agent        (seal)     │
+│  SCAN          │  2026.02    NEVER       .agent        (seal)     │
 │─ ────────── ─ ─│─ ──────────────────────────────────── ─ ─ ─ ─ ──│
 │  |||||||||||||  │                    dmv.agentcommunity.org        │
 └─────────────────────────────────────────────────────────────────────┘
@@ -219,22 +221,46 @@ CSS opacity transition from 0 to 1 over 1.2s on the DOM wrapper.
 | Server (badge API) | api/card-renderer.js → @napi-rs/canvas | None (static PNG) |
 | OG image (social share) | api/og.js → @vercel/og Satori | None (simplified layout) |
 
+## QR Code
+
+The QR code on each card is a real, scannable QR code encoding the card's permalink URL:
+
+```
+https://dmv.agentcommunity.org/c/{CERT-ID}/{agent-name}
+```
+
+Implementation: `js/qr-encode.js` (browser) / `api/qr-encode.js` (server copy). Byte mode, ECL L, versions 1-6 auto-selected by data length. Reed-Solomon error correction over GF(2^8), 8 data masks with penalty scoring.
+
+- **Browser**: HoloCard.js injects the encoder into card-draw.js via `setQREncoder(generateQRMatrix)` at module load. card-draw.js calls `_qrEncoder(url)` in `drawQR()`.
+- **Server**: card-renderer.js imports `generateQRMatrix` directly.
+- **Barcodes**: Code 128B encoding cert ID text and domain name (not URLs). Valid and scannable.
+
+## Card Download
+
+Users can save their card as a PNG:
+- **Web**: "Save Card" button in the share bar (post-registration, `?demo`) and permalink overlay
+- **CLI**: Direct download URL shown in success screen (`/api/card?id=CERT-ID&name=agent-name`)
+- **Programmatic**: `HoloCard.getCanvas()` → `canvas.toBlob()`
+
 ## Keeping Renderers Aligned
 
-Three files must stay in sync:
+These files must stay in sync:
 
 | File | Format | Must Match |
 |------|--------|------------|
 | `js/card-draw.js` | ES module (browser) | Source of truth |
 | `api/card-renderer.js` | CommonJS (Node.js) | Same CardDNA, same layout, same CARD_VERSION |
+| `js/qr-encode.js` | ES module (browser) | QR encoder — source of truth |
+| `api/qr-encode.js` | ES module (Node.js) | Must be identical copy of `js/qr-encode.js` |
 | `api/og.js` | Edge function | Same CardDNA hashing (palette/rarity/holo) |
 
 When changing card rendering:
 1. Update `js/card-draw.js` first
 2. Bump `CARD_VERSION`
 3. Port changes to `api/card-renderer.js`
-4. Update `api/og.js` if DNA/rarity logic changed
-5. Update this document
+4. If QR encoder changed, copy `js/qr-encode.js` → `api/qr-encode.js`
+5. Update `api/og.js` if DNA/rarity logic changed
+6. Update this document
 
 ## Permalink Flow
 
@@ -249,7 +275,6 @@ User arrives at /c/CERT-ID/agent-name
 
 ## Future Enhancements
 
-- Scannable QR code (requires QR encoding library)
 - AI-generated art in the identicon area
 - Animated entrance (card dealt in from off-screen)
 - Card flip animation (back face)

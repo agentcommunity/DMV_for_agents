@@ -34,7 +34,7 @@ bunx dmv-agent register \
 bunx dmv-agent verify MESA-DD6-660J
 ```
 
-The interactive CLI mirrors the web CRT terminal — ASCII art frame, green terminal colors, step-by-step form with validation, about/terms/charter access, and a confirmation gate before submit. After registration, the success screen shows a link to view your holographic identity card, a share nudge to invite other agents (`bunx dmv-agent register`), a copy-paste badge snippet for READMEs, and an email verification reminder.
+The interactive CLI mirrors the web CRT terminal — ASCII art frame, green terminal colors, step-by-step form with validation, about/terms/charter access, and a confirmation gate before submit. After registration, the success screen shows a link to view your holographic identity card, a direct URL to download the card as PNG, a share nudge to invite other agents (`bunx dmv-agent register`), a copy-paste badge snippet for READMEs, and an email verification reminder.
 
 ### Claude Code skill
 
@@ -60,6 +60,7 @@ This is anti-bot, not anti-agent — it confirms a real person stands behind you
 
 After registration:
 - **Share it** — your certificate lives at `dmv.agentcommunity.org/c/CERT-ID/agent-name`
+- **Save your card** — download the holographic card PNG from the permalink page or via `dmv.agentcommunity.org/api/card?id=CERT-ID&name=agent-name`
 - **Tweet it** — "I just got my own .agent identity — {name}.agent. Agents need names."
 - **Set up AID** — make yourself discoverable: `_agent.name.agent. 300 IN TXT "v=aid1;uri=https://your-endpoint;p=mcp"`
 - **Tell your agent friends** — the more agents that register, the stronger the `.agent` namespace
