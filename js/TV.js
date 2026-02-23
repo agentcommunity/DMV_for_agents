@@ -73,8 +73,10 @@ export class TV {
 
     this.camera = null;
     this.cameraPosition = { x: 0, y: -0.5, z: 20 };
-    // Fit target for scroll-zoom framing (prefer CRT screen dimensions, not full model bounds).
+    // Fit target for card/about zoom framing (CRT screen dimensions).
     this.tvFitSize = { width: 2.8, height: 2.4 };
+    // Fit target for scroll-zoom framing (derived from screen + bezel padding).
+    this.tvFrameSize = { width: 2.8 * 1.45, height: 2.4 * 1.45 };
     this.viewportProfiles = [
       // Tuned against common mobile widths:
       // 320-360 (small phones), 375-390 (mid phones), 412-430 (large phones)
@@ -211,6 +213,12 @@ export class TV {
             this.tvFitSize = { width: screenSize.x, height: screenSize.y };
           }
         }
+        // Derive bezel/frame size from screen bounds + padding.
+        // The TV bezel is roughly 45% wider and taller than the CRT glass.
+        this.tvFrameSize = {
+          width:  this.tvFitSize.width  * 1.45,
+          height: this.tvFitSize.height * 1.45
+        };
         resolve();
       }, (xhr) => {
         if (xhr.lengthComputable && xhr.total > 0) {
@@ -285,12 +293,13 @@ export class TV {
     if (isPortrait && aspect < 0.55) margin += 0.03;
     if (isPortrait && aspect < 0.5) margin += 0.02;
 
+    // Use full TV frame/bezel bounds so the camera stops with bezel edges
+    // aligned to the viewport, rather than zooming past them to show only the screen glass.
     // On portrait phones we intentionally allow light side cropping of the TV shell
     // so the CRT doesn't become too tiny from strict full-width fit.
-    const fitWidth = isPortrait ? this.tvFitSize.width * 0.78 : this.tvFitSize.width;
-    let endZ = this._zoomDistanceToFit(fitWidth, this.tvFitSize.height, margin);
+    const fitWidth = isPortrait ? this.tvFrameSize.width * 0.70 : this.tvFrameSize.width;
+    let endZ = this._zoomDistanceToFit(fitWidth, this.tvFrameSize.height, margin);
     endZ += profile.scrollExtraZ;
-    endZ = Math.max(3.6, endZ);
     if (isPortrait && aspect < 0.45) endZ += 0.1;
 
     const endY = isPortrait ? profile.scrollY : 0.5;

@@ -61,7 +61,7 @@ tv.setAboutMesh(aboutPoster.mesh);
 
 const wallSign = new WallSign(tv.getScene());
 setTimeout(() => wallSign.flickerOn(), 1200);
-setTimeout(() => { const cta = document.getElementById('centerCta'); if (cta) cta.classList.add('is-visible'); }, 2100);
+setTimeout(() => { const cta = document.getElementById('centerCta'); if (cta) cta.classList.add('is-visible'); }, 2800);
 
 function applyOuterUITheme(isNightMode) {
   const dark = Boolean(isNightMode);

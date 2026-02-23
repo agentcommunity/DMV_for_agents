@@ -124,8 +124,8 @@ export class CRTTerminal {
     // Completion callback
     this.onComplete = null;
 
-    // Boot sequence text
-    this.bootLines = [
+    // Boot sequence text — phase 2a (init lines, shown first)
+    this.bootLinesInit = [
       { text: '', color: this.textColor },
       { text: '  ██████╗ ███╗   ███╗██╗   ██╗', color: this.headerColor },
       { text: '  ██╔══██╗████╗ ████║██║   ██║', color: this.headerColor },
@@ -135,21 +135,26 @@ export class CRTTerminal {
       { text: '  ╚═════╝ ╚═╝     ╚═╝  ╚═══╝  ', color: this.headerColor },
       { text: '', color: this.textColor },
       { text: '  DEPARTMENT OF MACHINE VERIFICATION', color: this.headerColor },
-      { text: '  Machine Identity & Registration Terminal v1.0', color: this.dimColor },
+      { text: '  Machine Identity & Registration Kiosk v1.0', color: this.dimColor },
       { text: '  ─────────────────────────────────', color: this.dimColor },
       { text: '', color: this.textColor },
-      { text: '  Initializing registration terminal...', color: this.dimColor, bootFiller: true },
-      { text: '  Connection secure.', color: this.dimColor, bootFiller: true },
-      { text: '  Ready for input.', color: this.textColor, bootFiller: true },
+      { text: '  Initializing registration kiosk...', color: this.dimColor, initLine: true },
+      { text: '  Connection secure.', color: this.dimColor, initLine: true },
+      { text: '  Preparing input.', color: this.textColor, initLine: true },
+    ];
+    // Boot sequence text — phase 2b (welcome lines, replace init after bar)
+    this.bootLinesWelcome = [
       { text: '', color: this.textColor, bootFiller: true },
-      { text: '  agents need namespace', color: this.textColor, namespaceLine: true, bootFiller: true },
+      { text: '  agents need names', color: this.textColor, namespaceLine: true, bootFiller: true },
       { text: '', color: this.textColor, bootFiller: true },
-      { text: '  Join the community & pre-register', color: this.dimColor, bootFiller: true },
-      { text: '  your dream .agent name', color: this.dimColor, bootFiller: true },
+      { text: '  Join the .agent community &', color: this.dimColor, bootFiller: true },
+      { text: '  pre-register your {dream}.agent name', color: this.dimColor, bootFiller: true },
       { text: '', color: this.textColor, bootFiller: true },
       { text: '  Operated by agentcommunity.org', color: this.dimColor, bootFiller: true },
       { text: '', color: this.textColor, bootFiller: true },
     ];
+    // Boot bar progress (0..1, -1 = not showing)
+    this._bootBarProgress = -1;
 
     // ID generation — content-addressed via FNV-1a hash
     this._idWords = [
@@ -253,7 +258,10 @@ export class CRTTerminal {
     for (const line of this.lines) {
       if (remap[line.color]) line.color = remap[line.color];
     }
-    for (const line of this.bootLines) {
+    for (const line of this.bootLinesInit) {
+      if (remap[line.color]) line.color = remap[line.color];
+    }
+    for (const line of this.bootLinesWelcome) {
       if (remap[line.color]) line.color = remap[line.color];
     }
     this.dirty = true;
@@ -929,7 +937,7 @@ export class CRTTerminal {
     if (!this.inputActive) return;
 
     switch (this.bootPhase) {
-      case 2:
+      case 2.5:
         if (this._waitingForEnter && key === 'Enter') {
           this.startTypeSelector();
         }
@@ -1003,21 +1011,50 @@ export class CRTTerminal {
         this.bootLineIndex = 0;
       }
     } else if (this.bootPhase === 2) {
+      // Phase 2a: type out init lines, then show boot bar
       this.bootTimer++;
       this.dirty = true;
-      if (this.bootTimer % 3 === 0 && this.bootLineIndex < this.bootLines.length) {
-        const bl = this.bootLines[this.bootLineIndex];
-        this.lines.push({ ...bl, typed: 0 });
-        this.bootLineIndex++;
+      if (this.bootLineIndex < this.bootLinesInit.length) {
+        if (this.bootTimer % 3 === 0) {
+          const bl = this.bootLinesInit[this.bootLineIndex];
+          this.lines.push({ ...bl, typed: 0 });
+          this.bootLineIndex++;
+        }
+      } else if (this._bootBarProgress < 0) {
+        // All init lines typed — check if text finished typing out
+        const initDone = this.lines.every(l => l.typed >= l.text.length);
+        if (initDone) this._bootBarProgress = 0;
+      } else if (this._bootBarProgress < 1) {
+        // Animate boot bar
+        this._bootBarProgress = Math.min(this._bootBarProgress + 0.025, 1);
+      } else {
+        // Bar complete — transition to phase 2b (welcome)
+        this._bootBarProgress = -1;
+        // Remove init lines, keep header
+        this.lines = this.lines.filter(l => !l.initLine);
+        this.bootPhase = 2.5;
+        this.bootTimer = 0;
+        this._welcomeLineIndex = 0;
       }
-      const allTyped = this.lines.length >= this.bootLines.length &&
-        this.lines.every(l => l.typed >= l.text.length);
-      if (allTyped && !this._waitingForEnter) {
-        this._waitingForEnter = true;
-        this.inputActive = true;
-        this._enterPromptIndex = this.lines.length;
-        const promptText = this.isMobile ? '  ▶ Tap to begin' : '  ▶ Press [ENTER] to begin';
-        this.lines.push({ text: promptText, color: this.headerColor, typed: 0 });
+    } else if (this.bootPhase === 2.5) {
+      // Phase 2b: type out welcome lines, then show "Press ENTER"
+      this.bootTimer++;
+      this.dirty = true;
+      if (this._welcomeLineIndex < this.bootLinesWelcome.length) {
+        if (this.bootTimer % 3 === 0) {
+          const bl = this.bootLinesWelcome[this._welcomeLineIndex];
+          this.lines.push({ ...bl, typed: 0 });
+          this._welcomeLineIndex++;
+        }
+      } else {
+        const allTyped = this.lines.every(l => l.typed >= l.text.length);
+        if (allTyped && !this._waitingForEnter) {
+          this._waitingForEnter = true;
+          this.inputActive = true;
+          this._enterPromptIndex = this.lines.length;
+          const promptText = this.isMobile ? '  ▶ Tap to begin' : '  ▶ Press [ENTER] to begin';
+          this.lines.push({ text: promptText, color: this.headerColor, typed: 0 });
+        }
       }
     } else if (this.bootPhase === 6) {
       this.dirty = true;
@@ -1245,7 +1282,7 @@ export class CRTTerminal {
       }
 
       // Enter prompt: pulsing blink + full-screen tap target
-      const isEnterPrompt = this.bootPhase === 2 && this._waitingForEnter && i === this._enterPromptIndex;
+      const isEnterPrompt = this.bootPhase === 2.5 && this._waitingForEnter && i === this._enterPromptIndex;
       if (isEnterPrompt && line.typed >= line.text.length) {
         this._addTapTarget('enter_begin', 0, 0, w, h);
         ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 0.06));
@@ -1311,6 +1348,19 @@ export class CRTTerminal {
     }
 
     // Type selector overlay
+    // Boot bar (phase 2a, between init lines and welcome)
+    if (this.bootPhase === 2 && this._bootBarProgress >= 0) {
+      const barY = y + this.lineHeight;
+      const barWidth = (w - this.padding * 2) * 0.55;
+      const barH = this.lineHeight - 8;
+      const filled = barWidth * this._bootBarProgress;
+      const rgb = this.flickerRGB;
+      ctx.fillStyle = `rgba(${rgb}, 0.12)`;
+      ctx.fillRect(this.padding + 16, barY, barWidth, barH);
+      ctx.fillStyle = `rgba(${rgb}, 0.5)`;
+      ctx.fillRect(this.padding + 16, barY, filled, barH);
+    }
+
     if (this.bootPhase === 3 && selectorStartY !== null) {
       this.drawTypeSelector(ctx, selectorStartY);
     }
