@@ -27,7 +27,10 @@ export default function middleware(request) {
   const title = `${displayName} — DMV Certificate ${certId}`;
   const description = `${displayName} is verified at the Department of Machine Verification. Certificate ID: ${certId}. Get yours at dmv.agentcommunity.org`;
   const permalink = `${DMV_BASE}/c/${encodeURIComponent(certId)}/${encodeURIComponent(agentName || 'agent')}`;
+  // Full Canvas2D card (880x630) — works for iMessage/Facebook/LinkedIn (longer timeouts)
   const ogImage = `${DMV_BASE}/api/card?id=${encodeURIComponent(certId)}&name=${encodeURIComponent(agentName)}`;
+  // Lightweight Satori edge function (1200x630) — fast enough for Twitter's ~4s timeout
+  const twitterImage = `${DMV_BASE}/api/og?id=${encodeURIComponent(certId)}&name=${encodeURIComponent(agentName)}`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -39,6 +42,7 @@ export default function middleware(request) {
   <meta property="og:title" content="${esc(title)}">
   <meta property="og:description" content="${esc(description)}">
   <meta property="og:image" content="${esc(ogImage)}">
+  <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="880">
   <meta property="og:image:height" content="630">
   <meta property="og:url" content="${esc(permalink)}">
@@ -46,7 +50,8 @@ export default function middleware(request) {
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="${esc(title)}">
   <meta name="twitter:description" content="${esc(description)}">
-  <meta name="twitter:image" content="${esc(ogImage)}">
+  <meta name="twitter:image" content="${esc(twitterImage)}">
+  <meta name="twitter:image:alt" content="DMV certificate card for ${esc(displayName)}">
   <link rel="canonical" href="${esc(permalink)}">
 </head>
 <body>
