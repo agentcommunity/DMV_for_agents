@@ -39,6 +39,15 @@ const terminalStatusBar = document.getElementById('terminalStatusBar');
 const terminalStatusText = document.getElementById('terminalStatusText');
 const crtAnnouncements = document.getElementById('crtAnnouncements');
 
+const CANONICAL_ORIGIN = (() => {
+  const raw = document.querySelector('meta[property="og:url"]')?.getAttribute('content') || '';
+  try {
+    return new URL(raw, window.location.origin).origin;
+  } catch {
+    return window.location.origin;
+  }
+})();
+
 const tv = new TV(container, label);
 await tv.init();
 
@@ -67,7 +76,7 @@ function applyOuterUITheme(isNightMode) {
   const dark = Boolean(isNightMode);
   document.documentElement.classList.toggle('ui-dark', dark);
   if (appFavicon) {
-    appFavicon.href = dark ? 'images/favicon_dark.ico?v=1' : 'images/favicon.ico?v=1';
+    appFavicon.href = dark ? '/images/favicon_dark.ico?v=1' : '/images/favicon.ico?v=1';
   }
   aboutPoster.setTheme(dark ? 'dark' : 'light');
   wallSign.setTheme();
@@ -181,23 +190,83 @@ async function maybeEnableGyro() {
 
 function buildPermalinkUrl(certId, agentName = '') {
   const name = encodeURIComponent(agentName || 'agent');
-  return `https://dmv.agentcommunity.org/c/${encodeURIComponent(certId)}/${name}`;
+  return new URL(`/c/${encodeURIComponent(certId)}/${name}`, CANONICAL_ORIGIN).toString();
 }
 
-function buildSharePayload(certId, data = {}) {
-  const agentName = data.agentName || 'agent';
-  const shareUrl = buildPermalinkUrl(certId, agentName);
-  const text = encodeURIComponent(
-    `I just registered ${agentName}.agent at the Department of Machine Verification.\n\n` +
-    `Get yours -> ${shareUrl}`
-  );
+function buildSharePayload(certId, data = {}, variant = 'register') {
+  const requestedName = (data.agentName || '').trim();
+  const resolvedName = requestedName || 'agent';
+  const shareUrl = buildPermalinkUrl(certId, resolvedName);
+  const agentPart = `${resolvedName}.agent`;
+  const text = variant === 'permalink'
+    ? `Check out ${agentPart} — verified at the Department of Machine Verification.\n\nGet yours:`
+    : `I just registered ${agentPart} at the Department of Machine Verification.\n\nGet yours:`;
   return { text, shareUrl };
 }
 
-function shareCertificateOnX(certId, data = {}) {
-  if (!certId) return;
-  const { text } = buildSharePayload(certId, data);
-  window.open(`https://x.com/intent/tweet?text=${text}`, '_blank');
+function buildXIntentUrl(text, shareUrl) {
+  const intent = new URL('https://x.com/intent/tweet');
+  intent.searchParams.set('text', text);
+  intent.searchParams.set('url', shareUrl);
+  return intent.toString();
+}
+
+function canUseWebShare(shareData) {
+  if (!window.isSecureContext) return false;
+  if (typeof navigator.share !== 'function') return false;
+  if (typeof navigator.canShare === 'function') {
+    try {
+      return navigator.canShare({ url: shareData?.url });
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function tryWebShare(shareData) {
+  if (!canUseWebShare(shareData)) return { ok: false, reason: 'unsupported' };
+  try {
+    await navigator.share(shareData);
+    return { ok: true };
+  } catch (err) {
+    if (err?.name === 'AbortError') return { ok: false, reason: 'aborted' };
+    return { ok: false, reason: 'error' };
+  }
+}
+
+function openInNewTab(url) {
+  try {
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (opened) opened.opener = null;
+    return Boolean(opened);
+  } catch {
+    return false;
+  }
+}
+
+function shareCertificate(certId, data = {}, options = {}) {
+  if (!certId) return Promise.resolve({ ok: false, method: 'none', reason: 'missing' });
+  const variant = options.variant || 'register';
+  const { text, shareUrl } = buildSharePayload(certId, data, variant);
+  const shareData = { title: 'DMV Certificate', text, url: shareUrl };
+
+  const opened = openInNewTab(buildXIntentUrl(text, shareUrl));
+  if (opened) return Promise.resolve({ ok: true, method: 'x' });
+
+  if (canUseWebShare(shareData)) {
+    return tryWebShare(shareData).then((nativeShare) => {
+      if (nativeShare.ok) return { ok: true, method: 'native' };
+      if (nativeShare.reason === 'aborted') return { ok: false, method: 'native', reason: 'aborted' };
+      return copyShareLink(certId, data).then((copied) => (
+        { ok: copied, method: copied ? 'copy' : 'none', reason: copied ? 'copied' : 'failed' }
+      ));
+    });
+  }
+
+  return copyShareLink(certId, data).then((copied) => (
+    { ok: copied, method: copied ? 'copy' : 'none', reason: copied ? 'copied' : 'failed' }
+  ));
 }
 
 function setCardShareTicker(message, variant = 'ok') {
@@ -220,8 +289,20 @@ function setCardShareTicker(message, variant = 'ok') {
 async function copyShareLink(certId, data = {}) {
   if (!certId) return false;
   const { shareUrl } = buildSharePayload(certId, data);
+  const restoreFocus = (() => {
+    const active = document.activeElement;
+    return () => {
+      if (!active || active === document.body) return;
+      if (typeof active.focus !== 'function') return;
+      try {
+        active.focus({ preventScroll: true });
+      } catch {
+        active.focus();
+      }
+    };
+  })();
   try {
-    if (navigator.clipboard?.writeText) {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(shareUrl);
       return true;
     }
@@ -233,14 +314,26 @@ async function copyShareLink(certId, data = {}) {
     const helper = document.createElement('textarea');
     helper.value = shareUrl;
     helper.setAttribute('readonly', '');
+    helper.setAttribute('aria-hidden', 'true');
+    helper.tabIndex = -1;
     helper.style.position = 'fixed';
     helper.style.left = '-9999px';
+    helper.style.top = '0';
+    helper.style.opacity = '0';
     document.body.appendChild(helper);
+    try {
+      helper.focus({ preventScroll: true });
+    } catch {
+      helper.focus();
+    }
     helper.select();
+    helper.setSelectionRange(0, helper.value.length);
     const ok = document.execCommand('copy');
     document.body.removeChild(helper);
-    return ok;
+    restoreFocus();
+    return Boolean(ok);
   } catch (err) {
+    restoreFocus();
     return false;
   }
 }
@@ -278,7 +371,17 @@ cardShareBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   if (!latestCardData?.certificateId) return;
-  shareCertificateOnX(latestCardData.certificateId, latestCardData);
+  shareCertificate(latestCardData.certificateId, latestCardData).then((result) => {
+    if (result.method === 'copy') {
+      setCardShareTicker('Link copied (popup blocked)', 'warn');
+    } else if (result.reason === 'aborted') {
+      // User canceled native share; no-op.
+    } else if (!result.ok && result.reason === 'failed') {
+      setCardShareTicker('Copy failed', 'warn');
+    } else if (!result.ok) {
+      setCardShareTicker('Popup blocked', 'warn');
+    }
+  });
 });
 
 cardCopyBtn?.addEventListener('click', async (e) => {
@@ -432,13 +535,21 @@ if (permalink) {
 
   shareBtn?.addEventListener('click', () => {
     const certId = permalink.certificateId;
-    const shareUrl = buildPermalinkUrl(certId, permalink.agentName);
-    const agentPart = permalink.agentName ? `${permalink.agentName}.agent` : 'an agent';
-    const text = encodeURIComponent(
-      `Check out ${agentPart} - verified at the Department of Machine Verification.\n\n` +
-      `Get yours -> ${shareUrl}`
-    );
-    window.open(`https://x.com/intent/tweet?text=${text}`, '_blank');
+    shareCertificate(certId, permalink, { variant: 'permalink' }).then((result) => {
+      const labelEl = shareBtn.querySelector('.permalink-overlay__cta-text');
+      const original = labelEl?.textContent || 'Share on X';
+      const message = result.method === 'copy'
+        ? 'Link copied'
+        : result.ok
+          ? original
+          : 'Popup blocked';
+      if (labelEl && message !== original) {
+        labelEl.textContent = message;
+        window.setTimeout(() => {
+          if (labelEl) labelEl.textContent = original;
+        }, 1600);
+      }
+    });
   });
 
   if (aboutToggleLink) {
@@ -536,7 +647,13 @@ tv.crt.onViewCert = () => {
 
 tv.crt.onShareCert = (certId, data) => {
   latestCardData = { ...(latestCardData || {}), ...(data || {}), certificateId: certId };
-  shareCertificateOnX(certId, data);
+  shareCertificate(certId, data).then((result) => {
+    if (result.method === 'copy') {
+      announce('Share link copied to clipboard.');
+    } else if (!result.ok && result.reason !== 'aborted') {
+      announce('Share failed. Copy the link from the card view.');
+    }
+  });
 };
 
 if (!permalink && aboutToggleLink) {
@@ -550,7 +667,7 @@ if (!permalink && aboutToggleLink) {
   });
 }
 
-const audio = new Audio(encodeURI('audio/pat102 - electro dance.mp3'));
+const audio = new Audio(encodeURI('/audio/pat102 - electro dance.mp3'));
 audio.loop = true;
 let soundOn = false;
 const soundToggle = document.getElementById('soundToggle');

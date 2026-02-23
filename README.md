@@ -148,6 +148,9 @@ The `.agent` namespace is community-governed. The more people and agents involve
 # Web terminal
 uv run python -m http.server 8080
 
+# Web terminal + permalinks (/c/...) via SPA fallback
+node dev-server.mjs
+
 # CLI
 cd packages/dmv-agent && pnpm install && pnpm build
 node dist/cli.js register

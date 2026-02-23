@@ -191,7 +191,7 @@ export class TV {
 
     return new Promise((resolve, reject) => {
       this.crt.setLoadProgress(0);
-      this.gltfLoader.load('models/tv1.glb', (gltf) => {
+      this.gltfLoader.load('/models/tv1.glb', (gltf) => {
         this.crt.loadComplete();
         this.model = gltf.scene;
         this.triggerEl = this.model.getObjectByName('Cube001');
