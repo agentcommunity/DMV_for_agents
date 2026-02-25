@@ -28,7 +28,7 @@ export class AboutPoster {
       { label: 'agentcommunity.org', url: 'https://agentcommunity.org' },
       { label: 'aid.agentcommunity.org', url: 'https://aid.agentcommunity.org' },
       { label: 'dmv.agentcommunity.org', url: 'https://dmv.agentcommunity.org' },
-      { label: 'github', url: 'https://github.com/agentcommunity/DMV_for_agents' },
+      { label: 'fork it: github.com/agentcommunity/DMV_for_agents', url: 'https://github.com/agentcommunity/DMV_for_agents' },
     ];
 
     this.texture = new THREE.CanvasTexture(this.canvas);

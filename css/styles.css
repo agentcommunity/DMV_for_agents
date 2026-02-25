@@ -388,6 +388,20 @@ body.scrolled .center-cta__cli { pointer-events: none; }
 }
 .footer__right {
   justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 1.6rem;
+}
+.footer__github {
+  pointer-events: auto;
+  color: var(--ui-text-secondary);
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+}
+@media (hover: hover) {
+  .footer__github:hover { opacity: 1; }
 }
 .clock {
   font-family: var(--floating-ui-font-mono);
