@@ -28,6 +28,7 @@ export class AboutPoster {
       { label: 'agentcommunity.org', url: 'https://agentcommunity.org' },
       { label: 'aid.agentcommunity.org', url: 'https://aid.agentcommunity.org' },
       { label: 'dmv.agentcommunity.org', url: 'https://dmv.agentcommunity.org' },
+      { label: 'github', url: 'https://github.com/agentcommunity/DMV_for_agents' },
     ];
 
     this.texture = new THREE.CanvasTexture(this.canvas);
@@ -241,8 +242,10 @@ export class AboutPoster {
     drawLines(
       [
         'The Department of Machine Verification',
-        'is the registration authority for the',
-        '.agent community.',
+        'is the pre-registration terminal for',
+        'the .agent community — a coalition of',
+        'builders, researchers, and companies',
+        'working to secure .agent through ICANN.',
       ],
       bodyFont,
       colors.bodyStrong,
@@ -252,46 +255,7 @@ export class AboutPoster {
     );
 
     drawLines(
-      [
-        'As AI agents become first-class',
-        'participants on the internet, they',
-        'need identity - a way to be recognized,',
-        'verified, and trusted.',
-      ],
-      bodyFont,
-      colors.bodyDim,
-      34,
-      14,
-      6
-    );
-
-    drawLines(
-      [
-        'The DMV issues machine identity',
-        'certificates that establish:',
-      ],
-      bodyFont,
-      colors.bodyStrong,
-      34,
-      12,
-      6
-    );
-
-    drawLines(
-      [
-        '  - A requested .agent name (non-binding)',
-        '  - A unique, content-addressed certificate ID',
-        '  - Membership in the agent community',
-      ],
-      smallFont,
-      colors.bodySoft,
-      30,
-      18,
-      0
-    );
-
-    drawLines(
-      ['WHAT YOU GET'],
+      ['WHY AGENTS NEED NAMES'],
       sectionFont,
       colors.section,
       30,
@@ -301,9 +265,21 @@ export class AboutPoster {
 
     drawLines(
       [
-        '  - Your requested .agent name (non-binding)',
-        '  - Unique, deterministic certificate ID',
-        '  - Badge endpoint for README and websites',
+        'Agents are becoming real participants',
+        'on the internet. They handle support,',
+        'manage calendars, negotiate deals.',
+        '',
+        'But right now, they\'re anonymous.',
+        'No names. No accountability. No trust.',
+        '',
+        'When an agent books a flight for you,',
+        'or negotiates a contract, or responds',
+        'to a customer — people need to know:',
+        'who built this? Who\'s accountable?',
+        'Can I trust it?',
+        '',
+        'A name like acme-support.agent',
+        'answers all three instantly.',
       ],
       smallFont,
       colors.list,
@@ -313,7 +289,7 @@ export class AboutPoster {
     );
 
     drawLines(
-      ['HOW IT WORKS'],
+      ['THE .AGENT COMMUNITY'],
       sectionFont,
       colors.section,
       30,
@@ -323,14 +299,16 @@ export class AboutPoster {
 
     drawLines(
       [
-        'The terminal validates your inputs, normalizes',
-        'identity fields, and mints a deterministic',
-        'certificate reference tied to your requested',
-        'handle and account type.',
+        'The .agent community is applying to ICANN',
+        'for .agent — a dedicated top-level domain',
+        'for AI agents. Not a product. Not a',
+        'platform. A public namespace, governed',
+        'by its members.',
         '',
-        'You can share the permalink publicly, embed the',
-        'badge endpoint, and let others verify your',
-        'registration metadata through open endpoints.',
+        'Policies for who gets a name, how disputes',
+        'are resolved, and what safety standards',
+        'apply — decided by the community, not',
+        'a single corporation.',
       ],
       smallFont,
       colors.list,
@@ -340,7 +318,7 @@ export class AboutPoster {
     );
 
     drawLines(
-      ['FOR AI AGENTS'],
+      ['THIS TERMINAL'],
       sectionFont,
       colors.section,
       30,
@@ -350,13 +328,69 @@ export class AboutPoster {
 
     drawLines(
       [
-        'AI agents can self-register via CLI or MCP:',
+        'Pre-registration records your interest',
+        'in a .agent domain name. It\'s non-binding',
+        '— names may change before .agent launches.',
+        'But your certificate ID is permanent: a',
+        'content-addressed hash that proves you',
+        'were here, and when.',
         '',
-        '  bunx dmv-agent register',
+        'Every registration strengthens the case',
+        'for .agent at ICANN. The more agents that',
+        'show up, the clearer the demand.',
+      ],
+      smallFont,
+      colors.list,
+      28,
+      16,
+      0
+    );
+
+    drawLines(
+      ['AID — DISCOVERY PROTOCOL'],
+      sectionFont,
+      colors.section,
+      30,
+      8,
+      2
+    );
+
+    drawLines(
+      [
+        'The community also builds AID — Agent',
+        'Identity & Discovery. A DNS-based protocol',
+        'so agents can publish who they are, where',
+        'they live, and what they can do.',
         '',
-        'Or add the MCP server to your host config',
-        'for tool-based registration. The operator',
-        '(human responsible) must verify by email.',
+        'When .agent launches, DMV pre-registrations',
+        'feed into the official DNS-based system.',
+        'The spec is open at aid.agentcommunity.org.',
+      ],
+      smallFont,
+      colors.list,
+      28,
+      16,
+      0
+    );
+
+    drawLines(
+      ['GET INVOLVED'],
+      sectionFont,
+      colors.section,
+      30,
+      8,
+      2
+    );
+
+    drawLines(
+      [
+        'This is an open community project. The AID',
+        'spec, this terminal, and the governance',
+        'framework are all open source.',
+        '',
+        'Register an agent. Share your card. Review',
+        'the spec. Open a PR. The internet\'s next',
+        'chapter needs more voices at the table.',
       ],
       smallFont,
       colors.list,
@@ -403,8 +437,8 @@ export class AboutPoster {
 
     drawLines(
       [
-        'This is a pre-registration terminal.',
-        'Full verification coming soon.',
+        'Pre-registration is non-binding.',
+        'Certificate IDs are permanent.',
       ],
       smallFont,
       colors.note,
