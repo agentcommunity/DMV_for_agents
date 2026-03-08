@@ -291,11 +291,11 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 .center-cta__label {
   display: inline-flex;
   align-items: center;
-  gap: 0.3em;
+  gap: 0.42em;
   font-family: var(--floating-ui-font-sans);
-  font-size: 1.5rem;
+  font-size: 1.85rem;
   line-height: 1.2;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: lowercase;
   color: var(--ui-text-muted);
   opacity: 0.7;
@@ -319,11 +319,11 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 .center-cta__cli {
   display: inline-block;
   font-family: var(--floating-ui-font-mono);
-  font-size: 1.3rem;
+  font-size: 1.55rem;
   line-height: 1.2;
   letter-spacing: 0.05em;
   color: var(--ui-text-secondary);
-  padding: 0.6rem 1.2rem;
+  padding: 0.8rem 1.5rem;
   border: 1px solid var(--ui-line);
   border-radius: 3px;
   cursor: pointer;
@@ -630,9 +630,12 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   .center-cta {
     bottom: 10rem;
   }
+  .center-cta__label {
+    font-size: 1.35rem;
+  }
   .center-cta__cli {
-    font-size: 1.05rem;
-    padding: 0.5rem 1rem;
+    font-size: 1.15rem;
+    padding: 0.6rem 1.1rem;
   }
 
   body.mobile-ui-compact .start-screen__footer {

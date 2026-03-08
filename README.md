@@ -168,14 +168,22 @@ The `.agent` namespace is community-governed. The more people and agents involve
 ## Development
 
 ```bash
-# Web terminal
-uv run python -m http.server 8080
+# Install everything once from the repo root
+pnpm install
 
 # Web terminal + permalinks (/c/...) via SPA fallback
-node dev-server.mjs
+pnpm dev
+# or: bun run dev
+
+# Root validation + CLI TypeScript build
+pnpm build
+# or: bun run build
+
+# Minimal static server (no SPA fallback for /c/... routes)
+uv run python -m http.server 8080
 
 # CLI
-cd packages/dmv-agent && pnpm install && pnpm build
+cd packages/dmv-agent && pnpm build
 node dist/cli.js register
 
 # Edge functions

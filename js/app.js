@@ -1,4 +1,4 @@
-import { TV } from './TV.js?v=22';
+import { TV } from './TV.js?v=23';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
@@ -39,6 +39,7 @@ const cliSnippet = document.getElementById('cliSnippet');
 const terminalStatusBar = document.getElementById('terminalStatusBar');
 const terminalStatusText = document.getElementById('terminalStatusText');
 const crtAnnouncements = document.getElementById('crtAnnouncements');
+const cliCommandMeta = document.querySelector('meta[name="agent:cli"]');
 
 const CANONICAL_ORIGIN = (() => {
   const raw = document.querySelector('meta[property="og:url"]')?.getAttribute('content') || '';
@@ -48,6 +49,10 @@ const CANONICAL_ORIGIN = (() => {
     return window.location.origin;
   }
 })();
+
+const CLI_REGISTER_COMMAND = cliCommandMeta?.getAttribute('content')?.trim()
+  || cliSnippet?.textContent.trim()
+  || 'bunx dmv-agent register';
 
 const tv = new TV(container, label);
 await tv.init();
@@ -85,13 +90,22 @@ function applyOuterUITheme(isNightMode) {
 
 applyOuterUITheme(tv.isNightMode);
 
+async function copyCliCommand(command = CLI_REGISTER_COMMAND, source = 'cta') {
+  try {
+    await navigator.clipboard.writeText(command);
+    if (source === 'cta' && cliSnippet) {
+      cliSnippet.textContent = 'copied — register via cli or mcp';
+      setTimeout(() => { cliSnippet.textContent = CLI_REGISTER_COMMAND; }, 3000);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 if (cliSnippet) {
   cliSnippet.addEventListener('click', () => {
-    navigator.clipboard.writeText(cliSnippet.textContent.trim()).then(() => {
-      const original = cliSnippet.textContent;
-      cliSnippet.textContent = 'copied — have your agent choose its own name';
-      setTimeout(() => { cliSnippet.textContent = original; }, 3000);
-    });
+    copyCliCommand();
   });
 }
 
@@ -443,11 +457,12 @@ function announce(message) {
 
 const PHASE_LABELS = {
   2: 'Terminal booting',
-  3: 'Select account type: individual or organization',
+  3: 'Select account type: organization, individual, or agent',
   4: 'Form input',
   5: 'Review your information',
   6: 'Processing registration',
   7: 'Registration complete',
+  8: 'Agents should self-register via CLI or MCP',
 };
 
 tv.onRender((dt) => {
@@ -683,6 +698,14 @@ tv.crt.onShareCert = (certId, data) => {
   });
 };
 
+tv.crt.setAgentRegistrationCommands(CLI_REGISTER_COMMAND, 'bunx dmv-agent');
+tv.crt.onCopyAgentCli = () => {
+  return copyCliCommand(CLI_REGISTER_COMMAND, 'crt').then((copied) => {
+    announce(copied ? 'CLI command copied to clipboard.' : 'Copy failed. Use the command shown on screen.');
+    return copied;
+  });
+};
+
 if (!permalink && aboutToggleLink) {
   aboutToggleLink.addEventListener('click', (e) => {
     e.preventDefault();
@@ -730,7 +753,7 @@ ScrollTrigger.create({
   end: 'bottom bottom',
   onUpdate: ({ progress }) => {
     if (window.innerWidth < 768) label.classList.add('hidden');
-    lastScrollProgress = Math.min(progress, 0.95);
+    lastScrollProgress = Math.min(progress, 1);
     document.body.classList.toggle('scrolled', lastScrollProgress > 0.02);
     document.documentElement.style.setProperty('--scroll-progress', lastScrollProgress);
     tv.animateCameraPosition(lastScrollProgress);

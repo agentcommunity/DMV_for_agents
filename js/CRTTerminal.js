@@ -49,8 +49,8 @@ export class CRTTerminal {
     this.manualScrollY = null; // non-null during reading mode
 
     // Account type selection (phase 3)
-    this.accountType = null;   // 'org' or 'individual'
-    this.selectorIndex = 0;    // 0=org, 1=individual
+    this.accountType = null;   // 'org' | 'individual' | 'agent'
+    this.selectorIndex = 0;    // 0=org, 1=individual, 2=agent
 
     // Form fields — set dynamically after type selection
     this.fields = [];
@@ -123,6 +123,9 @@ export class CRTTerminal {
 
     // Completion callback
     this.onComplete = null;
+    this.onCopyAgentCli = null;
+    this.agentCliCommand = 'bunx dmv-agent register';
+    this.agentMcpCommand = 'bunx dmv-agent';
 
     // Boot sequence text — phase 2a (init lines, shown first)
     this.bootLinesInit = [
@@ -240,6 +243,16 @@ export class CRTTerminal {
     this.dirty = true;
   }
 
+  setAgentRegistrationCommands(cliCommand, mcpCommand = 'bunx dmv-agent') {
+    if (typeof cliCommand === 'string' && cliCommand.trim()) {
+      this.agentCliCommand = cliCommand.trim();
+    }
+    if (typeof mcpCommand === 'string' && mcpCommand.trim()) {
+      this.agentMcpCommand = mcpCommand.trim();
+    }
+    this.dirty = true;
+  }
+
   setColorScheme(name) {
     const p = this.palettes[name];
     if (!p) return;
@@ -293,6 +306,9 @@ export class CRTTerminal {
   // --- Phase 3: Type Selector ---
 
   startTypeSelector() {
+    if (this._selectorBaseIndex != null) {
+      this.lines.splice(this._selectorBaseIndex);
+    }
     // Remove "Press ENTER" prompt if present
     if (this._enterPromptIndex != null) {
       this.lines.splice(this._enterPromptIndex);
@@ -307,12 +323,16 @@ export class CRTTerminal {
     }
 
     this.bootPhase = 3;
+    this.accountType = null;
+    this.fields = [];
+    this.currentField = -1;
     this.selectorIndex = 0;
     this.inputActive = true;
+    this._selectorBaseIndex = this.lines.length;
     this._selectorStartIndex = this.lines.length;
     this.lines.push({ text: '  Select account type:', color: this.headerColor, typed: 0 });
     this.lines.push({ text: '', color: this.textColor, typed: 999 });
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 15; i++) {
       this.lines.push({ text: '', color: this.textColor, typed: 999 });
     }
   }
@@ -325,17 +345,25 @@ export class CRTTerminal {
     } else if (key === '2') {
       this.selectorIndex = 1;
       this.selectAccountType();
+    } else if (key === '3') {
+      this.selectorIndex = 2;
+      this.selectAccountType();
     } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
-      this.selectorIndex = 0;
+      this.selectorIndex = Math.max(0, this.selectorIndex - 1);
     } else if (key === 'ArrowDown' || key === 'ArrowRight') {
-      this.selectorIndex = 1;
+      this.selectorIndex = Math.min(2, this.selectorIndex + 1);
     } else if (key === 'Enter') {
       this.selectAccountType();
     }
   }
 
   selectAccountType() {
-    this.accountType = this.selectorIndex === 0 ? 'org' : 'individual';
+    this.accountType = this.selectorIndex === 0 ? 'org' : this.selectorIndex === 1 ? 'individual' : 'agent';
+
+    if (this.accountType === 'agent') {
+      this.startAgentGuidance();
+      return;
+    }
 
     if (this.accountType === 'org') {
       this.fields = [
@@ -353,11 +381,8 @@ export class CRTTerminal {
     }
 
     // Remove selector placeholder lines
-    if (this._selectorStartIndex != null) {
-      const selectorHeader = this.lines.findIndex(l => l.text === '  Select account type:');
-      if (selectorHeader >= 0) {
-        this.lines.splice(selectorHeader);
-      }
+    if (this._selectorBaseIndex != null) {
+      this.lines.splice(this._selectorBaseIndex);
       this._selectorStartIndex = null;
     }
     while (this.lines.length > 0 && this.lines[this.lines.length - 1].text === '') {
@@ -374,14 +399,65 @@ export class CRTTerminal {
     this.addFormPrompt();
   }
 
+  startAgentGuidance() {
+    if (this._selectorBaseIndex != null) {
+      this.lines.splice(this._selectorBaseIndex);
+      this._selectorStartIndex = null;
+    }
+    while (this.lines.length > 0 && this.lines[this.lines.length - 1].text === '') {
+      this.lines.pop();
+    }
+
+    this.bootPhase = 8;
+    this.fields = [];
+    this.currentField = -1;
+    this.reviewReading = null;
+    this.inputActive = true;
+    this.agentActionIndex = 0;
+
+    this.lines.push({ text: '  > Account type: AGENT', color: this.textColor, typed: 0 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this.lines.push({ text: '  Agents should self-register via CLI or MCP.', color: this.headerColor, typed: 0 });
+    this.lines.push({ text: '  This kiosk is for human-operated registrations.', color: this.dimColor, typed: 0 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this.lines.push({ text: `  CLI: ${this.agentCliCommand}`, color: this.textColor, typed: 0, answerStart: 7 });
+    this.lines.push({ text: `  MCP: ${this.agentMcpCommand}`, color: this.dimColor, typed: 0, answerStart: 7 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this.lines.push({ text: '  Copy the CLI command, then continue on the agent host.', color: this.dimColor, typed: 0 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this._agentFeedbackLineIndex = this.lines.length;
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    this._agentActionStartIndex = this.lines.length;
+    for (let i = 0; i < 5; i++) {
+      this.lines.push({ text: '', color: this.textColor, typed: 999 });
+    }
+  }
+
+  setAgentCopyFeedback(message, color = this.headerColor) {
+    if (this._agentFeedbackLineIndex == null) return;
+    const line = this.lines[this._agentFeedbackLineIndex];
+    if (!line) return;
+    line.text = message ? `  ${message}` : '';
+    line.color = color;
+    line.typed = line.text.length;
+    delete line.answerStart;
+    this.dirty = true;
+  }
+
   drawTypeSelector(ctx, startY) {
     const boxWidth = 400;
     const boxHeight = 60;
     const gap = 16;
     const x = this.padding + 16;
     let y = startY;
+    const options = [
+      { key: '1', title: 'ORGANIZATION', subtitle: 'Register a company or team', action: 'type_org' },
+      { key: '2', title: 'INDIVIDUAL', subtitle: 'Register yourself', action: 'type_individual' },
+      { key: '3', title: 'AGENT', subtitle: 'Self-register via CLI or MCP', action: 'type_agent' },
+    ];
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < options.length; i++) {
       const isHighlighted = this.selectorIndex === i;
       const isFlashing = this._selectorFlashTimer > 0 && this._selectorFlashIndex === i;
       const borderColor = isFlashing ? this.headerColor : (isHighlighted ? this.headerColor : this.dimColor);
@@ -411,20 +487,11 @@ export class CRTTerminal {
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
-
-      if (i === 0) {
-        ctx.fillText('  [1]  ORGANIZATION', x + 12, y + 14);
-        ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
-        ctx.fillStyle = this.dimColor;
-        ctx.fillText('       Register a company or team', x + 12, y + 38);
-        this._addTapTarget('type_org', x, y, boxWidth, boxHeight);
-      } else {
-        ctx.fillText('  [2]  INDIVIDUAL', x + 12, y + 14);
-        ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
-        ctx.fillStyle = this.dimColor;
-        ctx.fillText('       Register yourself', x + 12, y + 38);
-        this._addTapTarget('type_individual', x, y, boxWidth, boxHeight);
-      }
+      ctx.fillText(`  [${options[i].key}]  ${options[i].title}`, x + 12, y + 14);
+      ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+      ctx.fillStyle = this.dimColor;
+      ctx.fillText(`       ${options[i].subtitle}`, x + 12, y + 38);
+      this._addTapTarget(options[i].action, x, y, boxWidth, boxHeight);
       ctx.shadowBlur = 0;
 
       y += boxHeight + gap;
@@ -434,6 +501,38 @@ export class CRTTerminal {
     ctx.fillStyle = this.dimColor;
     const hintText = this.isMobile ? '  Tap to select' : '  ↑/↓ Navigate  ·  Enter to select';
     ctx.fillText(hintText, x + 12, y + 8);
+  }
+
+  drawAgentGuidanceButtons(ctx, startY) {
+    const boxWidth = 400;
+    const boxHeight = 48;
+    const gap = 12;
+    const x = this.padding + 16;
+    let y = startY;
+    const buttons = [
+      { key: '1', label: 'Copy CLI command', action: 'agent_copy' },
+      { key: '2', label: 'Back to selector', action: 'agent_back' },
+    ];
+
+    for (let i = 0; i < buttons.length; i++) {
+      const isHighlighted = this.agentActionIndex === i;
+      const borderColor = isHighlighted ? this.headerColor : this.dimColor;
+      const textColor = isHighlighted ? this.textColor : this.dimColor;
+
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isHighlighted ? 2 : 1;
+      ctx.strokeRect(x, y, boxWidth, boxHeight);
+
+      ctx.font = `${this.fontSize}px "Courier New", monospace`;
+      ctx.fillStyle = textColor;
+      ctx.shadowColor = isHighlighted ? textColor : 'transparent';
+      ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
+      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
+      ctx.shadowBlur = 0;
+
+      this._addTapTarget(buttons[i].action, x, y, boxWidth, boxHeight);
+      y += boxHeight + gap;
+    }
   }
 
   drawDoneButtons(ctx, startY) {
@@ -765,6 +864,22 @@ export class CRTTerminal {
       }
       return true;
     }
+    if (action === 'type_agent') {
+      this.selectorIndex = 2;
+      if (this._selectorFlashTimer <= 0) {
+        this._selectorFlashIndex = 2;
+        this._selectorFlashTimer = 12;
+      }
+      return true;
+    }
+    if (action === 'agent_copy') {
+      this.handleAgentGuidanceInput('1');
+      return true;
+    }
+    if (action === 'agent_back') {
+      this.handleAgentGuidanceInput('2');
+      return true;
+    }
     if (action === 'review_tnc') {
       this.handleReviewInput('1');
       return true;
@@ -913,6 +1028,35 @@ export class CRTTerminal {
 
   // --- Phase 7: Done (View / Share) ---
 
+  handleAgentGuidanceInput(key) {
+    this.dirty = true;
+    if (key === '1') {
+      this.agentActionIndex = 0;
+      this.setAgentCopyFeedback('Copying CLI command...', this.dimColor);
+      if (this.onCopyAgentCli) {
+        Promise.resolve(this.onCopyAgentCli(this.agentCliCommand, this.agentMcpCommand)).then((copied) => {
+          this.setAgentCopyFeedback(
+            copied ? 'Copied. Ready to paste on the agent host.' : 'Copy failed. Use the command shown above.',
+            copied ? this.headerColor : this.dimColor,
+          );
+        });
+      }
+    } else if (key === '2' || key === 'Escape') {
+      this.agentActionIndex = 1;
+      this.startTypeSelector();
+    } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+      this.agentActionIndex = Math.max(0, this.agentActionIndex - 1);
+    } else if (key === 'ArrowDown' || key === 'ArrowRight') {
+      this.agentActionIndex = Math.min(1, this.agentActionIndex + 1);
+    } else if (key === 'Enter') {
+      if (this.agentActionIndex === 0) {
+        this.handleAgentGuidanceInput('1');
+      } else {
+        this.startTypeSelector();
+      }
+    }
+  }
+
   handleDoneInput(key) {
     this.dirty = true;
     if (key === '1' && this.onViewCert) {
@@ -946,6 +1090,7 @@ export class CRTTerminal {
       case 4: this.handleFormInput(key); break;
       case 5: this.handleReviewInput(key); break;
       case 7: this.handleDoneInput(key); break;
+      case 8: this.handleAgentGuidanceInput(key); break;
     }
   }
 
@@ -1233,6 +1378,7 @@ export class CRTTerminal {
     let submitButtonY = null;
     let reviewButtonsY = null;
     let formNextY = null;
+    let agentButtonsY = null;
 
     if (this.bootPhase === 3) {
       for (let i = 0; i < this.lines.length; i++) {
@@ -1277,6 +1423,13 @@ export class CRTTerminal {
       // Skip placeholder lines for done buttons (phase 7)
       if (this.bootPhase === 7 && this._doneButtonsStartIndex != null && i >= this._doneButtonsStartIndex) {
         if (i === this._doneButtonsStartIndex) doneButtonsY = y;
+        y += this.lineHeight;
+        continue;
+      }
+
+      // Skip placeholder lines for agent guidance buttons (phase 8)
+      if (this.bootPhase === 8 && this._agentActionStartIndex != null && i >= this._agentActionStartIndex) {
+        if (i === this._agentActionStartIndex) agentButtonsY = y;
         y += this.lineHeight;
         continue;
       }
@@ -1386,6 +1539,10 @@ export class CRTTerminal {
     // Done buttons overlay
     if (this.bootPhase === 7 && doneButtonsY !== null) {
       this.drawDoneButtons(ctx, doneButtonsY);
+    }
+
+    if (this.bootPhase === 8 && agentButtonsY !== null) {
+      this.drawAgentGuidanceButtons(ctx, agentButtonsY);
     }
 
     // Processing bar

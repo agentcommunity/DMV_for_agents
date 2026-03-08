@@ -181,6 +181,27 @@ function findEvidenceInText(text, pattern, maxMatches = 2) {
   return hits;
 }
 
+function findPermalinkEvidence(text, maxMatches = 2) {
+  const directHits = findEvidenceInText(text, CLAIMS.find((claim) => claim.id === 'permalink').pattern, maxMatches);
+  if (directHits.length > 0) return directHits;
+
+  const lines = text.split(/\r?\n/);
+  const inferredPatterns = [
+    /function buildPermalinkUrl\(/,
+    /new URL\(`\/c\/\$\{encodeURIComponent\(certId\)\}\/\$\{name\}`,\s*CANONICAL_ORIGIN\)/,
+    /history\.replaceState\(null,\s*'',\s*`\/c\/\$\{encodeURIComponent\(certificateId\)\}\/\$\{name\}`\)/,
+  ];
+
+  const hits = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (inferredPatterns.some((pattern) => pattern.test(lines[i]))) {
+      hits.push({ line: i + 1, text: lines[i].trim() });
+      if (hits.length >= maxMatches) break;
+    }
+  }
+  return hits;
+}
+
 function analyzeSurface(surface) {
   const files = surface.files.map((file) => {
     const content = readUtf8(file);
@@ -194,7 +215,9 @@ function analyzeSurface(surface) {
     let found = false;
 
     for (const file of files) {
-      const evidence = findEvidenceInText(file.content, claim.pattern, 1);
+      const evidence = claim.id === 'permalink'
+        ? findPermalinkEvidence(file.content, 1)
+        : findEvidenceInText(file.content, claim.pattern, 1);
       if (evidence.length > 0) {
         found = true;
         perFileEvidence.push({

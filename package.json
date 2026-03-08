@@ -2,8 +2,17 @@
   "private": true,
   "name": "dmv-vercel",
   "type": "module",
+  "packageManager": "pnpm@10.12.1",
+  "workspaces": [
+    "packages/*"
+  ],
   "description": "Root deps for Vercel Edge Functions (OG image generation)",
   "scripts": {
+    "dev": "node dev-server.mjs",
+    "start": "node dev-server.mjs",
+    "serve": "node dev-server.mjs",
+    "build": "node scripts/build-root.mjs",
+    "check": "node --test tests/text-surfaces.test.mjs",
     "text:audit": "node scripts/text-surfaces/run-audit.mjs",
     "text:audit:json": "node scripts/text-surfaces/run-audit.mjs --json",
     "text:check": "node --test tests/text-surfaces.test.mjs"
