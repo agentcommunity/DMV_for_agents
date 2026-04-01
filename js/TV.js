@@ -485,13 +485,13 @@ export class TV {
     if (this.renderer.toneMappingExposure < 1) {
       target = this.toneMappingExposureMax;
       triggerPos = 0;
-      this.scene.fog = new THREE.Fog(this.fogColor, 27, 29);
+      this.scene.fog.color.setHex(this.fogColor);
       this.renderer.setClearColor(this.fogColor, 1);
       this.isNightMode = false;
     } else {
       target = this.toneMappingExposureMin;
       triggerPos = 0.45;
-      this.scene.fog = new THREE.Fog(this.fogColorDark, 27, 29);
+      this.scene.fog.color.setHex(this.fogColorDark);
       this.renderer.setClearColor(this.fogColorDark, 1);
       this.isNightMode = true;
     }
