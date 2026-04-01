@@ -27,6 +27,7 @@ import {
 import { registerAgent } from './register.js';
 import { verifyCertificateId } from './certificate.js';
 import { validateAgentName, validateEmail } from './validate.js';
+import { checkRateLimit, recordAttempt, getMachineFingerprint } from './rate-limit.js';
 
 const server = new Server(
   {
@@ -67,7 +68,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           operator_name: {
             type: 'string',
             description:
-              'Optional: Name of the person or organization operating this agent.',
+              'Name of the person or organization operating this agent. Required.',
           },
           description: {
             type: 'string',
@@ -75,7 +76,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
               'Optional: Brief description of what this agent does.',
           },
         },
-        required: ['agent_name', 'email'],
+        required: ['agent_name', 'email', 'operator_name'],
       },
     },
     {
@@ -108,10 +109,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const description = (args?.description as string) || undefined;
 
     try {
+      // Client-side rate limiting (same as CLI)
+      const rateStatus = checkRateLimit();
+      if (!rateStatus.allowed) {
+        return {
+          content: [{ type: 'text' as const, text: `Rate limited: ${rateStatus.used}/${rateStatus.max} registrations used in the last 24h. Try again in ${rateStatus.retryIn}.` }],
+          isError: true,
+        };
+      }
+
+      const fingerprint = getMachineFingerprint();
       const result = await registerAgent(
         { agentName, email, operatorName, description },
         'mcp',
+        fingerprint,
       );
+
+      // Record successful attempt
+      recordAttempt(agentName);
 
       return {
         content: [
