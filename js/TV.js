@@ -174,8 +174,11 @@ export class TV {
 
   async loadModelDeferred() {
     if (this.modelLoaded) return;
-    try { await this.loadModel(); }
-    catch (err) { console.error('Error loading model:', err); }
+    if (this._modelLoadingPromise) return this._modelLoadingPromise;
+    this._modelLoadingPromise = this.loadModel()
+      .catch(err => console.error('Error loading model:', err))
+      .finally(() => { this._modelLoadingPromise = null; });
+    return this._modelLoadingPromise;
   }
 
   loadModel() {

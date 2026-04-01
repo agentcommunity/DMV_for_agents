@@ -20,7 +20,7 @@ type Rarity = 'STANDARD' | 'ENHANCED' | 'RARE' | 'LEGENDARY';
 
 const RARITY_SYMBOLS: Record<Rarity, string> = {
   STANDARD:  '',
-  ENHANCED:  '◆',
+  ENHANCED:  '◇',
   RARE:      '★',
   LEGENDARY: '✦',
 };
