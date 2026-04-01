@@ -2,6 +2,7 @@ import { TV } from './TV.js?v=24';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
+import { WallNumber } from './WallNumber.js?v=1';
 import { insertRegistration } from './supabase.js?v=16';
 
 const gsap = window.gsap;
@@ -91,6 +92,8 @@ tv.setAboutMesh(aboutPoster.mesh);
 
 const wallSign = new WallSign(tv.getScene());
 setTimeout(() => wallSign.flickerOn(), 1200);
+
+const wallNumber = new WallNumber(tv.getScene());
 setTimeout(() => { const cta = document.getElementById('centerCta'); if (cta) cta.classList.add('is-visible'); }, 2800);
 
 function applyOuterUITheme(isNightMode) {
@@ -101,6 +104,7 @@ function applyOuterUITheme(isNightMode) {
   }
   aboutPoster.setTheme(dark ? 'dark' : 'light');
   wallSign.setTheme();
+  wallNumber.setTheme();
 }
 
 applyOuterUITheme(tv.isNightMode);
