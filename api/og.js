@@ -76,12 +76,16 @@ function getCardDNA(name) {
 
 export default function handler(req) {
   const { searchParams } = new URL(req.url);
-  const agentName = searchParams.get('name') || '';
+  let agentName = searchParams.get('name') || '';
   // Support legacy ?id= param, but name is primary
-  const certIdParam = searchParams.get('id') || '';
+  let certIdParam = searchParams.get('id') || '';
+
+  // Truncate to prevent resource exhaustion
+  if (agentName.length > 32) agentName = agentName.slice(0, 32);
+  if (certIdParam.length > 16) certIdParam = certIdParam.slice(0, 16);
 
   const cacheHeaders = {
-    'Cache-Control': 'public, max-age=86400, s-maxage=604800',
+    'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
   };
 
   // Default (no params) — generic DMV branding

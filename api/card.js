@@ -17,8 +17,26 @@ import {
   CH,
 } from './card-renderer.js';
 
+export const config = {
+  maxDuration: 15,
+};
+
 export default async function handler(req, res) {
   const { id, name, type } = req.query;
+
+  // Validate inputs to prevent resource exhaustion
+  if (name && name.length > 32) {
+    res.status(400).json({ error: 'name must be 32 characters or fewer' });
+    return;
+  }
+  if (id && id.length > 16) {
+    res.status(400).json({ error: 'id must be 16 characters or fewer' });
+    return;
+  }
+  if (type && !['individual', 'organization', 'agent'].includes(type.toLowerCase())) {
+    res.status(400).json({ error: 'type must be individual, organization, or agent' });
+    return;
+  }
 
   // No name → can't render a card (need name for visual DNA)
   if (!name) {
@@ -36,6 +54,6 @@ export default async function handler(req, res) {
   const buffer = canvas.toBuffer('image/png');
 
   res.setHeader('Content-Type', 'image/png');
-  res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+  res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400');
   res.status(200).send(buffer);
 }
