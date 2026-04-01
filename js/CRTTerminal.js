@@ -1275,9 +1275,13 @@ export class CRTTerminal {
       }
     }
 
-    // Scanline animation: mark dirty every 3rd frame when CRT is on
-    if (this.isOn && this.time % 3 === 0) {
-      this.dirty = true;
+    // Scanline animation: frequent during active phases, throttled when idle
+    if (this.isOn) {
+      const isActivePhase = this.phase <= 2.5 || this.phase === 6;
+      const scanlineInterval = isActivePhase ? 3 : 30; // ~20fps active, ~2fps idle
+      if (this.time % scanlineInterval === 0) {
+        this.dirty = true;
+      }
     }
 
     if (this.dirty) {
