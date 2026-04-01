@@ -4,7 +4,10 @@ dev-server.mjs
 scripts/
 docs/
 tests/
-packages/
+packages/dmv-agent/src/
+packages/dmv-agent/dist/
+packages/dmv-agent/node_modules/
+packages/dmv-agent-alias/
 AGENTS.md
 ARCHITECTURE.md
 CARD.md

@@ -26,7 +26,7 @@ domain_requested    TEXT        -- e.g. 'my-agent.agent' (NOT unique — pre-reg
 email               TEXT
 certificate_id      TEXT        -- UNIQUE partial index (WHERE certificate_id IS NOT NULL)
 signup_source       TEXT        -- 'ui' | 'cli' | 'mcp' | 'api'
-status              TEXT        -- 'pending_profile' (set by register-agent)
+status              TEXT        -- 'provisional_dmv' (set by register-agent)
 user_id             UUID        -- nullable (set by trigger, NOT by register-agent)
 metadata            JSONB       -- { agent_description, client_ip }
 created_at          TIMESTAMPTZ -- default now()

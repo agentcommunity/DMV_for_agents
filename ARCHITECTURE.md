@@ -301,7 +301,7 @@ To prevent copy drift across user-facing surfaces, the repo includes a text audi
 ### Accepted exceptions (intentional divergence)
 
 1. `status-language-drift`
-   - DB row starts `pending_profile` until email verification.
+   - DB row starts `provisional_dmv` until email verification.
    - Card text remains `VERIFIED` by design (public artifact, no DB status crawl at card render time).
 2. `web-crt-email-reminder-gap`
    - Web CRT completion avoids extra verification copy.

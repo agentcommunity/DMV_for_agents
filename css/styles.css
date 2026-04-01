@@ -234,6 +234,11 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 }
 @media (hover: hover) { .header-link:hover { opacity: 1; } }
 
+.header-brand__links {
+  display: flex;
+  gap: 1.6rem;
+}
+
 /* === Toggle (clean track + thumb) === */
 .toggle {
   display: inline-flex; align-items: center; gap: 0.8rem;
@@ -929,4 +934,83 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   mix-blend-mode: color-dodge;
   opacity: calc(var(--card-opacity) * var(--pointer-from-center) * var(--holo-intensity, 0.5));
   transition: opacity 0.3s ease;
+}
+
+/* === Agent View (full-page markdown takeover) === */
+.agent-view {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #0d0d0d;
+  color: rgba(255, 255, 255, 0.88);
+  overflow-y: auto;
+  padding: 12rem var(--container-padding) 6rem;
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.4rem;
+  line-height: 1.7;
+}
+
+.agent-view__content {
+  max-width: 100rem;
+  margin: 0 auto;
+}
+
+.agent-view h2 {
+  font-size: 2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1.6rem;
+  opacity: 0.9;
+}
+
+.agent-view h3 {
+  font-size: 1.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 2rem;
+  margin-bottom: 0.8rem;
+  opacity: 0.7;
+}
+
+.agent-view__code {
+  display: block;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.4rem;
+  padding: 1.2rem 1.6rem;
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.3rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: inherit;
+  cursor: text;
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+.agent-view__divider {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 3.2rem 0;
+}
+
+.agent-view__skill pre {
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.5rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  opacity: 0.88;
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+.agent-view::-webkit-scrollbar { width: 0.6rem; }
+.agent-view::-webkit-scrollbar-track { background: transparent; }
+.agent-view::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 0.3rem; }
+
+@media (max-width: 767px) {
+  .agent-view { padding-top: 10rem; }
 }

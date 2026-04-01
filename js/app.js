@@ -1,8 +1,8 @@
-import { TV } from './TV.js?v=23';
+import { TV } from './TV.js?v=24';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
-import { insertRegistration } from './supabase.js?v=15';
+import { insertRegistration } from './supabase.js?v=16';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
@@ -23,6 +23,16 @@ function setShareHash(certificateId, agentName = '') {
 }
 
 const permalink = parsePermalink();
+
+// Preload the GLB model only when we'll actually use it (not in permalink mode)
+if (!permalink) {
+  const preload = document.createElement('link');
+  preload.rel = 'preload';
+  preload.href = '/models/tv1.glb';
+  preload.as = 'fetch';
+  preload.crossOrigin = '';
+  document.head.appendChild(preload);
+}
 
 const container = document.getElementById('canvasWrapper');
 const label = document.getElementById('modeLabel');
