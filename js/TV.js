@@ -601,7 +601,18 @@ export class TV {
       this._setLabelPosition();
       this.rotateCamera();
     }
-    requestAnimationFrame(() => this._render());
+    requestAnimationFrame(() => {
+      if (document.hidden) {
+        const resume = () => {
+          document.removeEventListener('visibilitychange', resume);
+          this._clock.getDelta(); // discard accumulated delta
+          this._render();
+        };
+        document.addEventListener('visibilitychange', resume);
+        return;
+      }
+      this._render();
+    });
   }
 
   setMousePosition(x, y) {
