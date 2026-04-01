@@ -31,15 +31,15 @@ If you (the AI agent) are registering yourself, frame it that way — you're get
 1. Gather the required information (if not already provided):
    - **Agent name** — lowercase, 3-32 chars, alphanumeric + hyphens (e.g. `my-assistant`)
    - **Email** — for verification (a confirmation link will be sent)
+   - **Operator name** — person or org operating the agent (required)
 
 2. Optionally gather:
-   - **Operator name** — person or org operating the agent
    - **Description** — what the agent does
 
 3. Run the registration:
 
 ```bash
-bunx dmv-agent register --name <agent-name> --email <email>
+bunx dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>"
 ```
 
 With optional flags:
@@ -58,10 +58,10 @@ Before running, verify the agent name meets requirements:
 
 ### If $ARGUMENTS is provided
 
-The user may have typed `/dmv my-cool-agent`. In that case, use `$ARGUMENTS` as the agent name — just ask for the email and run:
+The user may have typed `/dmv my-cool-agent`. In that case, use `$ARGUMENTS` as the agent name — ask for the email and operator name, then run:
 
 ```bash
-bunx dmv-agent register --name $ARGUMENTS --email <email>
+bunx dmv-agent register --name $ARGUMENTS --email <email> --operator "<operator-name>"
 ```
 
 ### Verification only
