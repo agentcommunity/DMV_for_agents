@@ -183,7 +183,7 @@ Deno.serve(async (req) => {
       status: 200, // Return 200 even for invalid — it's a badge, not an API
       headers: {
         'Content-Type': 'image/svg+xml',
-        'Cache-Control': 'public, max-age=300',
+        'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400',
         'Access-Control-Allow-Origin': '*',
       },
     })
@@ -221,7 +221,7 @@ Deno.serve(async (req) => {
     status: 200,
     headers: {
       'Content-Type': 'image/svg+xml',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400',
       'Access-Control-Allow-Origin': '*',
     },
   })
