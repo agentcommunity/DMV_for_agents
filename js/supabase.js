@@ -35,13 +35,23 @@ export async function insertRegistration(formData, signupSource = 'ui') {
   };
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
     const res = await fetch(REGISTER_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
-    const json = await res.json();
+    let json;
+    try {
+      json = await res.json();
+    } catch {
+      return { data: null, error: { message: `Server returned an unexpected response (HTTP ${res.status})` } };
+    }
 
     if (!res.ok) {
       console.error('[dmv] Registration error:', json.error);
@@ -50,8 +60,11 @@ export async function insertRegistration(formData, signupSource = 'ui') {
 
     return { data: json, error: null };
   } catch (err) {
+    const msg = err.name === 'AbortError'
+      ? 'Registration timed out. Please check your connection and try again.'
+      : err.message;
     console.error('[dmv] Network error:', err);
-    return { data: null, error: { message: err.message } };
+    return { data: null, error: { message: msg } };
   }
 }
 
