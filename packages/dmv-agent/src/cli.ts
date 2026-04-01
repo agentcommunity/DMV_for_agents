@@ -18,8 +18,9 @@ import {
   clearScreen, hideCursor, showCursor,
   renderBootScreen, renderFieldPrompt, renderConfirmation,
   renderProgress, renderSuccess, renderError, renderRateLimit,
-  renderContentPage, validationError, validationOk, color,
+  renderContentPage, validationError, validationOk, color, write,
 } from './ui.js';
+import { generateTextCard } from './text-card.js';
 import * as readline from 'node:readline';
 
 const VERSION = '0.1.0';
@@ -298,6 +299,17 @@ async function confirmAndSubmit(fields: CollectedFields): Promise<void> {
       email: fields.email,
       viewUrl,
     });
+
+    // ASCII text card — paste in READMEs or memory files
+    write('');
+    write(generateTextCard({
+      agentName: result.agentName,
+      domain: result.domain,
+      certificateId: result.certificateId,
+      accountType: 'Agent',
+      viewUrl,
+    }));
+    write('');
   } catch (err) {
     clearScreen();
     renderError((err as Error).message);
@@ -386,6 +398,17 @@ async function nonInteractiveRegister(flags: Record<string, string>): Promise<vo
       email,
       viewUrl,
     });
+
+    // ASCII text card — paste in READMEs or memory files
+    write('');
+    write(generateTextCard({
+      agentName: result.agentName,
+      domain: result.domain,
+      certificateId: result.certificateId,
+      accountType: 'Agent',
+      viewUrl,
+    }));
+    write('');
   } catch (err) {
     renderError((err as Error).message);
     process.exit(1);
