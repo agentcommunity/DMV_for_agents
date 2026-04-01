@@ -3,6 +3,8 @@
 // Client packages never see database credentials.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { Redis } from 'https://esm.sh/@upstash/redis@1.35.1'
+import { Ratelimit } from 'https://esm.sh/@upstash/ratelimit@2.0.6'
 
 // --- Certificate ID generation (duplicated from package — ~50 lines, no deps) ---
 
@@ -122,36 +124,68 @@ function getCorsHeaders(req: Request) {
   }
 }
 
-// --- Rate limiting (database-backed) ---
+// --- Rate limiting (Redis-backed via Upstash) ---
+
+function createRateLimiters() {
+  const redis = new Redis({
+    url: Deno.env.get('UPSTASH_REDIS_REST_URL')!,
+    token: Deno.env.get('UPSTASH_REDIS_REST_TOKEN')!,
+  })
+
+  return {
+    perEmail: new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(5, '10 m'),
+      prefix: 'dmv:email',
+    }),
+    perIp: new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(10, '10 m'),
+      prefix: 'dmv:ip',
+    }),
+    perIpEmail: new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(3, '10 m'),
+      prefix: 'dmv:ip-email',
+    }),
+  }
+}
+
+async function hashString(str: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
+  return [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2, '0')).join('')
+}
 
 async function checkRateLimit(
-  supabase: ReturnType<typeof createClient>,
   email: string,
   ip: string,
-): Promise<string | null> {
-  // Max 3 registrations per email per hour
-  const { count: emailCount } = await supabase
-    .from('registrations')
-    .select('*', { count: 'exact', head: true })
-    .eq('email', email)
-    .gte('created_at', new Date(Date.now() - 3600_000).toISOString())
+): Promise<{ error: string | null; retryAfter?: number }> {
+  const limiters = createRateLimiters()
+  const emailHash = await hashString(email)
+  const ipHash = await hashString(ip)
 
-  if ((emailCount ?? 0) >= 3) {
-    return 'Rate limited: max 3 registrations per email per hour'
+  // Tightest limit first: per IP+email combo
+  const ipEmailResult = await limiters.perIpEmail.limit(`${ipHash}:${emailHash}`)
+  if (!ipEmailResult.success) {
+    const retryAfter = Math.ceil((ipEmailResult.reset - Date.now()) / 1000)
+    return { error: 'Rate limited: too many registrations from this session', retryAfter }
   }
 
-  // Max 10 registrations per IP per hour (stored in metadata)
-  const { count: ipCount } = await supabase
-    .from('registrations')
-    .select('*', { count: 'exact', head: true })
-    .eq('metadata->>client_ip', ip)
-    .gte('created_at', new Date(Date.now() - 3600_000).toISOString())
-
-  if ((ipCount ?? 0) >= 10) {
-    return 'Rate limited: too many registrations from this address'
+  // Per-email limit
+  const emailResult = await limiters.perEmail.limit(emailHash)
+  if (!emailResult.success) {
+    const retryAfter = Math.ceil((emailResult.reset - Date.now()) / 1000)
+    return { error: 'Rate limited: too many registrations for this email', retryAfter }
   }
 
-  return null
+  // Per-IP limit (most lenient — shared IPs need headroom)
+  const ipResult = await limiters.perIp.limit(ipHash)
+  if (!ipResult.success) {
+    const retryAfter = Math.ceil((ipResult.reset - Date.now()) / 1000)
+    return { error: 'Rate limited: too many registrations from this address', retryAfter }
+  }
+
+  return { error: null }
 }
 
 // --- Handler ---
@@ -195,24 +229,58 @@ Deno.serve(async (req) => {
   const registrationType = (body.registration_type as string) || 'AGENT'
   const organizationName = (body.organization_name as string) || null
 
-  // Supabase client with service role key (server-side only)
+  // Client IP for rate limiting (before DB connection)
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || req.headers.get('cf-connecting-ip')
+    || 'unknown'
+
+  // Rate limit (Redis — no DB connection needed)
+  const rateLimit = await checkRateLimit(email, ip)
+  if (rateLimit.error) {
+    return new Response(
+      JSON.stringify({ error: rateLimit.error }),
+      { status: 429, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json', 'Retry-After': String(rateLimit.retryAfter || 600) } },
+    )
+  }
+
+  // Supabase client with service role key (server-side only — created after rate limit check)
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  // Client IP for rate limiting
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || req.headers.get('cf-connecting-ip')
-    || 'unknown'
+  // Lifetime cap: 3 unendorsed / 10 endorsed per email
+  const { count: totalCerts } = await supabase
+    .from('registrations')
+    .select('*', { count: 'exact', head: true })
+    .eq('email', email)
+    .not('certificate_id', 'is', null)
 
-  // Rate limit
-  const rateLimitError = await checkRateLimit(supabase, email, ip)
-  if (rateLimitError) {
-    return new Response(
-      JSON.stringify({ error: rateLimitError }),
-      { status: 429, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json', 'Retry-After': '600' } },
-    )
+  const CAP_UNENDORSED = 3
+  const CAP_ENDORSED = 10
+  const currentCount = totalCerts ?? 0
+
+  if (currentCount >= CAP_UNENDORSED) {
+    // Check if user is endorsed (has endorsement_status = 'signed' on any registration)
+    const { data: endorsed } = await supabase
+      .from('registrations')
+      .select('endorsement_status')
+      .eq('email', email)
+      .eq('endorsement_status', 'signed')
+      .limit(1)
+
+    const cap = endorsed?.length ? CAP_ENDORSED : CAP_UNENDORSED
+    if (currentCount >= cap) {
+      return new Response(
+        JSON.stringify({
+          error: `Certificate limit reached (${cap} max).${!endorsed?.length ? ' Endorsed members can register up to 10.' : ''}`,
+          current: currentCount,
+          limit: cap,
+          endorsed: !!endorsed?.length,
+        }),
+        { status: 403, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+      )
+    }
   }
 
   // Generate certificate ID (server-side — authoritative)
