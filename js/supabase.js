@@ -67,16 +67,3 @@ export async function insertRegistration(formData, signupSource = 'ui') {
     return { data: null, error: { message: msg } };
   }
 }
-
-/**
- * Check if a domain name is already taken.
- * For now, just try to register and handle the 409.
- * A dedicated lookup endpoint can be added later.
- * @param {string} agentName - without .agent suffix
- * @returns {boolean}
- */
-export async function isDomainTaken(agentName) {
-  if (!SUPABASE_ENABLED) return false;
-  // TODO: add a dedicated lookup edge function if needed
-  return false;
-}
