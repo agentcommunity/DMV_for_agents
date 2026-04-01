@@ -343,7 +343,7 @@ function evaluateRules(surfacesById) {
   }
 
   if (
-    /pending_profile/.test(surfacesById.register_api?.combinedText || '') &&
+    /provisional_dmv/.test(surfacesById.register_api?.combinedText || '') &&
     /VERIFIED/.test(surfacesById.web_card_client?.combinedText || '')
   ) {
     const warning = {

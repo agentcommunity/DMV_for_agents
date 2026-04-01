@@ -56,10 +56,11 @@ The Department of Machine Verification is the identity registration system for t
  │  │                                                │                   │
  │  │  POST /register-agent                          │                   │
  │  │    → validate input + registration_type        │                   │
- │  │    → rate limit: 3/email/hr, 10/IP/hr          │                   │
+ │  │    → rate limit: Redis triple layer (Upstash)    │                   │
+ │  │    → lifetime cap: 3/email or 10 if endorsed    │                   │
  │  │    → generate certificate ID (FNV-1a + Luhn)   │                   │
  │  │    → INSERT into registrations (status:         │                   │
- │  │      pending_profile, user_id: NULL)            │                   │
+ │  │      provisional_dmv, user_id: NULL)            │                   │
  │  │    → return cert ID + permalink + badge URLs   │                   │
  │  │    → DB trigger fires → agentcommunity.org     │                   │
  │  │      creates auth user + sends magic link +    │                   │
@@ -85,7 +86,7 @@ The Department of Machine Verification is the identity registration system for t
  │  │  certificate_id     TEXT (UNIQUE partial index) │                   │
  │  │  email              TEXT                       │                   │
  │  │  signup_source      TEXT (ui/cli/mcp/api)      │                   │
- │  │  status             TEXT (pending_profile)     │                   │
+ │  │  status             TEXT (provisional_dmv)     │                   │
  │  │  user_id            UUID (nullable — set by    │                   │
  │  │                      trigger, not by DMV)      │                   │
  │  │  full_name          TEXT (nullable)            │                   │
@@ -117,16 +118,18 @@ All five paths call the same edge function. Zero database credentials on the cli
 
 The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `bunx dmv-agent register --name <agent> --email <email> --operator <name>`.
 
-### Rate limiting (triple-layer for CLI)
+### Rate limiting (six layers)
 
-| Layer | Scope | Limit |
-|-------|-------|-------|
-| Client-side lockfile | Per machine (SHA-256 fingerprint) | 3 per 24h |
-| Server-side (email) | Per email address | 3 per hour |
-| Server-side (IP) | Per IP address | 10 per hour |
-| Server-side (fingerprint) | Per machine fingerprint | Sent with request |
+| Layer | Scope | Limit | Backend |
+|-------|-------|-------|---------|
+| Client-side lockfile | Per machine (SHA-256 fingerprint) | 3 per 24h | `~/.dmv-agent/registrations.json` |
+| Redis: per IP+email | Per session | 3 / 10 min | Upstash (shared with main site) |
+| Redis: per email | Per email address | 5 / 10 min | Upstash |
+| Redis: per IP | Per IP address | 10 / 10 min | Upstash |
+| DB: lifetime cap | Per email, lifetime | 3 (unendorsed) / 10 (endorsed) | Postgres |
+| DB: unique constraint | Per cert ID | Deterministic dedup | Postgres |
 
-Client-side tracking stored in `~/.dmv-agent/registrations.json`.
+Redis rate limiting is fail-open — if Upstash is down, requests fall through to the DB lifetime cap. Client-side lockfile is advisory (shared by CLI and MCP). See [AUTH_DMV.md](AUTH_DMV.md) for the full rate limiting architecture.
 
 ## Repository structure
 
@@ -221,7 +224,7 @@ Database:        RLS denies all anon access
 
 | Threat | Mitigation |
 |--------|-----------|
-| Spam registrations | Rate limit: 3/email/hr, 10/IP/hr (database-backed, not in-memory) |
+| Spam registrations | Redis rate limit: 3/IP+email/10min, 5/email/10min, 10/IP/10min (Upstash, fail-open) + lifetime cap 3/email (10 if endorsed) |
 | Name squatting | Pre-registration model — multiple users can claim the same domain. Magic link email verifies identity. |
 | Credential theft | No credentials in client code. Anon key removed. Only edge fn URL is public. |
 | Data exfil | lookup-agent returns only public fields. No email, no IP, no operator name. |

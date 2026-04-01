@@ -37,7 +37,6 @@ app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canv
 - `CRTTerminal.js` — Pure Canvas2D, no Three.js dependency. 8-phase boot state machine (off, flicker, boot text, type selector, form, review/submit, processing, done), conditional form fields with validation, color scheme swapping, CRT visual effects.
 - `HoloCard.js` — Self-contained holographic card module. Custom ShaderMaterial (GLSL) with rainbow iridescence, foil lines, glare, fresnel, sparkle. Front + back faces with Canvas2D content. Rarity system, identicon, scannable QR code (real encoder). Bob + tilt animation. See [CARD.md](CARD.md).
 - `WallSign.js` — Wall sign above the TV. PlaneGeometry + CanvasTexture with "DEPT. OF MACHINE VERIFICATION" title and "SELF-SERVE KIOSK" subtitle. Fluorescent tube flicker-on animation (GSAP timeline) fires ~1.2s after page load (not scroll-linked). Ambient flicker loop (random subtle opacity dips every 4-7s) runs after startup. Theme-aware via CSS custom properties. Self-contained with `dispose()` cleanup.
-- `CardPoster.js` — **Legacy.** Original flat card, replaced by HoloCard.js.
 - `AboutPoster.js` — PlaneGeometry + CanvasTexture. UI-style about text, toggle show/hide.
 
 **External deps (all CDN, no npm):**
@@ -139,7 +138,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
 **Edge functions** (`supabase/functions/`): registration proxy, lookup API, badge SVG generator. All Deno, deployed to Supabase. Zero secrets in client code — all DB writes go through edge functions.
 
-**Trigger chain**: register-agent INSERTs with `certificate_id` + `status: 'pending_profile'` + `user_id: NULL`. A database trigger (`on_dmv_registration`) on the agentcommunity.org side fires asynchronously (pg_net), creates/finds auth user, sends magic link + certificate email, and manages the `user_domains` table. DMV does NOT create auth users or send emails.
+**Trigger chain**: register-agent INSERTs with `certificate_id` + `status: 'provisional_dmv'` + `user_id: NULL`. A database trigger (`on_dmv_registration`) on the agentcommunity.org side fires asynchronously (pg_net), creates/finds auth user, sends certificate email, and manages the `user_domains` table. DMV does NOT create auth users or send emails. See [AUTH_DMV.md](AUTH_DMV.md) for the full auth integration flow.
 
 **Pre-registration model**: Multiple users can register interest in the same `.agent` domain. `domain_requested` is NOT unique. `certificate_id` is unique (same user+agent+type = same cert ID). Badge lookup is by cert ID only (`?domain=` deprecated).
 

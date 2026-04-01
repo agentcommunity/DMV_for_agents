@@ -96,7 +96,7 @@ You (web / CLI / MCP)
 ```
 
 - **Five registration paths** — web terminal, CLI, MCP server, JS API, Claude Code `/dmv` skill
-- **Triple-layer rate limiting** — per email, per IP, per machine
+- **Six-layer rate limiting** — Redis triple layer (per IP+email, per email, per IP) + DB lifetime cap + client lockfile + unique constraint
 - **Zero secrets in client code** — all writes go through edge functions
 - **Content-addressed IDs** — deterministic hashes, not sequential
 - **Email verification** — operator must click to activate
@@ -120,7 +120,7 @@ npm run text:check
 
 Two differences are currently intentional and tracked as accepted exceptions:
 
-- Card copy shows `VERIFIED` even while DB status is still `pending_profile` during email verification.
+- Card copy shows `VERIFIED` even while DB status is still `provisional_dmv` during email verification.
 - Web CRT completion copy stays minimal; verification/link/badge details are delivered in email follow-ups.
 
 Details: [Text Surface Audit](docs/text-surface-audit.md)

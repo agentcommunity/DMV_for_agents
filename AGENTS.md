@@ -12,7 +12,6 @@ css/styles.css      → All styles. Theme tokens, header/footer layout, center `
 js/app.js           → Entry point. Inits TV + HoloCard, wires events, scroll, sound, clock, theme sync + favicon switch
 js/TV.js            → 3D scene. Loads GLTF model, manages camera/lights/renderer, night mode, card zoom
 js/CRTTerminal.js   → Canvas2D CRT terminal. Boot sequence, type selector, form input, TnC/Charter, color schemes
-js/CardPoster.js    → [LEGACY] Original flat card. Replaced by HoloCard.js
 js/HoloCard.js      → Holographic 3D card. ShaderMaterial holo effects, front+back, rarity system, identicon, QR
 js/AboutPoster.js   → 3D plane with CanvasTexture. Theme-aware about text, toggle show/hide, camera zoom
 images/             → Favicon assets (`favicon.ico`, `favicon_dark.ico`)
@@ -256,9 +255,8 @@ External deps: Three.js 0.152.2 importmap, GSAP 3.12.2 + ScrollTrigger globals, 
 
 ## Extension Points
 
-- **Add CRT form fields**: Edit field sets in `selectAccountType()`. Update `CardPoster.drawCard()`.
+- **Add CRT form fields**: Edit field sets in `selectAccountType()` and update validation in `validateField()`.
 - **New color schemes**: Add to `CRTTerminal.palettes`, call `setColorScheme('name')`.
-- **CardPoster night mode**: Currently hardcoded green. Could accept color scheme and redraw.
 - **New 3D objects**: Get scene via `tv.getScene()`, add meshes.
 - **Scroll-triggered events**: Use `tv.on('animationEnd', cb)` or add thresholds in `animateCameraPosition()`.
 - **Center mark behavior**: Edit `.agent-mark` in `css/styles.css` and `downloadAgentWordmark()` in `js/app.js`.

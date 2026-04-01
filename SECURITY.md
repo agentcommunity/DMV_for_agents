@@ -31,4 +31,4 @@ We'll acknowledge your report within 48 hours and work with you on a fix before 
 - Zero secrets in client code — all database writes go through edge functions
 - Service role keys are only in Supabase's runtime environment, never in source
 - Certificate IDs are content-addressed hashes, not sequential — no enumeration risk
-- Rate limiting: 3 registrations per email per hour, 10 per IP per hour
+- Rate limiting: Redis-based triple layer (3/IP+email/10min, 5/email/10min, 10/IP/10min) + lifetime cap (3 per email, 10 if endorsed). Fail-open design — DB lifetime cap provides backstop if Redis is down.

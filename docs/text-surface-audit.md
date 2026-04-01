@@ -51,7 +51,7 @@ Accepted exceptions are codified in `/Users/user/dev/PROJECTS/AgentCommunity/Age
 Current accepted exceptions and rationale:
 
 1. `status-language-drift`
-   - Behavior: DB registration status starts as `pending_profile`, but card text shows `STATUS: VERIFIED`.
+   - Behavior: DB registration status starts as `provisional_dmv`, but card text shows `STATUS: VERIFIED`.
    - Rationale: card is a static public artifact and should not reflect internal verification-state transitions.
 2. `web-crt-email-reminder-gap`
    - Behavior: web CRT completion screen does not add extra verification reminder copy.
