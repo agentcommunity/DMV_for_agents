@@ -57,9 +57,14 @@ function readLockfile(): LockfileData {
 }
 
 function writeLockfile(data: LockfileData): void {
-  const path = getLockfilePath();
-  ensureDir(path);
-  writeFileSync(path, JSON.stringify(data, null, 2), 'utf-8');
+  try {
+    const path = getLockfilePath();
+    ensureDir(path);
+    writeFileSync(path, JSON.stringify(data, null, 2), 'utf-8');
+  } catch {
+    // Non-fatal: lockfile write may fail on read-only filesystems (containers).
+    // Registration already succeeded server-side. Rate limiting degrades gracefully.
+  }
 }
 
 /** Prune attempts outside the 24h window. */
