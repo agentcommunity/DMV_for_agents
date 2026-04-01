@@ -61,6 +61,7 @@ export class TV {
     this.parent.prepend(this.canvas);
 
     this.model = null;
+    this.modelLoaded = false;
     this.triggerEl = null;
     this.screen = null;
     this.trigger = null;
@@ -161,12 +162,20 @@ export class TV {
     return this.scene;
   }
 
-  async init() {
-    try { await this.loadModel(); }
-    catch (err) { console.error('Error loading model:', err); }
+  async init(options = {}) {
+    if (!options.skipModel) {
+      try { await this.loadModel(); }
+      catch (err) { console.error('Error loading model:', err); }
+    }
     this.createCamera();
     this.createLights();
     this._render();
+  }
+
+  async loadModelDeferred() {
+    if (this.modelLoaded) return;
+    try { await this.loadModel(); }
+    catch (err) { console.error('Error loading model:', err); }
   }
 
   loadModel() {
@@ -219,6 +228,7 @@ export class TV {
           width:  this.tvFitSize.width  * 1.45,
           height: this.tvFitSize.height * 1.45
         };
+        this.modelLoaded = true;
         resolve();
       }, (xhr) => {
         if (xhr.lengthComputable && xhr.total > 0) {

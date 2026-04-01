@@ -28,6 +28,9 @@ const container = document.getElementById('canvasWrapper');
 const label = document.getElementById('modeLabel');
 const hiddenInput = document.getElementById('hiddenInput');
 const aboutToggleLink = document.getElementById('aboutToggleLink');
+const agentToggleLink = document.getElementById('agentToggleLink');
+const agentView = document.getElementById('agentView');
+const agentViewSkillContent = document.getElementById('agentViewSkillContent');
 const aboutCursorHost = container;
 const cardShareBar = document.getElementById('cardShareBar');
 const cardShareBtn = document.getElementById('cardShareBtn');
@@ -55,7 +58,9 @@ const CLI_REGISTER_COMMAND = cliCommandMeta?.getAttribute('content')?.trim()
   || 'bunx dmv-agent register';
 
 const tv = new TV(container, label);
-await tv.init();
+// In permalink mode skip the 2.2MB GLB model — user just wants the card.
+// The model will be loaded on demand if the user navigates back to the full experience.
+await tv.init({ skipModel: !!permalink });
 
 const holoCard = new HoloCard();
 holoCard.addToScene(tv.getScene());
@@ -545,11 +550,84 @@ function syncAboutHover(clientX, clientY) {
   aboutCursorHost.style.cursor = isHoveringLink ? 'pointer' : '';
 }
 
+// ─── Agent View (full-page markdown for agents) ───────────────────
+let agentViewOpen = false;
+let skillMdCache = null;
+
+function setAgentLinkActive(active) {
+  if (!agentToggleLink) return;
+  agentToggleLink.classList.toggle('is-active', active);
+  agentToggleLink.setAttribute('aria-expanded', String(active));
+}
+
+function openAgentView() {
+  if (agentViewOpen || !agentView) return;
+
+  // Close about if open
+  if (aboutPoster.visible) closeAbout();
+
+  // Close card zoom if active and hide share bar
+  if (tv.isCardZoomed) {
+    holoCard.setVisible(false);
+    tv.zoomOutFromCard();
+  }
+  if (cardShareBar) cardShareBar.hidden = true;
+
+  // Hide 3D scene and overlays
+  container.style.display = 'none';
+  const footer = document.querySelector('.start-screen__footer');
+  const centerCta = document.getElementById('centerCta');
+  if (footer) footer.style.display = 'none';
+  if (centerCta) centerCta.style.display = 'none';
+
+  // Show view immediately
+  agentView.hidden = false;
+  agentViewOpen = true;
+  setAgentLinkActive(true);
+
+  // Fetch SKILL.md in background (show "Loading..." until ready)
+  if (!skillMdCache && agentViewSkillContent) {
+    fetch('/packages/dmv-agent/skills/dmv/SKILL.md')
+      .then((resp) => resp.ok ? resp.text() : Promise.reject('fetch failed'))
+      .then((text) => {
+        // Strip YAML frontmatter (--- ... ---)
+        skillMdCache = text.replace(/^---[\s\S]*?---\n*/, '');
+        agentViewSkillContent.textContent = skillMdCache;
+      })
+      .catch((err) => {
+        console.warn('Failed to load SKILL.md:', err);
+        agentViewSkillContent.textContent = '(Failed to load SKILL.md)';
+      });
+  } else if (skillMdCache && agentViewSkillContent) {
+    agentViewSkillContent.textContent = skillMdCache;
+  }
+}
+
+function closeAgentView() {
+  if (!agentViewOpen) return;
+  agentView.hidden = true;
+  container.style.display = '';
+  const footer = document.querySelector('.start-screen__footer');
+  const centerCta = document.getElementById('centerCta');
+  if (footer) footer.style.display = '';
+  if (centerCta) centerCta.style.display = '';
+  agentViewOpen = false;
+  setAgentLinkActive(false);
+}
+
 // Permalink mode: keep CTA flow, no right-side info panel
 if (permalink) {
   latestCardData = { ...permalink };
   holoCard.show(permalink, true);
   tv.jumpToCard();
+
+  // When the user zooms out of the card, load the TV model on demand
+  // so the full 3D scene is ready if they scroll around.
+  const _origZoomOut = tv.zoomOutFromCard.bind(tv);
+  tv.zoomOutFromCard = (...args) => {
+    if (!tv.modelLoaded) tv.loadModelDeferred();
+    return _origZoomOut(...args);
+  };
 
   const overlay = document.getElementById('permalinkOverlay');
   const agentLabel = document.getElementById('permalinkAgent');
@@ -605,6 +683,10 @@ if (permalink) {
       history.replaceState(null, '', window.location.pathname);
       window.location.reload();
     });
+  }
+
+  if (agentToggleLink) {
+    agentToggleLink.style.display = 'none';
   }
 
   document.querySelector('.start-screen__footer')?.style.setProperty('display', 'none');
@@ -709,11 +791,24 @@ tv.crt.onCopyAgentCli = () => {
 if (!permalink && aboutToggleLink) {
   aboutToggleLink.addEventListener('click', (e) => {
     e.preventDefault();
+    // Close agent view if open
+    if (agentViewOpen) closeAgentView();
     if (aboutPoster.visible) {
       closeAbout();
       return;
     }
     openAbout();
+  });
+}
+
+if (!permalink && agentToggleLink) {
+  agentToggleLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (agentViewOpen) {
+      closeAgentView();
+      return;
+    }
+    openAgentView();
   });
 }
 
@@ -910,6 +1005,14 @@ const passthroughKeys = new Set([
 ]);
 
 window.addEventListener('keydown', (e) => {
+  if (agentViewOpen) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAgentView();
+    }
+    return; // swallow all keys while agent view is open
+  }
+
   if (tv.isAboutZoomed) {
     if (e.key === 'Escape') {
       e.preventDefault();
