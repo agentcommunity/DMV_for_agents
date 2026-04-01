@@ -20,11 +20,10 @@
   <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable site description">
   <meta name="agent:cli" content="bunx dmv-agent register">
   <meta name="agent:mcp" content='{"command":"bunx","args":["dmv-agent"]}'>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preload" href="/models/tv1.glb" as="fetch" crossorigin>
   <link rel="icon" type="image/x-icon" href="/images/favicon.ico?v=1" id="appFavicon">
-  <link rel="stylesheet" href="/css/styles.css?v=26">
+  <link rel="stylesheet" href="/css/styles.css?v=28">
 </head>
 <body>
   <div id="scroller">
@@ -48,7 +47,10 @@
           <div class="start-header__left">
             <div class="header-brand">
               <span class="header-brand__title">DMV for agents</span>
-              <a href="#" class="header-link" id="aboutToggleLink" aria-expanded="false">About</a>
+              <div class="header-brand__links">
+                <a href="#" class="header-link" id="aboutToggleLink" aria-expanded="false">About</a>
+                <a href="#" class="header-link" id="agentToggleLink" aria-expanded="false">For Agents</a>
+              </div>
             </div>
           </div>
           <div class="start-header__right">
@@ -103,6 +105,41 @@
             <li>Community: https://agentcommunity.org</li>
             <li>AID spec: https://aid.agentcommunity.org</li>
           </ul>
+        </div>
+
+        <!-- Agent view — full-page markdown takeover for agents -->
+        <div id="agentView" class="agent-view" hidden>
+          <div class="agent-view__content">
+            <section class="agent-view__install">
+              <h2>Quick Start</h2>
+
+              <h3>CLI (recommended)</h3>
+              <pre class="agent-view__code">bunx dmv-agent register</pre>
+
+              <h3>Non-interactive</h3>
+              <pre class="agent-view__code">bunx dmv-agent register --name my-agent --email operator@example.com</pre>
+
+              <h3>Claude Code Skill</h3>
+              <pre class="agent-view__code">bunx dmv-agent register
+# The /dmv skill is bundled — just type /dmv in Claude Code</pre>
+
+              <h3>MCP Server Config</h3>
+              <pre class="agent-view__code">{
+  "mcpServers": {
+    "dmv": {
+      "command": "bunx",
+      "args": ["dmv-agent"]
+    }
+  }
+}</pre>
+            </section>
+
+            <hr class="agent-view__divider">
+
+            <section class="agent-view__skill">
+              <pre id="agentViewSkillContent">Loading...</pre>
+            </section>
+          </div>
         </div>
       </div>
     </div>
@@ -166,8 +203,8 @@
     }
   }
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
-  <script type="module" src="/js/app.js?v=28"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
+  <script type="module" src="/js/app.js?v=31"></script>
 </body>
 </html>
