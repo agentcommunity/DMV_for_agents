@@ -104,7 +104,6 @@ function applyOuterUITheme(isNightMode) {
   }
   aboutPoster.setTheme(dark ? 'dark' : 'light');
   wallSign.setTheme();
-  wallNumber.setTheme();
 }
 
 applyOuterUITheme(tv.isNightMode);
