@@ -319,7 +319,7 @@ Deno.serve(async (req) => {
       email,
       certificate_id: certificateId,
       signup_source: signupSource,
-      status: 'pending_profile',
+      status: 'provisional_dmv',
       metadata: {
         agent_description: description,
         client_ip: ip,
