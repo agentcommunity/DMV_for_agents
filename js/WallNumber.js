@@ -8,15 +8,15 @@ export class WallNumber {
   constructor(scene) {
     this.scene = scene;
 
-    // Canvas — 4K for crisp text on the 3D surface
-    this.W = 4096;
-    this.H = 4096;
+    // Canvas — 1K is plenty for two characters
+    this.W = 1024;
+    this.H = 1024;
     this.canvas = document.createElement('canvas');
     this.canvas.width = this.W;
     this.canvas.height = this.H;
     this.ctx = this.canvas.getContext('2d');
 
-    // Texture — max anisotropy for sharp text at oblique angles
+    // Texture — no mipmaps, linear filter for sharp text at oblique angles
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.encoding = THREE.sRGBEncoding;
     this.texture.minFilter = THREE.LinearFilter;
@@ -57,11 +57,10 @@ export class WallNumber {
     const { ctx, W, H } = this;
     ctx.clearRect(0, 0, W, H);
 
-    const root = getComputedStyle(document.documentElement);
     ctx.fillStyle = '#000000';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '900 2800px "PPSupplyMonoRegular", monospace';
+    ctx.font = '900 700px "PPSupplyMonoRegular", monospace';
     ctx.fillText('42', W / 2, H / 2);
 
     this.texture.needsUpdate = true;
