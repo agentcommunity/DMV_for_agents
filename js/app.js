@@ -888,6 +888,11 @@ window.addEventListener('pointerdown', (e) => {
 });
 
 let touchDragY = null;
+let pinchStartDist = null;
+const scroller = document.getElementById('scroller');
+const PINCH_SCROLL_SPEED = 3; // px of scroll per px of pinch distance change
+const CTRL_WHEEL_SCROLL_SPEED = 3;
+
 window.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
   if (!t) return;
@@ -899,9 +904,25 @@ window.addEventListener('touchstart', (e) => {
   if ((tv.crt.bootPhase === 5 && tv.crt.reviewReading) || aboutPoster.visible) {
     touchDragY = t.clientY;
   }
+  // Track pinch distance for 2-finger zoom-to-scroll
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchStartDist = Math.hypot(dx, dy);
+  }
 }, { passive: true });
 
 window.addEventListener('wheel', (e) => {
+  // Ctrl+wheel / trackpad pinch → scroll (browsers fire wheel+ctrlKey for pinch)
+  if (e.ctrlKey) {
+    if (!tv.isCardZoomed && !tv.isAboutZoomed
+        && !(tv.crt.bootPhase === 5 && tv.crt.reviewReading)
+        && !aboutPoster.visible) {
+      scroller.scrollTop += e.deltaY * CTRL_WHEEL_SCROLL_SPEED;
+      e.preventDefault();
+      return;
+    }
+  }
   // Scroll CRT reading view (terms/charter)
   if (tv.crt.bootPhase === 5 && tv.crt.reviewReading) {
     tv.crt.handleReviewInput(e.deltaY > 0 ? 'ArrowDown' : 'ArrowUp');
@@ -914,6 +935,23 @@ window.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 window.addEventListener('touchmove', (e) => {
+  // 2-finger pinch → scroll (zoom-to-scroll)
+  if (e.touches.length === 2 && pinchStartDist !== null) {
+    if (!tv.isCardZoomed && !tv.isAboutZoomed
+        && !(tv.crt.bootPhase === 5 && tv.crt.reviewReading)
+        && !aboutPoster.visible) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const delta = dist - pinchStartDist;
+      pinchStartDist = dist;
+      // Spread fingers = scroll down (zoom camera in), pinch = scroll up
+      scroller.scrollTop += delta * PINCH_SCROLL_SPEED;
+      e.preventDefault();
+      return;
+    }
+  }
+
   const t = e.touches[0];
   if (!t) return;
 
@@ -939,7 +977,13 @@ window.addEventListener('touchmove', (e) => {
 
 window.addEventListener('touchend', () => {
   touchDragY = null;
+  pinchStartDist = null;
 });
+
+// Safari gesture events (iOS/macOS pinch): prevent native zoom
+window.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+window.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+window.addEventListener('gestureend', (e) => e.preventDefault(), { passive: false });
 
 window.addEventListener('click', (e) => {
   maybeEnableGyro();
