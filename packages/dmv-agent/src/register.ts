@@ -76,11 +76,11 @@ export async function registerAgent(
     throw lastError || new Error('Registration failed after retries');
   }
 
+  const text = await res.text();
   let json: Record<string, unknown>;
   try {
-    json = await res.json();
+    json = JSON.parse(text);
   } catch {
-    const text = await res.text().catch(() => '');
     throw new Error(`Server returned invalid response (HTTP ${res.status}): ${text.slice(0, 200)}`);
   }
 

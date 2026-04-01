@@ -126,6 +126,8 @@ function getCorsHeaders(req: Request) {
 
 // --- Rate limiting (Redis-backed via Upstash) ---
 
+let _limiters: ReturnType<typeof createRateLimiters> | null = null
+
 function createRateLimiters() {
   const redis = new Redis({
     url: Deno.env.get('UPSTASH_REDIS_REST_URL')!,
@@ -151,6 +153,11 @@ function createRateLimiters() {
   }
 }
 
+function getLimiters() {
+  if (!_limiters) _limiters = createRateLimiters()
+  return _limiters
+}
+
 async function hashString(str: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
   return [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2, '0')).join('')
@@ -160,32 +167,39 @@ async function checkRateLimit(
   email: string,
   ip: string,
 ): Promise<{ error: string | null; retryAfter?: number }> {
-  const limiters = createRateLimiters()
-  const emailHash = await hashString(email)
-  const ipHash = await hashString(ip)
+  try {
+    const limiters = getLimiters()
+    const emailHash = await hashString(email)
+    const ipHash = await hashString(ip)
 
-  // Tightest limit first: per IP+email combo
-  const ipEmailResult = await limiters.perIpEmail.limit(`${ipHash}:${emailHash}`)
-  if (!ipEmailResult.success) {
-    const retryAfter = Math.ceil((ipEmailResult.reset - Date.now()) / 1000)
-    return { error: 'Rate limited: too many registrations from this session', retryAfter }
+    // Tightest limit first: per IP+email combo
+    const ipEmailResult = await limiters.perIpEmail.limit(`${ipHash}:${emailHash}`)
+    if (!ipEmailResult.success) {
+      const retryAfter = Math.ceil((ipEmailResult.reset - Date.now()) / 1000)
+      return { error: 'Rate limited: too many registrations from this session', retryAfter }
+    }
+
+    // Per-email limit
+    const emailResult = await limiters.perEmail.limit(emailHash)
+    if (!emailResult.success) {
+      const retryAfter = Math.ceil((emailResult.reset - Date.now()) / 1000)
+      return { error: 'Rate limited: too many registrations for this email', retryAfter }
+    }
+
+    // Per-IP limit (most lenient — shared IPs need headroom)
+    const ipResult = await limiters.perIp.limit(ipHash)
+    if (!ipResult.success) {
+      const retryAfter = Math.ceil((ipResult.reset - Date.now()) / 1000)
+      return { error: 'Rate limited: too many registrations from this address', retryAfter }
+    }
+
+    return { error: null }
+  } catch (err) {
+    // Fail-open: if Redis is down, allow the request through.
+    // The DB lifetime cap still provides a backstop against abuse.
+    console.error('Redis rate limit check failed, allowing request:', err)
+    return { error: null }
   }
-
-  // Per-email limit
-  const emailResult = await limiters.perEmail.limit(emailHash)
-  if (!emailResult.success) {
-    const retryAfter = Math.ceil((emailResult.reset - Date.now()) / 1000)
-    return { error: 'Rate limited: too many registrations for this email', retryAfter }
-  }
-
-  // Per-IP limit (most lenient — shared IPs need headroom)
-  const ipResult = await limiters.perIp.limit(ipHash)
-  if (!ipResult.success) {
-    const retryAfter = Math.ceil((ipResult.reset - Date.now()) / 1000)
-    return { error: 'Rate limited: too many registrations from this address', retryAfter }
-  }
-
-  return { error: null }
 }
 
 // --- Handler ---
