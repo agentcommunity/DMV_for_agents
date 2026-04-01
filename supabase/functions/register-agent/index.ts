@@ -64,6 +64,22 @@ function validateRequest(body: Record<string, unknown>): string | null {
   const email = body.email as string
   if (!email) return 'email is required'
   if (!EMAIL_REGEX.test(email)) return 'Invalid email format'
+  if (email.length > 254) return 'email must be 254 characters or fewer'
+
+  const operatorName = body.operator_name as string
+  if (operatorName && operatorName.length > 100) {
+    return 'operator_name must be 100 characters or fewer'
+  }
+
+  const orgName = body.organization_name as string
+  if (orgName && orgName.length > 100) {
+    return 'organization_name must be 100 characters or fewer'
+  }
+
+  const description = body.description as string
+  if (description && description.length > 500) {
+    return 'description must be 500 characters or fewer'
+  }
 
   const source = body.signup_source as string
   if (source && !['ui', 'cli', 'mcp', 'api'].includes(source)) {
@@ -90,10 +106,20 @@ function validateRequest(body: Record<string, unknown>): string | null {
 
 // --- CORS ---
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+const ALLOWED_ORIGINS = [
+  'https://dmv.agentcommunity.org',
+  'https://agentcommunity.org',
+]
+
+function getCorsHeaders(req: Request) {
+  const origin = req.headers.get('origin') || ''
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
+  }
 }
 
 // --- Rate limiting (database-backed) ---
@@ -132,13 +158,13 @@ async function checkRateLimit(
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders })
+    return new Response(null, { status: 204, headers: getCorsHeaders(req) })
   }
 
   if (req.method !== 'POST') {
     return new Response(
       JSON.stringify({ error: 'Method not allowed' }),
-      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      { status: 405, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
     )
   }
 
@@ -148,7 +174,7 @@ Deno.serve(async (req) => {
   } catch {
     return new Response(
       JSON.stringify({ error: 'Invalid JSON' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      { status: 400, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
     )
   }
 
@@ -157,7 +183,7 @@ Deno.serve(async (req) => {
   if (validationError) {
     return new Response(
       JSON.stringify({ error: validationError }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      { status: 400, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
     )
   }
 
@@ -185,7 +211,7 @@ Deno.serve(async (req) => {
   if (rateLimitError) {
     return new Response(
       JSON.stringify({ error: rateLimitError }),
-      { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      { status: 429, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json', 'Retry-After': '600' } },
     )
   }
 
@@ -227,13 +253,13 @@ Deno.serve(async (req) => {
           certificate_id: certificateId,
           permalink_url: permalinkUrl,
         }),
-        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        { status: 409, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
       )
     }
     console.error('Supabase insert error:', insertError.message)
     return new Response(
       JSON.stringify({ error: 'Registration failed. Please try again.' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      { status: 500, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
     )
   }
 
@@ -250,6 +276,6 @@ Deno.serve(async (req) => {
         `Certificate ${certificateId} issued for ${domain}. ` +
         `Check your email for your .agent credentials.`,
     }),
-    { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    { status: 201, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
   )
 })
