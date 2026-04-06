@@ -17,7 +17,9 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "dmv-card-test",
 	"main": "worker/index.ts",
-	// Taqanu account — same as main agentcommunity_page worker
+	// Taqanu account — same as main agentcommunity_page worker.
+	// Not a secret: the account ID is visible in any workers.dev subdomain
+	// this account hosts and is committed to wrangler configs across the org.
 	"account_id": "9a551fc3ff2c0e9ac70baa42a0138896",
 	"compatibility_date": "2025-12-01",
 	"compatibility_flags": [

@@ -143,10 +143,12 @@ The `cf:deploy` script chains:
 ## What this is NOT (yet)
 
 - Not connected to `dmv.agentcommunity.org` DNS — that's the final cutover step (coordinated with main site Phase 3)
-- The container's `max_instances` is 1, `instance_type` is `dev`/`lite` — fine for the test, will bump to `basic` + 3-5 instances + `getRandom()` distribution before the Brave takeover
+- The container's `max_instances` is 1, `instance_type` is `dev` (the wrangler default) — fine for the test, will bump to `basic` + 3-5 instances + `getRandom()` distribution before the Brave takeover
 - Email and Supabase Edge Functions (`register-agent`, `lookup-agent`, `badge`) are **not migrated** — they stay on Supabase, which is the right place for them
 - Browser-side `js/supabase.js` and the `dmv-agent` MCP package still POST directly to the Supabase function URL — the Worker only proxies `/badge/*` so far. Hardening plan to fix this lives in [DMV_HARDENING.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/DMV_HARDENING.md) (Phase A: Worker proxy + edge rate limits, Phase B: Turnstile on browser path + MCP migration, Phase C: close the bypass via `X-Forwarded-By` enforcement)
 - Custom OTP email flow for DMV (different branding from main site) is a separate piece of future work — see [RESEND_DMV.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/RESEND_DMV.md)
+- **No automated worker tests by design.** The test plan is `test-harness/render-comparison.mjs` (the bake-off — 11 cards byte-compared against current Vercel production) plus manual smoke testing of `/healthz`, `/api/card`, `/api/og`, `/c/:id/:name` (crawler + human UA), and `/badge/*`. Worker code is small enough that adding miniflare/vitest scaffolding would cost more than it returns. Re-evaluate when the worker grows or after the Brave takeover lands real traffic.
+- Cache API request coalescing in front of R2 is **not yet implemented**. With `max_instances: 1` and the current test traffic this isn't a problem. **It is a Brave-takeover blocker** — a thundering-herd of unique cards on launch day would each independently miss R2 and call the container, eating tail latency. Tracked as I-6 in the post-review fix sprint, deferred to a separate Brave-takeover-prep sprint.
 
 ## Related future work
 
