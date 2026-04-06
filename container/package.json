@@ -1,0 +1,19 @@
+{
+  "name": "dmv-card-renderer",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Container that renders DMV agent cards via @napi-rs/canvas (Skia)",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.61",
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

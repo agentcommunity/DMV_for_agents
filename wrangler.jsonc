@@ -1,0 +1,74 @@
+/**
+ * Wrangler config for the cf-test-containers branch.
+ *
+ * Goal: prove that the existing @napi-rs/canvas card renderer runs unchanged
+ * inside a Cloudflare Container, fronted by a Worker with R2 read-through
+ * caching, and produces visually identical output to the current Vercel
+ * deployment.
+ *
+ * NOT for production. No custom domain, no DNS, no static assets binding yet.
+ * Local dev: `pnpm wrangler dev`
+ * Test deploy: `pnpm wrangler deploy` (puts on workers.dev subdomain)
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "dmv-card-test",
+	"main": "worker/index.ts",
+	// Taqanu account — same as main agentcommunity_page worker
+	"account_id": "9a551fc3ff2c0e9ac70baa42a0138896",
+	"compatibility_date": "2025-12-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// ──────────────────────────────────────────────────────────────────────────
+	//  Container: Node 20 + @napi-rs/canvas card renderer
+	// ──────────────────────────────────────────────────────────────────────────
+	"containers": [
+		{
+			"class_name": "CardRenderer",
+			"image": "./container/Dockerfile",
+			// 1 instance is enough for the test branch.
+			// Production target: 3-5 with sleep_after='5m', spread by getRandom().
+			"max_instances": 1
+			// instance_type defaults to "dev" — small RAM/CPU but $0 in $5 plan.
+			// For production we'd bump to "basic".
+		}
+	],
+	// Containers are exposed via Durable Object bindings.
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "CARD_RENDERER",
+				"class_name": "CardRenderer"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"CardRenderer"
+			]
+		}
+	],
+	// ──────────────────────────────────────────────────────────────────────────
+	//  R2: read-through cache for rendered cards
+	// ──────────────────────────────────────────────────────────────────────────
+	// The actual bucket is created with:
+	//   pnpm wrangler r2 bucket create dmv-card-cache-test
+	// For local dev, wrangler simulates R2 in .wrangler/state — no real bucket
+	// is touched until you `wrangler deploy`.
+	"r2_buckets": [
+		{
+			"binding": "CARD_CACHE",
+			"bucket_name": "dmv-card-cache-test",
+			"preview_bucket_name": "dmv-card-cache-test-preview"
+		}
+	],
+	// ──────────────────────────────────────────────────────────────────────────
+	//  Observability — useful for debugging container cold starts during the bake-off
+	// ──────────────────────────────────────────────────────────────────────────
+	"observability": {
+		"enabled": true
+	}
+}
