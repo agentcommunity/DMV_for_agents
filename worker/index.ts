@@ -117,6 +117,30 @@ function cacheKey(params: RenderParams): string {
   return `v/${CACHE_VERSION}/${params.format}/${type}/${safe(params.name)}-${safe(id)}.png`;
 }
 
+// Build the L1 (caches.default / Cloudflare edge cache) cache key for a card.
+//
+// We use a SYNTHETIC URL on the same origin as the request so that:
+//   1. Two requests with different query-param ordering or extra junk params
+//      still resolve to the same L1 entry (the key encodes ONLY id/name/type/
+//      format/version, not the raw query string).
+//   2. The L1 namespace is the same as the R2 namespace — both invalidate
+//      atomically when CACHE_VERSION (= container hash) changes.
+//   3. The cache key is independent of /api/card vs /api/og path-prefix
+//      collision risk: format is part of the key.
+//
+// The synthetic path `/__cache/...` is private to the Worker — it's never
+// served as a real URL, only used as a Cache API key. The Cache API uses the
+// URL as the cache key string; nothing actually fetches this URL.
+//
+// I-6: this is the L1 layer in front of R2. See handleRender for the lookup
+// flow.
+function l1CacheKey(request: Request, params: RenderParams): Request {
+  const url = new URL(request.url);
+  url.pathname = `/__cache/${cacheKey(params)}`;
+  url.search = '';
+  return new Request(url.toString(), { method: 'GET' });
+}
+
 async function renderViaContainer(env: Env, params: RenderParams): Promise<Response> {
   // Single-instance routing for the test branch (deterministic = simpler debug).
   // For production we'd use getRandom() to spread across instances, or use
@@ -172,31 +196,84 @@ async function handleRender(
 
   const params: RenderParams = { id, name, type, format };
   const key = cacheKey(params);
+  const l1Key = l1CacheKey(request, params);
 
-  // 1. R2 cache lookup
+  // ───────────────────────────────────────────────────────────────────────
+  //  Cache hierarchy (I-6 — added before Brave new tab takeover)
+  //
+  //   L1 = caches.default (Cloudflare edge cache, in-region, ~ms)
+  //   L2 = R2 (cross-region, ~50–200ms)
+  //   L3 = Container (Skia render via DO, ~150–300ms)
+  //
+  //  Why L1 in front of R2:
+  //  Brave new tab takeover lands ~25M impressions on the homepage og:image.
+  //  Without L1, every cold-PoP first-hit goes through R2 (~100ms p50). With
+  //  L1, the second hit and onwards in any given PoP serves from edge cache
+  //  for free, with no R2 read or DO invocation. R2 still acts as the
+  //  cross-PoP source of truth so a cold PoP can warm without re-rendering.
+  //
+  //  Note: caches.default does NOT do true cross-request coalescing during
+  //  the cache-fill window — concurrent first-misses can still race for a
+  //  few ms. For the hot-card scenario (homepage og:image, featured agents)
+  //  the fill window is over before it matters because one of the racing
+  //  requests wins and fills the cache. For the worst worst case
+  //  (a brand-new viral card hit by a thundering herd), the win is bounded
+  //  by however long the container takes to render (150–300ms) — we accept
+  //  that as the cost of not having a Durable Object render coordinator.
+  // ───────────────────────────────────────────────────────────────────────
+
+  // 1. L1 lookup — the hot path. Serves from in-region edge cache when warm.
+  try {
+    const l1Hit = await caches.default.match(l1Key);
+    if (l1Hit) {
+      // L1 entries already carry Content-Type / Cache-Control / ETag /
+      // Content-Length from the put() — we just rewrite X-Cache so the caller
+      // can tell which tier served them, and re-emit X-Cache-Key for debug.
+      const headers = new Headers(l1Hit.headers);
+      headers.set('X-Cache', 'L1-HIT');
+      headers.set('X-Cache-Key', key);
+      return new Response(l1Hit.body, { status: l1Hit.status, headers });
+    }
+  } catch (err) {
+    // Cache API failures should never break the response — fall through to L2.
+    console.error('[L1] caches.default.match failed', { key, err });
+  }
+
+  // 2. L2 lookup — R2 cross-region cache. Slower than L1 but cheaper than
+  //    re-rendering, and acts as the source of truth across PoPs.
   const cached = await env.CARD_CACHE.get(key);
   if (cached) {
+    // Buffer the body so we can both stream it to the client AND put a
+    // separate copy into L1 via waitUntil. R2 R2Object body is a single-use
+    // ReadableStream, so we materialise it.
+    const bodyBuffer = await cached.arrayBuffer();
+    const responseHeaders = {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+      'X-Cache': 'L2-HIT',
+      'X-Cache-Key': key,
+      ETag: cached.httpEtag,
+      'Content-Length': String(cached.size),
+    } as const;
+
+    // Promote into L1 in the background so the next PoP-local request hits L1.
+    ctx.waitUntil(putL1(l1Key, bodyBuffer, cached.httpEtag, key));
+
     // M-4: surface ETag + Content-Length on the cache HIT path so CDNs and
     // browsers can do conditional requests / accurate progress bars.
-    return new Response(cached.body, {
+    return new Response(bodyBuffer, {
       status: 200,
-      headers: {
-        'Content-Type': 'image/png',
-        'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
-        'X-Cache': 'HIT',
-        'X-Cache-Key': key,
-        ETag: cached.httpEtag,
-        'Content-Length': String(cached.size),
-      },
+      headers: responseHeaders,
     });
   }
 
-  // 2. Cache miss — invoke container
+  // 3. Both caches miss — invoke container.
   const containerResponse = await renderViaContainer(env, params);
 
   if (!containerResponse.ok) {
     // M-3: pass through the container's actual content-type instead of
     // forcing application/json — the body might be plain text or HTML.
+    // Don't cache errors anywhere — let the next request try again.
     const body = await containerResponse.text();
     const upstreamType = containerResponse.headers.get('content-type') ?? 'text/plain';
     return new Response(body, {
@@ -205,15 +282,15 @@ async function handleRender(
     });
   }
 
-  // 3. Buffer the PNG so we can both write to R2 and stream to client.
+  // Buffer the PNG so we can stream to client AND populate both cache tiers.
   // Cards are small enough that buffering is fine (no need for duplexed streams).
   const buffer = await containerResponse.arrayBuffer();
 
-  // 4. Write to R2 in the background (I-5). The client gets the rendered PNG
-  // immediately; the cache write happens via ctx.waitUntil so a slow R2 PUT
-  // (50–200ms) doesn't extend response latency on the first miss. The IIFE
-  // wraps the put in try/catch so a transient R2 error logs but doesn't
-  // break the response.
+  // 4. Write to BOTH cache tiers in the background (I-5 + I-6). The client
+  // gets the rendered PNG immediately; cache writes happen via ctx.waitUntil
+  // so neither R2 PUT (~50–200ms) nor L1 PUT (~few ms) extends response
+  // latency on the first miss. Each put is wrapped in try/catch so a
+  // transient cache error logs but doesn't break the response.
   // Note: M-5 — httpMetadata.cacheControl is dead because the Worker re-applies
   // its own Cache-Control on every response and R2 isn't exposed publicly.
   // Drop it rather than carrying confusing dead config.
@@ -228,6 +305,7 @@ async function handleRender(
       }
     })(),
   );
+  ctx.waitUntil(putL1(l1Key, buffer, undefined, key));
 
   return new Response(buffer, {
     status: 200,
@@ -238,6 +316,36 @@ async function handleRender(
       'X-Cache-Key': key,
     },
   });
+}
+
+// L1 (caches.default) put helper — wraps the cache write in try/catch so a
+// transient Cache API error logs but doesn't break the upstream response.
+//
+// We construct a fresh Response (rather than reusing the upstream R2/container
+// response) because the Cache API needs an immutable Cache-Control header on
+// the stored response to honour TTL, and Response objects can only be put()
+// once (the body stream gets consumed). Building from a buffer is cheap.
+async function putL1(
+  l1Key: Request,
+  body: ArrayBuffer,
+  etag: string | undefined,
+  debugKey: string,
+): Promise<void> {
+  try {
+    const headers = new Headers({
+      'Content-Type': 'image/png',
+      // s-maxage drives the L1 TTL; the Cache API honours s-maxage (or
+      // max-age in its absence). 7 days matches what the M-4 R2 hit path
+      // returns to clients. Cards are deterministic from CACHE_VERSION so a
+      // long TTL is safe — a deploy bumps the version → fresh cache key.
+      'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+      'Content-Length': String(body.byteLength),
+    });
+    if (etag) headers.set('ETag', etag);
+    await caches.default.put(l1Key, new Response(body, { status: 200, headers }));
+  } catch (err) {
+    console.error('[L1] caches.default.put failed', { key: debugKey, err });
+  }
 }
 
 const handleCard = (request: Request, env: Env, ctx: ExecutionContext) =>
