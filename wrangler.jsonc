@@ -1,14 +1,17 @@
 /**
- * Wrangler config for the cf-test-containers branch.
+ * Wrangler config for the DMV cloudflare-migration branch.
  *
- * Goal: prove that the existing @napi-rs/canvas card renderer runs unchanged
- * inside a Cloudflare Container, fronted by a Worker with R2 read-through
- * caching, and produces visually identical output to the current Vercel
- * deployment.
+ * Pipeline:
+ *   Worker (worker/index.ts) ─┬─ Workers Static Assets (dist/)
+ *                             ├─ Container (Node 20 + @napi-rs/canvas)
+ *                             └─ R2 (read-through card cache)
  *
- * NOT for production. No custom domain, no DNS, no static assets binding yet.
- * Local dev: `pnpm wrangler dev`
- * Test deploy: `pnpm wrangler deploy` (puts on workers.dev subdomain)
+ * NOT yet wired to dmv.agentcommunity.org — DNS cutover is the last step.
+ *
+ * Local dev: `pnpm cf:dev`
+ * Deploy:    `pnpm cf:deploy` (runs cf:vendor → cf:build → wrangler deploy)
+ *
+ * See CLOUDFLARE.md for full architecture and rationale.
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
@@ -20,6 +23,34 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+
+	// ──────────────────────────────────────────────────────────────────────────
+	//  Static Assets — DMV SPA (index.html + js/ + css/ + fonts/ + audio/ + models/)
+	// ──────────────────────────────────────────────────────────────────────────
+	// `dist/` is populated by `pnpm cf:build` (scripts/build-cf.mjs) which copies
+	// only the production-facing files from the repo root. Bandwidth on static
+	// assets is FREE (no per-request cost), so the 2.2 MB GLB and 6 MB audio
+	// directory cost nothing.
+	//
+	// `not_found_handling = single-page-application` means any request that
+	// doesn't match a file gets index.html — required for /c/:certId/:agentName
+	// permalinks to load the SPA.
+	//
+	// `run_worker_first` lists paths where the Worker runs BEFORE static assets.
+	// We use this for /api/* (card + og), /c/* (crawler middleware via HTMLRewriter),
+	// /badge/* (Supabase proxy), and /healthz. Everything else falls through to
+	// static assets directly with no Worker invocation cost.
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api/*",
+			"/c/*",
+			"/badge/*",
+			"/healthz"
+		]
+	},
 	// ──────────────────────────────────────────────────────────────────────────
 	//  Container: Node 20 + @napi-rs/canvas card renderer
 	// ──────────────────────────────────────────────────────────────────────────

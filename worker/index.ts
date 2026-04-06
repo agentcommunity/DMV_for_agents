@@ -40,7 +40,34 @@ export class CardRenderer extends Container {
 interface Env {
   CARD_RENDERER: DurableObjectNamespace<CardRenderer>;
   CARD_CACHE: R2Bucket;
+  // Workers Static Assets binding — points at the dist/ directory built by
+  // scripts/build-cf.mjs. Used for: (1) crawler middleware HTMLRewriter
+  // injection on /c/* (we fetch index.html via env.ASSETS.fetch and inject
+  // og:* meta tags), (2) any future Worker route that needs to read a static
+  // file. Static asset serving for everything else is automatic — the Worker
+  // doesn't need to call ASSETS for those.
+  ASSETS: Fetcher;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Public origin used in OG meta tags. Stays as the production domain even
+// when serving from workers.dev — crawlers should always see canonical URLs.
+const DMV_ORIGIN = 'https://dmv.agentcommunity.org';
+
+// Crawler user-agent matcher — ported verbatim from middleware.js so we
+// preserve identical bot detection. Order: social/messaging crawlers first,
+// then search engines.
+const CRAWLER_UA =
+  /Twitterbot|facebookexternalhit|Facebot|LinkedInBot|Slackbot|WhatsApp|Discordbot|TelegramBot|Applebot|Googlebot|bingbot/i;
+
+// Permalink path: /c/CERT-ID or /c/CERT-ID/agent-name
+const PERMALINK_RE = /^\/c\/([^/]+)(?:\/([^/]+))?$/;
+
+// Supabase functions origin for /badge/* proxy.
+const SUPABASE_FUNCTIONS_ORIGIN = 'https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
@@ -53,29 +80,44 @@ function badRequest(msg: string): Response {
   });
 }
 
-function cacheKey(params: { id?: string; name: string; type?: string }): string {
-  // Card output is deterministic from (name, type) — id is part of the visual
-  // (it's printed on the card) but generated deterministically from name when
-  // not provided. We include all three in the key so explicit-id requests
-  // don't collide with implicit-id requests.
-  const id = params.id ?? '_';
-  const type = params.type ?? 'individual';
-  // Lowercase + simple normalization. Slashes forbidden inside R2 key segments.
-  const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]/g, '_').toLowerCase();
-  return `cards/${safe(params.type ?? 'individual')}/${safe(params.name)}-${safe(id)}.png`;
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
-async function renderViaContainer(
-  env: Env,
-  params: { id?: string; name: string; type?: string },
-): Promise<Response> {
+type RenderFormat = 'card' | 'og';
+
+interface RenderParams {
+  id?: string;
+  name: string;
+  type?: string;
+  format: RenderFormat;
+}
+
+function cacheKey(params: RenderParams): string {
+  // Card output is deterministic from (name, type, format) — id is part of
+  // the visual (it's printed on the card) but generated deterministically
+  // from name when not provided. We include all four in the key so explicit-id
+  // requests don't collide with implicit-id requests, and so the 880x630
+  // (card) and 1200x630 (og) formats coexist as separate cache entries.
+  const id = params.id ?? '_';
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]/g, '_').toLowerCase();
+  const type = safe(params.type ?? 'individual');
+  return `${params.format}/${type}/${safe(params.name)}-${safe(id)}.png`;
+}
+
+async function renderViaContainer(env: Env, params: RenderParams): Promise<Response> {
   // Single-instance routing for the test branch (deterministic = simpler debug).
   // For production we'd use getRandom() to spread across instances, or use
   // the location-aware helpers to route to the closest container.
-  const container = getContainer(env.CARD_RENDERER, 'default');
+  const container = getContainer(env.CARD_RENDERER, 'default-v2');
 
   const url = new URL('http://container/render');
   url.searchParams.set('name', params.name);
+  url.searchParams.set('format', params.format);
   if (params.id) url.searchParams.set('id', params.id);
   if (params.type) url.searchParams.set('type', params.type);
 
@@ -86,24 +128,37 @@ async function renderViaContainer(
 //  Routes
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function handleCard(request: Request, env: Env): Promise<Response> {
+// Default name used when /api/og is hit without a `name` parameter — e.g.,
+// the homepage og:image meta tag. Picks a deterministic, on-brand name so
+// the rendered card looks intentional.
+const DEFAULT_OG_NAME = 'dmv';
+
+async function handleRender(request: Request, env: Env, format: RenderFormat): Promise<Response> {
   const url = new URL(request.url);
-  const name = url.searchParams.get('name');
+  let name = url.searchParams.get('name');
   const id = url.searchParams.get('id') ?? undefined;
   const type = url.searchParams.get('type') ?? undefined;
 
-  // Validation matches api/card.js
+  // OG without a name → fall back to a default-branded card so the homepage
+  // meta tag still has something to point at. /api/card without a name still
+  // 400s — only /api/og is forgiving here.
   if (!name) {
-    // Current Vercel behavior: redirect to /api/og when no name
-    return Response.redirect(new URL('/api/og', request.url).toString(), 302);
+    if (format === 'og') {
+      name = DEFAULT_OG_NAME;
+    } else {
+      return badRequest('name is required');
+    }
   }
+
+  // Validation matches api/card.js
   if (name.length > 32) return badRequest('name must be 32 characters or fewer');
   if (id && id.length > 16) return badRequest('id must be 16 characters or fewer');
   if (type && !['individual', 'organization', 'agent'].includes(type.toLowerCase())) {
     return badRequest('type must be individual, organization, or agent');
   }
 
-  const key = cacheKey({ id, name, type });
+  const params: RenderParams = { id, name, type, format };
+  const key = cacheKey(params);
 
   // 1. R2 cache lookup
   const cached = await env.CARD_CACHE.get(key);
@@ -120,7 +175,7 @@ async function handleCard(request: Request, env: Env): Promise<Response> {
   }
 
   // 2. Cache miss — invoke container
-  const containerResponse = await renderViaContainer(env, { id, name, type });
+  const containerResponse = await renderViaContainer(env, params);
 
   if (!containerResponse.ok) {
     // Pass through error from container
@@ -131,14 +186,11 @@ async function handleCard(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  // 3. Tee the body so we can both write to R2 and stream to client.
-  // Using arrayBuffer() is simpler for a small PNG (<300 KB) and avoids
-  // duplexed-stream complexity. Cards are small enough that buffering is fine.
+  // 3. Buffer the PNG so we can both write to R2 and stream to client.
+  // Cards are small enough that buffering is fine (no need for duplexed streams).
   const buffer = await containerResponse.arrayBuffer();
 
-  // 4. Write to R2 (fire-and-forget — don't block the response)
-  // ctx.waitUntil would be the production pattern, but for the test we just
-  // await it so we know it succeeded.
+  // 4. Write to R2.
   await env.CARD_CACHE.put(key, buffer, {
     httpMetadata: {
       contentType: 'image/png',
@@ -157,10 +209,144 @@ async function handleCard(request: Request, env: Env): Promise<Response> {
   });
 }
 
+const handleCard = (request: Request, env: Env) => handleRender(request, env, 'card');
+const handleOg = (request: Request, env: Env) => handleRender(request, env, 'og');
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /c/:certId/:agentName — permalink with crawler OG injection
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Two paths:
+//   - Crawler UA  → fetch index.html via env.ASSETS, use HTMLRewriter to
+//                   override <title> + og:* + twitter:* meta tags with
+//                   card-specific values, return modified HTML
+//   - Human  UA  → fetch index.html via env.ASSETS unchanged. The SPA reads
+//                   window.location and renders the permalink card.
+//
+// Functionally identical to the previous Vercel middleware.js, but the
+// canonical HTML stays in one place (index.html) and we just patch meta tags
+// in-stream rather than maintaining a hand-written HTML template.
+
+async function handlePermalink(
+  request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+): Promise<Response> {
+  const certId = decodeURIComponent(match[1]);
+  const agentName = match[2] ? decodeURIComponent(match[2]) : '';
+
+  // Always serve index.html — both human and crawler paths render the SPA shell.
+  // We use a same-origin URL so the assets binding picks the right file.
+  const indexUrl = new URL('/index.html', request.url);
+  const indexResp = await env.ASSETS.fetch(new Request(indexUrl.toString(), { method: 'GET' }));
+
+  const ua = request.headers.get('user-agent') ?? '';
+  if (!CRAWLER_UA.test(ua)) {
+    // Human visitor — return index.html unchanged. SPA handles the permalink
+    // route via window.location parsing.
+    return new Response(indexResp.body, {
+      status: indexResp.status,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        // Same cache profile as the index.html _headers rule.
+        'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+      },
+    });
+  }
+
+  // Crawler — patch meta tags via HTMLRewriter (streaming, zero buffering).
+  const displayName = agentName ? `${agentName}.agent` : 'Agent';
+  const title = `${displayName} — DMV Certificate ${certId}`;
+  const description = `${displayName} is verified at the Department of Machine Verification. Certificate ID: ${certId}. Get yours at dmv.agentcommunity.org`;
+  const permalink = `${DMV_ORIGIN}/c/${encodeURIComponent(certId)}/${encodeURIComponent(agentName || 'agent')}`;
+  // Both og:image and twitter:image now use /api/og — the same Skia-rendered
+  // card composited onto a 1200x630 canvas (1.91:1, perfect for OG/Twitter).
+  // No need for the dual /api/card + /api/og workaround the old Vercel
+  // middleware used: with R2 caching, the once-per-card render cost is paid
+  // up front and every subsequent crawler hit is free.
+  const ogImage = `${DMV_ORIGIN}/api/og?id=${encodeURIComponent(certId)}&name=${encodeURIComponent(agentName)}`;
+  const twitterAlt = `DMV certificate card for ${displayName}`;
+
+  // HTMLRewriter handlers — replace `content` attributes on existing meta tags.
+  // The default index.html already has og:* and twitter:* tags pointing at
+  // generic DMV branding; we override them per-permalink.
+  const setContent = (val: string) => ({
+    element(el: Element) {
+      el.setAttribute('content', val);
+    },
+  });
+
+  const rewriter = new HTMLRewriter()
+    .on('title', {
+      element(el) {
+        el.setInnerContent(escapeHtml(title));
+      },
+    })
+    .on('meta[property="og:title"]', setContent(title))
+    .on('meta[property="og:description"]', setContent(description))
+    .on('meta[property="og:image"]', setContent(ogImage))
+    .on('meta[property="og:image:width"]', setContent('1200'))
+    .on('meta[property="og:image:height"]', setContent('630'))
+    .on('meta[property="og:url"]', setContent(permalink))
+    .on('meta[name="twitter:title"]', setContent(title))
+    .on('meta[name="twitter:description"]', setContent(description))
+    .on('meta[name="twitter:image"]', setContent(ogImage))
+    // Inject the elements that aren't in the default index.html.
+    .on('head', {
+      element(el) {
+        el.append(
+          `<meta name="twitter:image:alt" content="${escapeHtml(twitterAlt)}">`,
+          { html: true },
+        );
+        el.append(
+          `<link rel="canonical" href="${escapeHtml(permalink)}">`,
+          { html: true },
+        );
+      },
+    });
+
+  const transformed = rewriter.transform(indexResp);
+  return new Response(transformed.body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      // Match the previous Vercel middleware cache profile.
+      'Cache-Control': 'public, max-age=300, s-maxage=3600',
+      'X-Permalink-Mode': 'crawler',
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /badge/* — proxy to Supabase Edge Functions
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Replaces the vercel.json rewrite. We just forward the request to the
+// Supabase function URL with the path tail preserved. No auth needed —
+// the badge function is public.
+
+async function handleBadge(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  // /badge/foo/bar → /badge/foo/bar (Supabase function path matches)
+  const tail = url.pathname.replace(/^\/badge/, '');
+  const target = `${SUPABASE_FUNCTIONS_ORIGIN}/badge${tail}${url.search}`;
+  // Forward the request as-is (preserve method, headers, body).
+  const upstream = await fetch(target, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+  });
+  // Strip hop-by-hop headers and pass through.
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: upstream.headers,
+  });
+}
+
 async function handleHealthz(env: Env): Promise<Response> {
   // Ping the container too so we exercise the full path.
   try {
-    const container = getContainer(env.CARD_RENDERER, 'default');
+    const container = getContainer(env.CARD_RENDERER, 'default-v2');
     const containerResp = await container.fetch('http://container/healthz');
     return new Response(
       JSON.stringify({
@@ -185,12 +371,27 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // /api/card → container-rendered 880x630 PNG with R2 cache
     if (url.pathname === '/api/card') return handleCard(request, env);
+
+    // /api/og → SAME container renderer, composited onto 1200x630 for OG/Twitter
+    if (url.pathname === '/api/og') return handleOg(request, env);
+
+    // /badge/* → Supabase Edge Function proxy
+    if (url.pathname.startsWith('/badge/') || url.pathname === '/badge') {
+      return handleBadge(request);
+    }
+
+    // /c/:certId/:agentName → permalink with crawler OG injection or SPA shell
+    const permalinkMatch = url.pathname.match(PERMALINK_RE);
+    if (permalinkMatch) return handlePermalink(request, env, permalinkMatch);
+
+    // Health check
     if (url.pathname === '/healthz') return handleHealthz(env);
 
-    // Everything else falls through to static assets (declared in wrangler.jsonc).
-    // For the test branch, we don't serve any static assets — just return 404
-    // for unknown paths so the test harness can detect bad routing.
-    return new Response('not found', { status: 404 });
+    // Everything else: defer to Workers Static Assets (this only fires for
+    // paths NOT in `assets.run_worker_first`, but if a request slips through,
+    // we still serve it correctly.)
+    return env.ASSETS.fetch(request);
   },
 };

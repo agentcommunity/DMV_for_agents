@@ -3,3 +3,8 @@
 .npmrc
 node_modules/
 supabase/.temp/
+
+# Cloudflare migration build outputs
+dist/
+.wrangler/
+test-harness/output/
