@@ -60,16 +60,18 @@
 		{
 			"class_name": "CardRenderer",
 			"image": "./container/Dockerfile",
-			// 5 active instances. Combined with worker/index.ts POOL_SIZE=5
-			// (pickContainer helper) this gives us a 5-slot version-namespaced
-			// pool that random-distributes render load.
-			"max_instances": 5,
-			// "lite" (the default — verified from CF docs and the deploy diff)
-			// is 1/4 vCPU and 256 MiB. "basic" is 1/2 vCPU and 1 GiB, which
-			// gives the Skia renderer enough headroom for a thundering-herd
-			// burst on the homepage og:image during the Brave new tab takeover
-			// without the renderer choking on its own queue.
-			"instance_type": "basic"
+			// 1 active instance is enough: DMV expects a few thousand requests
+			// over the Brave window (the main site at agentcommunity_page is
+			// the 25M-impression hot path, not DMV). With R2 + L1 cache in
+			// front, effective container time per request is near-zero after
+			// the first render of each unique (name, type, format) combo.
+			"max_instances": 1
+			// instance_type omitted → defaults to "lite" (1/4 vCPU, 256 MiB).
+			// Verified from CF Containers docs: valid types are "lite"
+			// (default), "basic", "standard-1" through "standard-4". A
+			// previous commit set this to "basic" in anticipation of takeover
+			// load, but DMV doesn't see that traffic — reverted to avoid
+			// paying for headroom we won't use.
 		}
 	],
 	// Containers are exposed via Durable Object bindings.
@@ -104,15 +106,17 @@
 		}
 	],
 	// ──────────────────────────────────────────────────────────────────────────
-	//  Cron prewarm — keep L1/L2 caches warm for the Brave new tab takeover
+	//  Cron prewarm — keep the hot DMV URLs warm in L1/L2
 	// ──────────────────────────────────────────────────────────────────────────
-	// Schedule: every 10 minutes, the Worker fetches PREWARM_PATHS through
-	// PREWARM_ORIGIN. CF runs cron triggers from various PoPs over time so
-	// this acts as a poor-man's global L1 warmer. After cutover, switch
-	// PREWARM_ORIGIN to https://dmv.agentcommunity.org. See worker/index.ts
-	// `scheduled` handler for the implementation and the PREWARM_PATHS list.
+	// Hourly is plenty for DMV's expected traffic. L1 TTL is 7 days and the
+	// main purpose is "first Brave hit is already cache-warm" — any schedule
+	// shorter than a couple hours is overkill. CF rotates cron execution
+	// across PoPs, so over the course of a day the cron touches a reasonable
+	// spread of serving regions. After cutover, bump PREWARM_ORIGIN to
+	// https://dmv.agentcommunity.org. See worker/index.ts `scheduled` handler
+	// and the PREWARM_PATHS constant for the list of URLs warmed.
 	"triggers": {
-		"crons": ["*/10 * * * *"]
+		"crons": ["0 * * * *"]
 	},
 	"vars": {
 		"PREWARM_ORIGIN": "https://dmv-card-test.b-9a5.workers.dev"

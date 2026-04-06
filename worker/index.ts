@@ -25,12 +25,11 @@ import { CONTAINER_INSTANCE_ID } from './container-instance';
 // `sleepAfter` triggers scale-to-zero when the container is idle.
 export class CardRenderer extends Container {
   defaultPort = 8080;
-  // Shorter sleepAfter than the test branch (was 10m). With max_instances=5
-  // and version-namespaced pool slots (see pickContainer), old container
-  // versions need to clean up promptly after a deploy so the slot count
-  // doesn't bump against max_instances. 5m is the production target from
-  // the migration plan.
-  sleepAfter = '5m';
+  // 10m keeps the one active container warm across the scattered real
+  // traffic DMV actually sees (few thousand requests over the takeover,
+  // not the 25M the main site will absorb). Shorter sleepAfter would
+  // force avoidable cold-starts between bursts.
+  sleepAfter = '10m';
 
   override onStart(): void {
     console.log('[CardRenderer] container started');
@@ -175,43 +174,18 @@ function l1CacheKey(request: Request, params: RenderParams): Request {
   return new Request(url.toString(), { method: 'GET' });
 }
 
-// Number of container slots to load-balance across. Each slot becomes a
-// separate Durable Object instance under the hood. Combined with the
-// container's `max_instances` setting in wrangler.jsonc, this caps the
-// concurrent active container processes — going wider than `max_instances`
-// just means some slots wait for a free instance.
-//
-// Production target from the migration plan: 5 slots, instance_type: basic,
-// sleepAfter: 5m. Tune up for the Brave-takeover hot path or down for cost.
-const POOL_SIZE = 5;
-
-// Pick a container slot for this request. Two requirements:
-//
-//   1. Random distribution across the pool — spreads load evenly so a hot
-//      card doesn't pin one slot. We can't use @cloudflare/containers'
-//      built-in `getRandom()` helper because it names instances `instance-0`
-//      .. `instance-N` which doesn't include the version namespace, so
-//      after a deploy old DOs would still be hit until they sleep.
-//
-//   2. Version-namespaced — the slot name embeds CONTAINER_INSTANCE_ID, so
-//      a deploy that changes the container source bumps the hash, the slot
-//      names rotate (e.g. card-renderer-OLDHASH-3 -> card-renderer-NEWHASH-3),
-//      and the very next request spawns a fresh DO running the new image.
-//      Old DOs go idle after sleepAfter and reclaim their max_instances slot.
-//
-// The combination atomically rolls forward both the cache namespace (R2 +
-// L1 keys both prefix CACHE_VERSION) and the container pool — no version
-// skew possible.
-function pickContainer(env: Env): DurableObjectStub<CardRenderer> {
-  const slot = Math.floor(Math.random() * POOL_SIZE);
-  return getContainer(env.CARD_RENDERER, `${CONTAINER_INSTANCE_ID}-${slot}`);
-}
-
 async function renderViaContainer(env: Env, params: RenderParams): Promise<Response> {
-  // Pick a random pool slot. Each slot is a versioned DO instance — see
-  // pickContainer for the rationale on why we don't use the library's
-  // built-in getRandom().
-  const container = pickContainer(env);
+  // Singleton routing — one active container is more than enough for DMV's
+  // expected traffic (few thousand requests over the Brave window; the main
+  // site absorbs the 25M impressions, not DMV). The version-namespaced
+  // CONTAINER_INSTANCE_ID means a deploy atomically rolls forward the
+  // container (fresh image) and the cache namespace (R2 + L1 keys both
+  // prefix CACHE_VERSION), so there's no version skew.
+  //
+  // If DMV ever actually needs a pool, see git history at fafef20 for the
+  // version-namespaced pickContainer() implementation and the reasoning
+  // about why we don't use @cloudflare/containers' built-in getRandom().
+  const container = getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID);
 
   const url = new URL('http://container/render');
   url.searchParams.set('name', params.name);
@@ -642,14 +616,9 @@ async function handleBadge(request: Request): Promise<Response> {
 }
 
 async function handleHealthz(env: Env): Promise<Response> {
-  // Ping a random container slot so we exercise the full path. We don't
-  // ping all POOL_SIZE slots because that would do POOL_SIZE container
-  // RPCs per healthz call — too expensive for a basic liveness probe.
-  // The trade-off: a healthz that hits a healthy slot can hide a partially
-  // dead pool. If you need per-slot visibility, use observability /
-  // wrangler tail instead.
+  // Ping the singleton container so we exercise the full path.
   try {
-    const container = pickContainer(env);
+    const container = getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID);
     const containerResp = await container.fetch('http://container/healthz');
     return new Response(
       JSON.stringify({
