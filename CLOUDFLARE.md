@@ -142,13 +142,23 @@ The `cf:deploy` script chains:
 
 ## What this is NOT (yet)
 
-- Not connected to `dmv.agentcommunity.org` DNS — that's the final cutover step
-- Not deploying from GitHub via Workers Builds yet — currently CLI deploys only
-- The container's `max_instances` is 1, `instance_type` is `dev`/`lite` — fine for the test, will bump to `basic` + 3-5 instances + `getRandom()` distribution before cutover
+- Not connected to `dmv.agentcommunity.org` DNS — that's the final cutover step (coordinated with main site Phase 3)
+- The container's `max_instances` is 1, `instance_type` is `dev`/`lite` — fine for the test, will bump to `basic` + 3-5 instances + `getRandom()` distribution before the Brave takeover
 - Email and Supabase Edge Functions (`register-agent`, `lookup-agent`, `badge`) are **not migrated** — they stay on Supabase, which is the right place for them
+- Browser-side `js/supabase.js` and the `dmv-agent` MCP package still POST directly to the Supabase function URL — the Worker only proxies `/badge/*` so far. Hardening plan to fix this lives in [DMV_HARDENING.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/DMV_HARDENING.md) (Phase A: Worker proxy + edge rate limits, Phase B: Turnstile on browser path + MCP migration, Phase C: close the bypass via `X-Forwarded-By` enforcement)
+- Custom OTP email flow for DMV (different branding from main site) is a separate piece of future work — see [RESEND_DMV.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/RESEND_DMV.md)
+
+## Related future work
+
+The full backlog of post-migration items lives in the main `agentcommunity_PAGE` repo:
+
+- **[DMV_HARDENING.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/DMV_HARDENING.md)** — layered API hardening plan (Worker proxy + Workers Rate Limiting binding + Turnstile + closing the Supabase bypass)
+- **[RESEND_DMV.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/RESEND_DMV.md)** — DMV-branded OTP email flow via `admin.generateLink()` + Resend direct send
+- **[CLOUDFLARE-MIGRATION-PLAN.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/admin/CLOUDFLARE-MIGRATION-PLAN.md)** — broader migration plan (DMV is Phase 6a)
+- **[CLOUDFLARE-MIGRATION-HANDOFF.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/admin/CLOUDFLARE-MIGRATION-HANDOFF.md)** — current migration state and decisions
 
 ## Status
 
-Bake-off complete (visual fidelity verified). Phase 6a (full DMV on
-Cloudflare) in progress on this branch. See the tracking docs in the main
-`agentcommunity_PAGE` repo for the broader migration timeline.
+Bake-off complete (visual fidelity verified, 11/11 cards byte-identical to
+Vercel). Phase 6a mechanically complete on this branch. Awaiting browser
+acceptance test + DNS cutover.
