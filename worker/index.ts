@@ -18,6 +18,7 @@
 // This Worker only handles dynamic routes.
 
 import { Container, getContainer } from '@cloudflare/containers';
+import { CONTAINER_INSTANCE_ID } from './container-instance';
 
 // Cloudflare Containers ship as Durable Objects under the hood.
 // `defaultPort` is the port the container's HTTP server listens on.
@@ -113,7 +114,7 @@ async function renderViaContainer(env: Env, params: RenderParams): Promise<Respo
   // Single-instance routing for the test branch (deterministic = simpler debug).
   // For production we'd use getRandom() to spread across instances, or use
   // the location-aware helpers to route to the closest container.
-  const container = getContainer(env.CARD_RENDERER, 'default-v2');
+  const container = getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID);
 
   const url = new URL('http://container/render');
   url.searchParams.set('name', params.name);
@@ -346,7 +347,7 @@ async function handleBadge(request: Request): Promise<Response> {
 async function handleHealthz(env: Env): Promise<Response> {
   // Ping the container too so we exercise the full path.
   try {
-    const container = getContainer(env.CARD_RENDERER, 'default-v2');
+    const container = getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID);
     const containerResp = await container.fetch('http://container/healthz');
     return new Response(
       JSON.stringify({

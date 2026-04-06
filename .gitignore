@@ -8,3 +8,4 @@ supabase/.temp/
 dist/
 .wrangler/
 test-harness/output/
+worker/container-instance.ts
