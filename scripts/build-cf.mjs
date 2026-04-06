@@ -50,6 +50,15 @@ const FILES = [
   'sitemap.xml',
 ];
 
+// Files at non-root paths — keep separate from FILES (root-only) and DIRS
+// (full subtree) so we don't accidentally drag entire `packages/` into dist.
+// Each entry is a single file path; parent dirs are created on demand.
+const NESTED_FILES = [
+  // Fetched by js/app.js line ~603 — the agent welcome packet shown in the
+  // "About" panel. Without this, that view 404s in production.
+  'packages/dmv-agent/skills/dmv/SKILL.md',
+];
+
 // Things explicitly NOT shipped (documented for clarity, no enforcement):
 //   - card-lab.html, card-lab-v2.html  → dev tools
 //   - *.md                              → docs
@@ -171,6 +180,21 @@ async function build() {
     totalFiles += 1;
     totalBytes += s.size;
     console.log(`[cf:build]   ${file.padEnd(10)} → ${formatBytes(s.size)}`);
+  }
+
+  for (const rel of NESTED_FILES) {
+    const src = join(ROOT, rel);
+    const dst = join(DIST, rel);
+    if (!(await exists(src))) {
+      console.warn(`[cf:build] ⚠ skipping missing nested file: ${rel}`);
+      continue;
+    }
+    await mkdir(dirname(dst), { recursive: true });
+    await copyFile(src, dst);
+    const s = await stat(dst);
+    totalFiles += 1;
+    totalBytes += s.size;
+    console.log(`[cf:build]   ${rel} → ${formatBytes(s.size)}`);
   }
 
   // Optional: copy public/_headers if it exists. CF Workers Static Assets

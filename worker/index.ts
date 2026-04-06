@@ -98,16 +98,23 @@ interface RenderParams {
   format: RenderFormat;
 }
 
+// Strip the 'card-renderer-' prefix from CONTAINER_INSTANCE_ID — we use just
+// the hash as the R2 cache namespace so a container code change automatically
+// invalidates all cached cards. Old entries become orphaned (R2 storage is
+// cheap; they sit until manually purged or fall to TTL).
+const CACHE_VERSION = CONTAINER_INSTANCE_ID.replace(/^card-renderer-/, '');
+
 function cacheKey(params: RenderParams): string {
-  // Card output is deterministic from (name, type, format) — id is part of
-  // the visual (it's printed on the card) but generated deterministically
-  // from name when not provided. We include all four in the key so explicit-id
-  // requests don't collide with implicit-id requests, and so the 880x630
-  // (card) and 1200x630 (og) formats coexist as separate cache entries.
+  // Card output is deterministic from (name, type, format, container code).
+  // - name+type+id+format identify the visual
+  // - CACHE_VERSION (= container hash) invalidates the cache when the
+  //   renderer changes, so a deploy that fixes a rendering bug doesn't keep
+  //   serving the old broken PNG forever
+  // R2 key format:  v/<version>/<format>/<type>/<name>-<id>.png
   const id = params.id ?? '_';
   const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]/g, '_').toLowerCase();
   const type = safe(params.type ?? 'individual');
-  return `${params.format}/${type}/${safe(params.name)}-${safe(id)}.png`;
+  return `v/${CACHE_VERSION}/${params.format}/${type}/${safe(params.name)}-${safe(id)}.png`;
 }
 
 async function renderViaContainer(env: Env, params: RenderParams): Promise<Response> {
