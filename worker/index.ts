@@ -25,7 +25,12 @@ import { CONTAINER_INSTANCE_ID } from './container-instance';
 // `sleepAfter` triggers scale-to-zero when the container is idle.
 export class CardRenderer extends Container {
   defaultPort = 8080;
-  sleepAfter = '10m';
+  // Shorter sleepAfter than the test branch (was 10m). With max_instances=5
+  // and version-namespaced pool slots (see pickContainer), old container
+  // versions need to clean up promptly after a deploy so the slot count
+  // doesn't bump against max_instances. 5m is the production target from
+  // the migration plan.
+  sleepAfter = '5m';
 
   override onStart(): void {
     console.log('[CardRenderer] container started');
@@ -48,6 +53,10 @@ interface Env {
   // file. Static asset serving for everything else is automatic — the Worker
   // doesn't need to call ASSETS for those.
   ASSETS: Fetcher;
+  // Origin used by the cron prewarm handler when fetching its own URLs.
+  // Set in wrangler.jsonc `vars`. On the test branch this is the workers.dev
+  // subdomain; on cutover it becomes https://dmv.agentcommunity.org.
+  PREWARM_ORIGIN: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +78,31 @@ const PERMALINK_RE = /^\/c\/([^/]+)(?:\/([^/]+))?$/;
 
 // Supabase functions origin for /badge/* proxy.
 const SUPABASE_FUNCTIONS_ORIGIN = 'https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1';
+
+// URLs the cron prewarm handler hits to keep L1/L2 caches warm in whichever
+// PoP CF schedules the cron in. Add featured-agent OG cards here when we
+// identify them — anything in this list gets re-warmed every cron tick.
+//
+// Why prewarm at all: Brave new tab takeover lands ~25M impressions on a
+// small set of hot URLs. Without prewarm, the FIRST hit in any cold PoP eats
+// the full container render time (~150-300ms) and races against any
+// concurrent requests for the same card. With a cron prewarm running every
+// 10 minutes from CF's network, the L1 + L2 entries in serving PoPs stay
+// fresh and the first real Brave hit is an L1-HIT.
+//
+// CF cron triggers run from various PoPs over time, so this also acts as a
+// poor-man's global L1 warmer. Not as good as a fan-out warmer that hits
+// every PoP, but free and zero ops.
+const PREWARM_PATHS = [
+  // Default homepage og:image — the Brave-takeover hot path. Hit BOTH the
+  // explicit ?name=dmv and the fallback (no name) so we cover the two URL
+  // shapes that the SPA might emit.
+  '/api/og?name=dmv',
+  '/api/og',
+  // Sanity-check the /api/card endpoint too — same renderer, separate cache
+  // namespace. Cheap to keep warm.
+  '/api/card?name=dmv&type=individual',
+] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
@@ -141,11 +175,43 @@ function l1CacheKey(request: Request, params: RenderParams): Request {
   return new Request(url.toString(), { method: 'GET' });
 }
 
+// Number of container slots to load-balance across. Each slot becomes a
+// separate Durable Object instance under the hood. Combined with the
+// container's `max_instances` setting in wrangler.jsonc, this caps the
+// concurrent active container processes — going wider than `max_instances`
+// just means some slots wait for a free instance.
+//
+// Production target from the migration plan: 5 slots, instance_type: basic,
+// sleepAfter: 5m. Tune up for the Brave-takeover hot path or down for cost.
+const POOL_SIZE = 5;
+
+// Pick a container slot for this request. Two requirements:
+//
+//   1. Random distribution across the pool — spreads load evenly so a hot
+//      card doesn't pin one slot. We can't use @cloudflare/containers'
+//      built-in `getRandom()` helper because it names instances `instance-0`
+//      .. `instance-N` which doesn't include the version namespace, so
+//      after a deploy old DOs would still be hit until they sleep.
+//
+//   2. Version-namespaced — the slot name embeds CONTAINER_INSTANCE_ID, so
+//      a deploy that changes the container source bumps the hash, the slot
+//      names rotate (e.g. card-renderer-OLDHASH-3 -> card-renderer-NEWHASH-3),
+//      and the very next request spawns a fresh DO running the new image.
+//      Old DOs go idle after sleepAfter and reclaim their max_instances slot.
+//
+// The combination atomically rolls forward both the cache namespace (R2 +
+// L1 keys both prefix CACHE_VERSION) and the container pool — no version
+// skew possible.
+function pickContainer(env: Env): DurableObjectStub<CardRenderer> {
+  const slot = Math.floor(Math.random() * POOL_SIZE);
+  return getContainer(env.CARD_RENDERER, `${CONTAINER_INSTANCE_ID}-${slot}`);
+}
+
 async function renderViaContainer(env: Env, params: RenderParams): Promise<Response> {
-  // Single-instance routing for the test branch (deterministic = simpler debug).
-  // For production we'd use getRandom() to spread across instances, or use
-  // the location-aware helpers to route to the closest container.
-  const container = getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID);
+  // Pick a random pool slot. Each slot is a versioned DO instance — see
+  // pickContainer for the rationale on why we don't use the library's
+  // built-in getRandom().
+  const container = pickContainer(env);
 
   const url = new URL('http://container/render');
   url.searchParams.set('name', params.name);
@@ -576,9 +642,14 @@ async function handleBadge(request: Request): Promise<Response> {
 }
 
 async function handleHealthz(env: Env): Promise<Response> {
-  // Ping the container too so we exercise the full path.
+  // Ping a random container slot so we exercise the full path. We don't
+  // ping all POOL_SIZE slots because that would do POOL_SIZE container
+  // RPCs per healthz call — too expensive for a basic liveness probe.
+  // The trade-off: a healthz that hits a healthy slot can hide a partially
+  // dead pool. If you need per-slot visibility, use observability /
+  // wrangler tail instead.
   try {
-    const container = getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID);
+    const container = pickContainer(env);
     const containerResp = await container.fetch('http://container/healthz');
     return new Response(
       JSON.stringify({
@@ -626,4 +697,74 @@ export default {
     // we still serve it correctly.)
     return env.ASSETS.fetch(request);
   },
-};
+
+  // Cron-driven cache prewarm. wrangler.jsonc declares the trigger schedule
+  // (default: every 10 minutes). For each path in PREWARM_PATHS we synthesize
+  // an internal Request and call handleRender directly — same code path as a
+  // real /api/card or /api/og hit, so it warms L1 (caches.default in this
+  // PoP) and populates L2 (R2, cross-PoP).
+  //
+  // Why direct calls instead of `fetch(env.PREWARM_ORIGIN + path)`: Workers
+  // can't reliably loop back to their own public URL — CF's edge classifies
+  // a Worker fetching its own subdomain as a recursive subrequest and routes
+  // it past the Worker into Static Assets, which 404s on /api/* paths.
+  // Verified empirically: the public-URL approach returned 404 from inside
+  // the cron handler even though the same URL returns 200 from outside.
+  // Calling handleCard/handleOg directly avoids the loopback entirely.
+  //
+  // PREWARM_ORIGIN is still used as the synthetic Request's origin so the
+  // resulting `request.url` looks like a real public URL (handleRender uses
+  // it to build the L1 cache key — keeps the cache key shape consistent
+  // with real traffic).
+  //
+  // Cache effectiveness shows up in wrangler tail: each line logs the
+  // X-Cache header. Healthy steady state: every line says L1-HIT. After a
+  // deploy that bumps CACHE_VERSION the next tick says MISS once per path
+  // (fresh container render) then L1-HIT forever after.
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    const origin = env.PREWARM_ORIGIN;
+    if (!origin) {
+      console.error('[prewarm] PREWARM_ORIGIN not set; skipping');
+      return;
+    }
+    for (const path of PREWARM_PATHS) {
+      ctx.waitUntil(
+        (async () => {
+          try {
+            const url = new URL(path, origin);
+            const request = new Request(url.toString(), {
+              method: 'GET',
+              headers: { 'user-agent': 'dmv-cf-prewarm/1.0' },
+            });
+            // Route by pathname — only /api/card and /api/og make sense for
+            // a render-cache prewarm. Other paths in PREWARM_PATHS would be
+            // a config error; log and skip rather than 500.
+            let response: Response;
+            if (url.pathname === '/api/og') {
+              response = await handleOg(request, env, ctx);
+            } else if (url.pathname === '/api/card') {
+              response = await handleCard(request, env, ctx);
+            } else {
+              console.error(`[prewarm] ${path} -> not a renderable path, skipping`);
+              return;
+            }
+            console.log(
+              `[prewarm] ${path} -> ${response.status} x-cache=${response.headers.get('x-cache') ?? 'none'}`,
+            );
+            // Drain the body so any handleRender ctx.waitUntil work (R2 put,
+            // L1 put) actually has something to flush. Without this the
+            // Response body sits unread and the underlying buffer/stream
+            // isn't released.
+            await response.arrayBuffer();
+          } catch (err) {
+            console.error(`[prewarm] ${path} failed`, err);
+          }
+        })(),
+      );
+    }
+  },
+} satisfies ExportedHandler<Env>;
