@@ -23,8 +23,10 @@ COPY src/card-renderer.js src/qr-encode.js ./src/
 # Copy the font (vendored from ../fonts/)
 COPY fonts/PPSupplyMono-Regular.otf ./fonts/
 
-# Copy the HTTP server wrapper
-COPY src/server.mjs ./
+# Copy the HTTP server wrapper (lives at container/server.mjs on disk so the
+# `./src/card-renderer.js` import resolves the same way locally as in the
+# container — see I-8 in docs/superpowers/plans/2026-04-06-dmv-cf-fix-sprint.md)
+COPY server.mjs ./
 
 EXPOSE 8080
 CMD ["node", "server.mjs"]

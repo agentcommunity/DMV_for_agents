@@ -141,7 +141,12 @@ async function renderViaContainer(env: Env, params: RenderParams): Promise<Respo
 // the rendered card looks intentional.
 const DEFAULT_OG_NAME = 'dmv';
 
-async function handleRender(request: Request, env: Env, format: RenderFormat): Promise<Response> {
+async function handleRender(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  format: RenderFormat,
+): Promise<Response> {
   const url = new URL(request.url);
   let name = url.searchParams.get('name');
   const id = url.searchParams.get('id') ?? undefined;
@@ -171,6 +176,8 @@ async function handleRender(request: Request, env: Env, format: RenderFormat): P
   // 1. R2 cache lookup
   const cached = await env.CARD_CACHE.get(key);
   if (cached) {
+    // M-4: surface ETag + Content-Length on the cache HIT path so CDNs and
+    // browsers can do conditional requests / accurate progress bars.
     return new Response(cached.body, {
       status: 200,
       headers: {
@@ -178,6 +185,8 @@ async function handleRender(request: Request, env: Env, format: RenderFormat): P
         'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
         'X-Cache': 'HIT',
         'X-Cache-Key': key,
+        ETag: cached.httpEtag,
+        'Content-Length': String(cached.size),
       },
     });
   }
@@ -186,11 +195,13 @@ async function handleRender(request: Request, env: Env, format: RenderFormat): P
   const containerResponse = await renderViaContainer(env, params);
 
   if (!containerResponse.ok) {
-    // Pass through error from container
+    // M-3: pass through the container's actual content-type instead of
+    // forcing application/json — the body might be plain text or HTML.
     const body = await containerResponse.text();
+    const upstreamType = containerResponse.headers.get('content-type') ?? 'text/plain';
     return new Response(body, {
       status: containerResponse.status,
-      headers: { 'Content-Type': 'application/json', 'X-Source': 'container' },
+      headers: { 'Content-Type': upstreamType, 'X-Source': 'container' },
     });
   }
 
@@ -198,13 +209,25 @@ async function handleRender(request: Request, env: Env, format: RenderFormat): P
   // Cards are small enough that buffering is fine (no need for duplexed streams).
   const buffer = await containerResponse.arrayBuffer();
 
-  // 4. Write to R2.
-  await env.CARD_CACHE.put(key, buffer, {
-    httpMetadata: {
-      contentType: 'image/png',
-      cacheControl: 'public, max-age=31536000, immutable',
-    },
-  });
+  // 4. Write to R2 in the background (I-5). The client gets the rendered PNG
+  // immediately; the cache write happens via ctx.waitUntil so a slow R2 PUT
+  // (50–200ms) doesn't extend response latency on the first miss. The IIFE
+  // wraps the put in try/catch so a transient R2 error logs but doesn't
+  // break the response.
+  // Note: M-5 — httpMetadata.cacheControl is dead because the Worker re-applies
+  // its own Cache-Control on every response and R2 isn't exposed publicly.
+  // Drop it rather than carrying confusing dead config.
+  ctx.waitUntil(
+    (async () => {
+      try {
+        await env.CARD_CACHE.put(key, buffer, {
+          httpMetadata: { contentType: 'image/png' },
+        });
+      } catch (err) {
+        console.error('[CARD_CACHE] R2 put failed', { key, err });
+      }
+    })(),
+  );
 
   return new Response(buffer, {
     status: 200,
@@ -217,8 +240,10 @@ async function handleRender(request: Request, env: Env, format: RenderFormat): P
   });
 }
 
-const handleCard = (request: Request, env: Env) => handleRender(request, env, 'card');
-const handleOg = (request: Request, env: Env) => handleRender(request, env, 'og');
+const handleCard = (request: Request, env: Env, ctx: ExecutionContext) =>
+  handleRender(request, env, ctx, 'card');
+const handleOg = (request: Request, env: Env, ctx: ExecutionContext) =>
+  handleRender(request, env, ctx, 'og');
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  /c/:certId/:agentName — permalink with crawler OG injection
@@ -240,6 +265,16 @@ async function handlePermalink(
   env: Env,
   match: RegExpMatchArray,
 ): Promise<Response> {
+  // M-8: only GET/HEAD make sense for the permalink shell. Anything else
+  // (POST/PUT/DELETE) used to fall through and serve the SPA HTML — surprising
+  // and slightly misleading. Reject explicitly with 405.
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('Method Not Allowed', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
+
   const certId = decodeURIComponent(match[1]);
   const agentName = match[2] ? decodeURIComponent(match[2]) : '';
 
@@ -247,6 +282,21 @@ async function handlePermalink(
   // We use a same-origin URL so the assets binding picks the right file.
   const indexUrl = new URL('/index.html', request.url);
   const indexResp = await env.ASSETS.fetch(new Request(indexUrl.toString(), { method: 'GET' }));
+
+  // I-4: if the assets binding can't return a usable index.html (genuine 404,
+  // 5xx, etc.), don't keep going. Wrapping a 404 body with a 200 status —
+  // which the old crawler path did via the hardcoded `status: 200` — would
+  // tell crawlers a missing page is fine. Bail with a hand-built 404 instead.
+  if (!indexResp.ok) {
+    console.error('[handlePermalink] index.html fetch failed', {
+      status: indexResp.status,
+      url: indexUrl.toString(),
+    });
+    return new Response('Not Found', {
+      status: 404,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
 
   const ua = request.headers.get('user-agent') ?? '';
   if (!CRAWLER_UA.test(ua)) {
@@ -333,21 +383,87 @@ async function handlePermalink(
 // Supabase function URL with the path tail preserved. No auth needed —
 // the badge function is public.
 
+// Headers we forward upstream to Supabase. Anything else (Cookie,
+// Authorization, cf-*, host, etc.) is dropped — we never want to leak
+// dmv.agentcommunity.org credentials to a different origin, and CF-injected
+// headers carry no meaning to Supabase. (I-2)
+const BADGE_FORWARD_REQUEST_HEADERS = [
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'user-agent',
+] as const;
+
+// Headers we strip from Supabase's response before returning to the client.
+// `set-cookie` would scope a Supabase cookie onto the DMV domain — refuse it.
+// Hop-by-hop headers per RFC 7230 §6.1 are connection-scoped and must not be
+// proxied. (I-2)
+const BADGE_RESPONSE_HEADERS_TO_STRIP = new Set([
+  'set-cookie',
+  'connection',
+  'transfer-encoding',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'upgrade',
+]);
+
 async function handleBadge(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  // /badge/foo/bar → /badge/foo/bar (Supabase function path matches)
-  const tail = url.pathname.replace(/^\/badge/, '');
-  const target = `${SUPABASE_FUNCTIONS_ORIGIN}/badge${tail}${url.search}`;
-  // Forward the request as-is (preserve method, headers, body).
-  const upstream = await fetch(target, {
+  // /badge/foo/bar → /badge/foo/bar (Supabase function path matches).
+  // Strip the prefix so we can validate the resolved path below.
+  const tail = url.pathname.slice('/badge'.length); // '' or '/...'
+
+  // I-3: path traversal defense. Defense-in-depth — reject obvious badness
+  // first, then validate by URL parsing on the upstream side.
+  if (tail.includes('..') || tail.includes('//')) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
+  const targetUrl = new URL(`${SUPABASE_FUNCTIONS_ORIGIN}/badge${tail}${url.search}`);
+  // After URL normalisation, make sure we're still inside /functions/v1/badge.
+  // If a URL trick squeaked past the textual check, this catches it.
+  if (!targetUrl.pathname.startsWith('/functions/v1/badge')) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
+
+  // Build a clean header set instead of forwarding the request verbatim. (I-2)
+  const upstreamHeaders = new Headers();
+  for (const name of BADGE_FORWARD_REQUEST_HEADERS) {
+    const value = request.headers.get(name);
+    if (value !== null) upstreamHeaders.set(name, value);
+  }
+  // Standard reverse-proxy hints so the Supabase function knows the original
+  // client. cf-connecting-ip is the CF-attested client IP.
+  const clientIp = request.headers.get('cf-connecting-ip');
+  if (clientIp) upstreamHeaders.set('x-forwarded-for', clientIp);
+  upstreamHeaders.set('x-forwarded-host', url.host);
+  upstreamHeaders.set('x-forwarded-proto', url.protocol.replace(':', ''));
+
+  const upstream = await fetch(targetUrl.toString(), {
     method: request.method,
-    headers: request.headers,
+    headers: upstreamHeaders,
     body: request.body,
   });
-  // Strip hop-by-hop headers and pass through.
+
+  // Strip hop-by-hop + set-cookie headers from the response. (I-2)
+  const responseHeaders = new Headers();
+  upstream.headers.forEach((value, key) => {
+    if (!BADGE_RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
+      responseHeaders.set(key, value);
+    }
+  });
+
   return new Response(upstream.body, {
     status: upstream.status,
-    headers: upstream.headers,
+    headers: responseHeaders,
   });
 }
 
@@ -376,14 +492,14 @@ async function handleHealthz(env: Env): Promise<Response> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // /api/card → container-rendered 880x630 PNG with R2 cache
-    if (url.pathname === '/api/card') return handleCard(request, env);
+    if (url.pathname === '/api/card') return handleCard(request, env, ctx);
 
     // /api/og → SAME container renderer, composited onto 1200x630 for OG/Twitter
-    if (url.pathname === '/api/og') return handleOg(request, env);
+    if (url.pathname === '/api/og') return handleOg(request, env, ctx);
 
     // /badge/* → Supabase Edge Function proxy
     if (url.pathname.startsWith('/badge/') || url.pathname === '/badge') {

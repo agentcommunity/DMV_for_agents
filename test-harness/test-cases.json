@@ -1,16 +1,16 @@
 {
   "description": "Test card definitions chosen to exercise every visual permutation: rarity, palette, holo type, and account type. Names are deterministic so re-runs produce identical cards.",
   "cases": [
-    { "name": "alice",       "type": "individual",   "expectedRarity": "?" },
-    { "name": "bob",         "type": "individual",   "expectedRarity": "?" },
-    { "name": "claude",      "type": "agent",        "expectedRarity": "?" },
-    { "name": "anthropic",   "type": "organization", "expectedRarity": "?" },
-    { "name": "openai",      "type": "organization", "expectedRarity": "?" },
-    { "name": "cursor",      "type": "agent",        "expectedRarity": "?" },
-    { "name": "perplexity",  "type": "organization", "expectedRarity": "?" },
-    { "name": "supercoolagent", "type": "agent",     "expectedRarity": "?" },
-    { "name": "x",           "type": "individual",   "expectedRarity": "?" },
-    { "name": "longest-possible-name-yes",  "type": "individual", "expectedRarity": "?" }
+    { "name": "alice",       "type": "individual"   },
+    { "name": "bob",         "type": "individual"   },
+    { "name": "claude",      "type": "agent"        },
+    { "name": "anthropic",   "type": "organization" },
+    { "name": "openai",      "type": "organization" },
+    { "name": "cursor",      "type": "agent"        },
+    { "name": "perplexity",  "type": "organization" },
+    { "name": "supercoolagent", "type": "agent"     },
+    { "name": "x",           "type": "individual"   },
+    { "name": "longest-possible-name-yes",  "type": "individual" }
   ],
   "withExplicitId": [
     { "id": "ABCD-EFG-HIJK", "name": "alice", "type": "individual" }

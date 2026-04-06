@@ -98,7 +98,7 @@ async function exists(p) {
 const CONTAINER_HASH_INPUTS = [
   'container/Dockerfile',
   'container/package.json',
-  'container/src/server.mjs',
+  'container/server.mjs',
   'container/src/card-renderer.js',
   'container/src/qr-encode.js',
   'container/fonts/PPSupplyMono-Regular.otf',
