@@ -1,0 +1,130 @@
+/**
+ * Wrangler config for the DMV cloudflare-migration branch.
+ *
+ * Pipeline:
+ *   Worker (worker/index.ts) ─┬─ Workers Static Assets (dist/)
+ *                             ├─ Container (Node 20 + @napi-rs/canvas)
+ *                             └─ R2 (read-through card cache)
+ *
+ * NOT yet wired to dmv.agentcommunity.org — DNS cutover is the last step.
+ *
+ * Local dev: `pnpm cf:dev`
+ * Deploy:    `pnpm cf:deploy` (runs cf:vendor → cf:build → wrangler deploy)
+ *
+ * See CLOUDFLARE.md for full architecture and rationale.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "dmv-agentcommunity",
+	"main": "worker/index.ts",
+	// Taqanu account — same as main agentcommunity_page worker.
+	// Not a secret: the account ID is visible in any workers.dev subdomain
+	// this account hosts and is committed to wrangler configs across the org.
+	"account_id": "9a551fc3ff2c0e9ac70baa42a0138896",
+	"compatibility_date": "2025-12-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+
+	// ──────────────────────────────────────────────────────────────────────────
+	//  Static Assets — DMV SPA (index.html + js/ + css/ + fonts/ + audio/ + models/)
+	// ──────────────────────────────────────────────────────────────────────────
+	// `dist/` is populated by `pnpm cf:build` (scripts/build-cf.mjs) which copies
+	// only the production-facing files from the repo root. Bandwidth on static
+	// assets is FREE (no per-request cost), so the 2.2 MB GLB and 6 MB audio
+	// directory cost nothing.
+	//
+	// `not_found_handling = single-page-application` means any request that
+	// doesn't match a file gets index.html — required for /c/:certId/:agentName
+	// permalinks to load the SPA.
+	//
+	// `run_worker_first` lists paths where the Worker runs BEFORE static assets.
+	// We use this for /api/* (card + og), /c/* (crawler middleware via HTMLRewriter),
+	// /badge/* (Supabase proxy), and /healthz. Everything else falls through to
+	// static assets directly with no Worker invocation cost.
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api/*",
+			"/c/*",
+			"/badge/*",
+			"/healthz"
+		]
+	},
+	// ──────────────────────────────────────────────────────────────────────────
+	//  Container: Node 20 + @napi-rs/canvas card renderer
+	// ──────────────────────────────────────────────────────────────────────────
+	"containers": [
+		{
+			"class_name": "CardRenderer",
+			"image": "./container/Dockerfile",
+			// 1 active instance is enough: DMV expects a few thousand requests
+			// over the Brave window (the main site at agentcommunity_page is
+			// the 25M-impression hot path, not DMV). With R2 + L1 cache in
+			// front, effective container time per request is near-zero after
+			// the first render of each unique (name, type, format) combo.
+			"max_instances": 1
+			// instance_type omitted → defaults to "lite" (1/4 vCPU, 256 MiB).
+			// Verified from CF Containers docs: valid types are "lite"
+			// (default), "basic", "standard-1" through "standard-4". A
+			// previous commit set this to "basic" in anticipation of takeover
+			// load, but DMV doesn't see that traffic — reverted to avoid
+			// paying for headroom we won't use.
+		}
+	],
+	// Containers are exposed via Durable Object bindings.
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "CARD_RENDERER",
+				"class_name": "CardRenderer"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"CardRenderer"
+			]
+		}
+	],
+	// ──────────────────────────────────────────────────────────────────────────
+	//  R2: read-through cache for rendered cards
+	// ──────────────────────────────────────────────────────────────────────────
+	// The actual bucket is created with:
+	//   pnpm wrangler r2 bucket create dmv-card-cache-test
+	// For local dev, wrangler simulates R2 in .wrangler/state — no real bucket
+	// is touched until you `wrangler deploy`.
+	"r2_buckets": [
+		{
+			"binding": "CARD_CACHE",
+			"bucket_name": "dmv-card-cache-test",
+			"preview_bucket_name": "dmv-card-cache-test-preview"
+		}
+	],
+	// ──────────────────────────────────────────────────────────────────────────
+	//  Cron prewarm — keep the hot DMV URLs warm in L1/L2
+	// ──────────────────────────────────────────────────────────────────────────
+	// Hourly is plenty for DMV's expected traffic. L1 TTL is 7 days and the
+	// main purpose is "first Brave hit is already cache-warm" — any schedule
+	// shorter than a couple hours is overkill. CF rotates cron execution
+	// across PoPs, so over the course of a day the cron touches a reasonable
+	// spread of serving regions. After cutover, bump PREWARM_ORIGIN to
+	// https://dmv.agentcommunity.org. See worker/index.ts `scheduled` handler
+	// and the PREWARM_PATHS constant for the list of URLs warmed.
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
+	"vars": {
+		"PREWARM_ORIGIN": "https://dmv.agentcommunity.org"
+	},
+	// ──────────────────────────────────────────────────────────────────────────
+	//  Observability — useful for debugging container cold starts during the bake-off
+	// ──────────────────────────────────────────────────────────────────────────
+	"observability": {
+		"enabled": true
+	}
+}

@@ -6,7 +6,7 @@
   "workspaces": [
     "packages/*"
   ],
-  "description": "Root deps for Vercel Edge Functions (OG image generation)",
+  "description": "Root deps for Vercel Edge Functions (OG image generation) — also hosts cf-test-containers branch scaffolding",
   "scripts": {
     "dev": "node dev-server.mjs",
     "start": "node dev-server.mjs",
@@ -15,10 +15,32 @@
     "check": "node --test tests/text-surfaces.test.mjs",
     "text:audit": "node scripts/text-surfaces/run-audit.mjs",
     "text:audit:json": "node scripts/text-surfaces/run-audit.mjs --json",
-    "text:check": "node --test tests/text-surfaces.test.mjs"
+    "text:check": "node --test tests/text-surfaces.test.mjs",
+    "cf:dev": "pnpm cf:vendor:check && pnpm cf:build && wrangler dev",
+    "cf:deploy": "pnpm cf:vendor:check && pnpm cf:build && wrangler deploy",
+    "cf:tail": "wrangler tail",
+    "cf:test:render": "node test-harness/render-comparison.mjs",
+    "cf:vendor": "cp api/card-renderer.js container/src/card-renderer.js && cp api/qr-encode.js container/src/qr-encode.js && cp fonts/PPSupplyMono-Regular.otf container/fonts/PPSupplyMono-Regular.otf",
+    "cf:vendor:check": "node scripts/check-vendor.mjs",
+    "cf:build": "node scripts/build-cf.mjs",
+    "cf:container:build": "docker build -t dmv-card-renderer container/"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.2.2",
     "@napi-rs/canvas": "^0.1.61",
     "@vercel/og": "^0.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "workerd",
+      "@napi-rs/canvas"
+    ]
   }
 }
