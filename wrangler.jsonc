@@ -119,7 +119,7 @@
 		"crons": ["0 * * * *"]
 	},
 	"vars": {
-		"PREWARM_ORIGIN": "https://dmv-card-test.b-9a5.workers.dev"
+		"PREWARM_ORIGIN": "https://dmv.agentcommunity.org"
 	},
 	// ──────────────────────────────────────────────────────────────────────────
 	//  Observability — useful for debugging container cold starts during the bake-off
