@@ -15,7 +15,7 @@ export interface ValidationError {
 export function validateAgentName(name: string): string | null {
   if (!name) return 'Agent name is required';
   if (name.length < 3) return 'Agent name must be at least 3 characters';
-  if (name.length > 32) return 'Agent name must be at most 32 characters';
+  if (name.length > 63) return 'Agent name must be at most 63 characters';
   if (!AGENT_NAME_REGEX.test(name)) {
     return 'Agent name must be lowercase alphanumeric (hyphens allowed in middle)';
   }

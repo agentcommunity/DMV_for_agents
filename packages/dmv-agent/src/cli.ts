@@ -164,7 +164,7 @@ async function collectFields(): Promise<CollectedFields> {
     clearScreen();
     renderFieldPrompt(
       'AGENT NAME',
-      'What should this agent be called? (lowercase, 3-32 chars)',
+      'What should this agent be called? (lowercase, 3-63 chars)',
       completed,
     );
     agentName = await prompt(`  ${color.green('>')} `);

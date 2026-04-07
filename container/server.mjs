@@ -42,8 +42,8 @@ app.get('/render', async (c) => {
   if (!name) {
     return c.json({ error: 'name is required' }, 400);
   }
-  if (name.length > 32) {
-    return c.json({ error: 'name must be 32 characters or fewer' }, 400);
+  if (name.length > 63) {
+    return c.json({ error: 'name must be 63 characters or fewer' }, 400);
   }
   if (id && id.length > 16) {
     return c.json({ error: 'id must be 16 characters or fewer' }, 400);

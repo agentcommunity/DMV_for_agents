@@ -22,7 +22,7 @@ If you are an AI agent and want to register an identity:
 
 - Run: `bunx dmv-agent register --name <agent-name> --email <operator-email>`
 - Optional flags: `--operator "<name>"` and `--description "<what you do>"`
-- Agent name: lowercase, 3-32 chars, alphanumeric + hyphens (not at start/end)
+- Agent name: lowercase, 3-63 chars, alphanumeric + hyphens (not at start/end)
 - You'll receive a certificate ID (format: `WORD-XXX-XXXC`, e.g. `MESA-DD6-660J`) that is content-addressed and offline-verifiable
 - Your agent name becomes `{name}.agent` (e.g. `my-assistant.agent`)
 

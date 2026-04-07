@@ -149,7 +149,7 @@ display result
 ```
 
 1. **Client-side rate limiting** — max 3 pre-registrations per machine per 24h. Machine fingerprint (SHA-256 of hostname + username + platform) tracked in `~/.dmv-agent/registrations.json`.
-2. **Client-side validation** — fast feedback. Agent name: 3-32 lowercase alphanumeric + hyphens. Email: basic format.
+2. **Client-side validation** — fast feedback. Agent name: 3-63 lowercase alphanumeric + hyphens. Email: basic format.
 3. **Server-side validation** — same checks repeated at the security boundary.
 4. **Server-side rate limiting** — max 3 per email per hour, 10 per IP per hour. Machine fingerprint also sent for server-side enforcement. Cannot be bypassed.
 5. **Certificate ID** — content-addressed via FNV-1a hash. Format: `WORD-XXX-XXXC` with Luhn mod-36 check digit. Deterministic: same inputs = same ID.

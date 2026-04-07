@@ -245,7 +245,7 @@ async function handleRender(
   }
 
   // Input validation — 32-char name cap, 16-char id cap, type enum.
-  if (name.length > 32) return badRequest('name must be 32 characters or fewer');
+  if (name.length > 63) return badRequest('name must be 63 characters or fewer');
   if (id && id.length > 16) return badRequest('id must be 16 characters or fewer');
   if (type && !['individual', 'organization', 'agent'].includes(type.toLowerCase())) {
     return badRequest('type must be individual, organization, or agent');

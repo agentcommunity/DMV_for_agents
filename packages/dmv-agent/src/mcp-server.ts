@@ -57,7 +57,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             description:
               'The desired agent name (without .agent suffix). ' +
-              'Lowercase alphanumeric, hyphens allowed. 3-32 chars. ' +
+              'Lowercase alphanumeric, hyphens allowed. 3-63 chars. ' +
               'Example: "my-assistant"',
           },
           email: {

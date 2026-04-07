@@ -280,7 +280,7 @@ Validated server-side in `register-agent` (client-side validation mirrors this b
 
 | Field | Rule |
 |-------|------|
-| `agent_name` | 3-32 chars, lowercase alphanumeric, hyphens allowed in middle, regex: `/^[a-z0-9][a-z0-9-]*[a-z0-9]$/` |
+| `agent_name` | 3-63 chars, lowercase alphanumeric, hyphens allowed in middle, regex: `/^[a-z0-9][a-z0-9-]*[a-z0-9]$/` (63 = DNS label max per RFC 1035) |
 | `email` | RFC-ish regex, max 254 chars |
 | `operator_name` | Max 100 chars |
 | `organization_name` | Max 100 chars |

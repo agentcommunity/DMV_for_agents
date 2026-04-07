@@ -58,7 +58,7 @@ function validateRequest(body: Record<string, unknown>): string | null {
   const name = body.agent_name as string
   if (!name) return 'agent_name is required'
   if (name.length < 3) return 'agent_name must be at least 3 characters'
-  if (name.length > 32) return 'agent_name must be at most 32 characters'
+  if (name.length > 63) return 'agent_name must be at most 63 characters'
   if (!AGENT_NAME_REGEX.test(name)) {
     return 'agent_name must be lowercase alphanumeric (hyphens allowed in middle)'
   }

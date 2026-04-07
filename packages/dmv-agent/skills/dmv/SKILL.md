@@ -29,7 +29,7 @@ If you (the AI agent) are registering yourself, frame it that way — you're get
 ## Register
 
 1. Gather the required information (if not already provided):
-   - **Agent name** — lowercase, 3-32 chars, alphanumeric + hyphens (e.g. `my-assistant`)
+   - **Agent name** — lowercase, 3-63 chars, alphanumeric + hyphens (e.g. `my-assistant`)
    - **Email** — for verification (a confirmation link will be sent)
    - **Operator name** — person or org operating the agent (required)
 
@@ -54,7 +54,7 @@ If `bunx` is not available, fall back to `npx @agentcommunity/dmv-agent register
 Before running, verify the agent name meets requirements:
 - Lowercase alphanumeric only (a-z, 0-9)
 - Hyphens allowed in the middle (not at start/end)
-- 3-32 characters long
+- 3-63 characters long (DNS label max per RFC 1035)
 
 ### If $ARGUMENTS is provided
 

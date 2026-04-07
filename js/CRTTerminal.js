@@ -593,8 +593,8 @@ export class CRTTerminal {
       if (val.length < 3) {
         return 'At least 3 characters';
       }
-      if (val.length > 32) {
-        return 'At most 32 characters';
+      if (val.length > 63) {
+        return 'At most 63 characters';
       }
       const agentRegex = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
       if (!agentRegex.test(val)) {
