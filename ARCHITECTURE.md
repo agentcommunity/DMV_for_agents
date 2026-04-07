@@ -118,7 +118,9 @@ All five paths call the same edge function. Zero database credentials on the cli
 
 The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `bunx dmv-agent register --name <agent> --email <email> --operator <name>`.
 
-### Rate limiting (six layers)
+### Rate limiting (seven layers)
+
+**Layer 0 — Cloudflare Worker edge rate limit** (NEW 2026-04-07). 100 req/60s per `${ip}:${pathname}` on `/api/card` and `/api/og` via the Workers Rate Limiting API binding `API_RATE_LIMITER`. Runs BEFORE the in-Worker cache lookup so rejections don't eat CPU on L1/R2 reads. Rejected requests return `429` with `Retry-After: 60`. Configured in `wrangler.jsonc` under the top-level `ratelimits` array. Note: this layer guards the CARD-RENDER path, not the REGISTRATION path — the 6 layers below still apply to `register-agent` independently.
 
 | Layer | Scope | Limit | Backend |
 |-------|-------|-------|---------|

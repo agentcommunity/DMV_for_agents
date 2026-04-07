@@ -130,7 +130,7 @@ eyeball the bake-off output (`pnpm cf:test:render` — see below).
 | `container/src/qr-encode.js` | QR encoder, byte-identical to `js/qr-encode.js` |
 | `container/fonts/PPSupplyMono-Regular.otf` | Auto-synced from `fonts/` by `scripts/build-cf.mjs` |
 | `scripts/build-cf.mjs` | Font sync → QR drift check → `dist/` copy → container-hash write |
-| `public/_headers` | Cache + security headers for Workers Static Assets |
+| `public/_headers` | Cache + security headers for Workers Static Assets. Sets global security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy), immutable cache headers for hashed assets (`/js/`, `/css/`, `/fonts/`, `/models/`), and `Link: rel=preload` headers on `/` and `/index.html` that Cloudflare auto-promotes to HTTP 103 Early Hints (requires zone-level Early Hints toggle enabled in the dashboard under Speed → Optimization → Content Optimization). CSP includes a `sha256-…` hash for the inline importmap in `index.html`, `'wasm-unsafe-eval'` for DRACOLoader, and `worker-src 'self' blob:` for the Draco decoder Worker. The same CSP is also emitted by `worker/index.ts` `handlePermalink` (as `PERMALINK_CSP` constant) because `run_worker_first: ["/c/*"]` bypasses Static Assets `_headers` on permalink routes — keep the two copies in sync manually. |
 | `test-harness/test-cases.json` | 11 representative cards covering rarity/palette/account-type permutations |
 | `test-harness/render-comparison.mjs` | Compares local `wrangler dev` output against the deployed worker for eyeball visual regression |
 
@@ -193,10 +193,58 @@ open test-harness/output/index.html
   of serving regions. `PREWARM_ORIGIN` lives in `wrangler.jsonc vars` and
   points at `https://dmv.agentcommunity.org`.
 
-- **Observability**: `observability.enabled = true` in `wrangler.jsonc`.
-  Use `pnpm cf:tail` to stream live logs. Every card response carries
-  `X-Cache: L1-HIT | L2-HIT | MISS` and `X-Cache-Key`, which makes cache
-  health visible at a glance.
+- **Observability**: `observability.enabled = true` in `wrangler.jsonc`. Use
+  `pnpm cf:tail` to stream live logs. Every cache-tier response carries
+  `X-Cache: L1-HIT | L2-HIT | MISS | 304` and `X-Cache-Key` for
+  point-in-time debugging. Rate-limited responses emit `X-RateLimit-Limit`
+  + `X-RateLimit-Window`. Badge KV responses emit `X-Badge-Cache: KV-HIT |
+  MISS`. For structured aggregate telemetry (cache hit ratio, render
+  latency, KV hit ratio, rate-limit rejections), see the
+  `dmv_worker_events` Analytics Engine dataset — queryable from the CF
+  dashboard → Workers → dmv-agentcommunity → Analytics Engine. Schema is
+  documented at the `emitAnalytics()` helper in `worker/index.ts`.
+
+- **Rate limiting**: `/api/card` and `/api/og` are guarded by the Workers
+  Rate Limiting API binding `API_RATE_LIMITER` — 100 req/60s per
+  `${ip}:${pathname}`. Configured under the top-level `ratelimits` array in
+  `wrangler.jsonc`. The limiter runs BEFORE L1 lookup so rejected requests
+  don't eat cache-tier work, and prewarm cron requests bypass via UA check
+  (`dmv-cf-prewarm/1.0`). Rate-limit rejections emit an `error` category
+  Analytics Engine event. For a future zone-level upgrade to Pro+, layer a
+  WAF Rate Limiting Rule on top — WAF runs earlier in the request pipeline
+  and rejected requests don't count as Worker invocations.
+
+- **Badge KV cache**: `/badge/*` is proxied through the Worker to the
+  Supabase `badge` edge function with a 10-minute KV read-through cache
+  (`BADGE_CACHE_KV`). Badge SVGs are deterministic per cert ID and stale
+  content is cosmetic, so the 10-min window trades invisible freshness for
+  ~10x fewer Supabase invocations during peak traffic. Only `GET` requests
+  are cached, and only `upstream.ok` responses are written. Content-Type
+  and HTTP status are stored in KV metadata (1024-byte cap). Misses emit
+  `X-Badge-Cache: MISS`, hits emit `X-Badge-Cache: KV-HIT`. KV puts are
+  tethered to `ctx.waitUntil()` so the runtime doesn't cancel them when
+  the response returns.
+
+- **Request coalescing**: concurrent first-misses on the same cache key
+  are deduplicated per Worker isolate via an in-memory `inflightRenders`
+  Map in `worker/index.ts`. Scope is single-isolate (not global): CF may
+  run multiple isolates per PoP, but within each isolate a thundering herd
+  of N requests collapses to one container call. Failure of the primary
+  render fails all awaiters of that batch with 502 — we do NOT
+  auto-re-render to avoid amplifying a thundering-herd against a broken
+  container. The Map entry is cleaned up in a `finally` block so the next
+  batch of requests starts fresh. Closes the "Cache API request coalescing
+  is not yet implemented" known gap from earlier.
+
+- **Healthz schema**: `/healthz` returns `{ worker: 'ok', container: { ... } }`
+  where `container` is always an object. Happy path: `{ status: 'ok',
+  renderer_version: <CARD_VERSION>, node: <process.version>, uptime_ms,
+  boot_ms }`. Parse fallback (container returned non-JSON, e.g. old image
+  mid-deploy): `{ status: 'ok', legacy: true }` — observed briefly during
+  the 2026-04-07 deploy while the new container booted, then transitioned
+  to the full payload. HTTP error: `{ status: 'error', http: <code> }`.
+  Network error: `{ status: 'error', message: <string> }`. Probes can
+  safely read `container.status` across all branches.
 
 - **No automated worker tests by design**. The worker code is small enough
   that adding miniflare/vitest scaffolding would cost more than it returns.
@@ -205,12 +253,6 @@ open test-harness/output/index.html
   (crawler UA + human UA), and `/badge/*`. Revisit if the worker grows.
 
 ## Known gaps (separate sprints)
-
-- **Cache API request coalescing** is not yet implemented. Under a
-  thundering herd of unique cards (brand-new viral card hit at launch),
-  concurrent first-misses can each independently call the container and
-  eat tail latency. Flagged as Brave-takeover prep in the post-review fix
-  sprint.
 
 - **API hardening** — `js/supabase.js` (browser) and `packages/dmv-agent/`
   (CLI + MCP) still POST directly to the Supabase `register-agent` edge
