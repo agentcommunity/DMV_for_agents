@@ -1043,26 +1043,37 @@ async function handleHealthz(env: Env): Promise<Response> {
     const containerResp = await container.fetch('http://container/healthz');
     // Parse the container's JSON response and embed it so callers see
     // renderer_version / uptime_ms / node without needing direct container
-    // access. On parse failure (e.g., container returned text), fall back
-    // to the simple boolean signal.
+    // access. `container` is normalised to an object in every branch so
+    // probes can consistently read `.status` without polymorphism.
     let containerPayload: unknown;
     try {
       containerPayload = containerResp.ok ? await containerResp.json() : null;
     } catch {
       containerPayload = null;
     }
+    let containerField: unknown;
+    if (containerResp.ok) {
+      // Rich JSON from Task 9+ container, OR a sentinel for an older
+      // container that returns text (the parse-fallback branch). The
+      // `legacy: true` flag lets probes detect a mis-built or rolled-back
+      // container image that returns 200 but no structured payload.
+      containerField = containerPayload ?? { status: 'ok', legacy: true };
+    } else {
+      containerField = {
+        status: 'error',
+        http: containerResp.status,
+      };
+    }
     return new Response(
-      JSON.stringify({
-        worker: 'ok',
-        container: containerResp.ok
-          ? (containerPayload ?? 'ok')
-          : `error ${containerResp.status}`,
-      }),
+      JSON.stringify({ worker: 'ok', container: containerField }),
       { headers: { 'Content-Type': 'application/json' } },
     );
   } catch (err) {
     return new Response(
-      JSON.stringify({ worker: 'ok', container: `error: ${(err as Error).message}` }),
+      JSON.stringify({
+        worker: 'ok',
+        container: { status: 'error', message: (err as Error).message },
+      }),
       { status: 500, headers: { 'Content-Type': 'application/json' } },
     );
   }
