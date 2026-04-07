@@ -140,6 +140,30 @@ const DMV_ORIGIN = 'https://dmv.agentcommunity.org';
 const CRAWLER_UA =
   /Twitterbot|facebookexternalhit|Facebot|LinkedInBot|Slackbot|WhatsApp|Discordbot|TelegramBot|Applebot|Googlebot|bingbot|Pinterest|redditbot|Mastodon|Pleroma|Akkoma|Misskey|Bluesky/i;
 
+// In-flight request coalescing for the container render path.
+//
+// Module-level Map keyed by the same cacheKey() used for L1/R2. When a
+// thundering herd of concurrent first-misses arrives on a fresh URL, the
+// first request kicks off the container render and stores the in-flight
+// promise here; concurrent requests within the same Worker isolate await
+// that promise instead of each calling the container independently. On
+// settle (success or error) the entry is removed so a later miss can
+// re-render if needed.
+//
+// Scope: single isolate only. CF may run multiple isolates per PoP and
+// multiple PoPs globally, so this is NOT a global semaphore — it's a
+// per-isolate dedupe that bounds the worst-case N-way container fan-out
+// to "at most one per isolate" instead of "one per request". For the
+// Brave takeover shape (small hot set, high RPS) this is a measurable
+// win. A global coordinator would live in a Durable Object; see
+// CLOUDFLARE.md known-gaps for the tradeoff discussion.
+//
+// Important: the Map holds Promises of the raw PNG ArrayBuffer, not
+// Response objects. Responses are single-use (body stream consumed on
+// first read), so multiple awaiters cannot share a Response. ArrayBuffer
+// is structurally shareable.
+const inflightRenders = new Map<string, Promise<ArrayBuffer>>();
+
 // Permalink path: /c/CERT-ID or /c/CERT-ID/agent-name
 const PERMALINK_RE = /^\/c\/([^/]+)(?:\/([^/]+))?$/;
 
@@ -262,6 +286,20 @@ async function renderViaContainer(env: Env, params: RenderParams): Promise<Respo
   if (params.type) url.searchParams.set('type', params.type);
 
   return container.fetch(url.toString());
+}
+
+// Helper used by the coalescing miss path. Calls the container and buffers
+// the result into an ArrayBuffer so it can be shared across multiple
+// awaiters of the same in-flight promise. Throws on non-ok upstream.
+async function renderAndBuffer(env: Env, params: RenderParams): Promise<ArrayBuffer> {
+  const response = await renderViaContainer(env, params);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(
+      `container render ${response.status}: ${body.slice(0, 200)}`,
+    );
+  }
+  return response.arrayBuffer();
 }
 
 // Strip the response body for HEAD requests while preserving status and
@@ -546,41 +584,75 @@ async function handleRender(
     );
   }
 
-  // 3. Both caches miss — invoke container.
-  const containerResponse = await renderViaContainer(env, params);
-
-  if (!containerResponse.ok) {
-    // M-3: pass through the container's actual content-type instead of
-    // forcing application/json — the body might be plain text or HTML.
-    // Don't cache errors anywhere — let the next request try again.
-    const body = await containerResponse.text();
-    const upstreamType = containerResponse.headers.get('content-type') ?? 'text/plain';
-    emitAnalytics(env, {
-      category: 'error',
-      tier: `container-${containerResponse.status}`,
-      path,
-      key,
-      latencyMs: Date.now() - startedAt,
-      sizeBytes: 0,
-    });
-    return new Response(body, {
-      status: containerResponse.status,
-      headers: { 'Content-Type': upstreamType, 'X-Source': 'container' },
-    });
+  // 3. Both caches miss — invoke container, coalescing concurrent first-misses.
+  let buffer: ArrayBuffer;
+  const existing = inflightRenders.get(key);
+  if (existing) {
+    // Another request in this isolate is already rendering this card —
+    // await its result. Saves a duplicate container call.
+    try {
+      buffer = await existing;
+    } catch (err) {
+      // The in-flight promise rejected (container was broken, OOM, etc.).
+      // FAIL FAST: do NOT re-render. If the container just failed, kicking
+      // off a second render against the same broken container amplifies the
+      // thundering herd that coalescing was supposed to prevent. Let all
+      // awaiters of this rejected batch return 502; the next fresh request
+      // AFTER this Map entry has been cleared (by the primary owner's
+      // finally block below) will create a new inflight entry and may
+      // succeed — but we don't race it from inside the awaiter branch.
+      emitAnalytics(env, {
+        category: 'error',
+        tier: 'inflight-rejected',
+        path,
+        key,
+        latencyMs: Date.now() - startedAt,
+        sizeBytes: 0,
+      });
+      const msg = err instanceof Error ? err.message : String(err);
+      return new Response(`Render failed (coalesced): ${msg}`, {
+        status: 502,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Source': 'container-coalesced',
+        },
+      });
+    }
+  } else {
+    // We are the primary owner of this render. Set the promise on the Map
+    // BEFORE awaiting so concurrent requests in this isolate can find it.
+    // Use try/finally to guarantee the Map entry is removed on both success
+    // and failure — otherwise a permanent "stuck" entry could poison the
+    // slot for the rest of the isolate's lifetime.
+    const freshPromise = renderAndBuffer(env, params);
+    inflightRenders.set(key, freshPromise);
+    try {
+      buffer = await freshPromise;
+    } catch (err) {
+      emitAnalytics(env, {
+        category: 'error',
+        tier: 'container-render-failed',
+        path,
+        key,
+        latencyMs: Date.now() - startedAt,
+        sizeBytes: 0,
+      });
+      const msg = err instanceof Error ? err.message : String(err);
+      return new Response(`Render failed: ${msg}`, {
+        status: 502,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Source': 'container',
+        },
+      });
+    } finally {
+      inflightRenders.delete(key);
+    }
   }
 
-  // Buffer the PNG so we can stream to client AND populate both cache tiers.
-  // Cards are small enough that buffering is fine (no need for duplexed streams).
-  const buffer = await containerResponse.arrayBuffer();
-
-  // 4. Write to BOTH cache tiers in the background (I-5 + I-6). The client
-  // gets the rendered PNG immediately; cache writes happen via ctx.waitUntil
-  // so neither R2 PUT (~50–200ms) nor L1 PUT (~few ms) extends response
-  // latency on the first miss. Each put is wrapped in try/catch so a
-  // transient cache error logs but doesn't break the response.
-  // Note: M-5 — httpMetadata.cacheControl is dead because the Worker re-applies
-  // its own Cache-Control on every response and R2 isn't exposed publicly.
-  // Drop it rather than carrying confusing dead config.
+  // 4. Write to BOTH cache tiers in the background. Multiple awaiters of the
+  // same in-flight promise each hit this block — that's fine: caches.default
+  // and R2 both tolerate redundant puts for the same key.
   ctx.waitUntil(
     (async () => {
       try {
@@ -602,6 +674,7 @@ async function handleRender(
     latencyMs: Date.now() - startedAt,
     sizeBytes: buffer.byteLength,
   });
+
   return stripBodyForHead(
     new Response(buffer, {
       status: 200,
