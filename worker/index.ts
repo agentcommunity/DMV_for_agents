@@ -1041,10 +1041,22 @@ async function handleHealthz(env: Env): Promise<Response> {
   try {
     const container = getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID);
     const containerResp = await container.fetch('http://container/healthz');
+    // Parse the container's JSON response and embed it so callers see
+    // renderer_version / uptime_ms / node without needing direct container
+    // access. On parse failure (e.g., container returned text), fall back
+    // to the simple boolean signal.
+    let containerPayload: unknown;
+    try {
+      containerPayload = containerResp.ok ? await containerResp.json() : null;
+    } catch {
+      containerPayload = null;
+    }
     return new Response(
       JSON.stringify({
         worker: 'ok',
-        container: containerResp.ok ? 'ok' : `error ${containerResp.status}`,
+        container: containerResp.ok
+          ? (containerPayload ?? 'ok')
+          : `error ${containerResp.status}`,
       }),
       { headers: { 'Content-Type': 'application/json' } },
     );

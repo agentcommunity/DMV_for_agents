@@ -18,7 +18,13 @@ import {
   renderCard,
   CW,
   CH,
+  CARD_VERSION,
 } from './src/card-renderer.js';
+
+// Capture boot time once so /healthz can report uptime for cold-start
+// observability. Worker-side code correlates this with its own Date.now()
+// to detect container restarts in the middle of a busy window.
+const CONTAINER_BOOT_MS = Date.now();
 
 const app = new Hono();
 
@@ -30,7 +36,15 @@ const OG_H = 630;
 // edges end so there's no visible seam.
 const OG_BG = '#0a0d0a';
 
-app.get('/healthz', (c) => c.text('ok'));
+app.get('/healthz', (c) =>
+  c.json({
+    status: 'ok',
+    renderer_version: CARD_VERSION,
+    node: process.version,
+    uptime_ms: Date.now() - CONTAINER_BOOT_MS,
+    boot_ms: CONTAINER_BOOT_MS,
+  }),
+);
 
 app.get('/render', async (c) => {
   const id = c.req.query('id');
