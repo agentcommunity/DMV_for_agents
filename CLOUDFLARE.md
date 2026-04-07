@@ -194,15 +194,20 @@ open test-harness/output/index.html
   points at `https://dmv.agentcommunity.org`.
 
 - **Observability**: `observability.enabled = true` in `wrangler.jsonc`. Use
-  `pnpm cf:tail` to stream live logs. Every cache-tier response carries
-  `X-Cache: L1-HIT | L2-HIT | MISS | 304` and `X-Cache-Key` for
-  point-in-time debugging. Rate-limited responses emit `X-RateLimit-Limit`
-  + `X-RateLimit-Window`. Badge KV responses emit `X-Badge-Cache: KV-HIT |
-  MISS`. For structured aggregate telemetry (cache hit ratio, render
-  latency, KV hit ratio, rate-limit rejections), see the
-  `dmv_worker_events` Analytics Engine dataset — queryable from the CF
-  dashboard → Workers → dmv-agentcommunity → Analytics Engine. Schema is
-  documented at the `emitAnalytics()` helper in `worker/index.ts`.
+  `pnpm cf:tail` to stream live logs. Successful card responses carry
+  `X-Cache: L1-HIT | L2-HIT | MISS` and `X-Cache-Key` for point-in-time
+  debugging (304 revalidation responses reuse the originating tier's
+  `X-Cache` value, so a conditional GET that matches L1 returns
+  `HTTP/2 304` with `X-Cache: L1-HIT`). Rate-limited responses emit
+  `X-RateLimit-Limit` + `X-RateLimit-Window`. Badge KV responses emit
+  `X-Badge-Cache: KV-HIT | MISS`. For structured aggregate telemetry
+  (cache hit ratio, render latency, KV hit ratio, rate-limit rejections),
+  see the `dmv_worker_events` Analytics Engine dataset — queryable from
+  the CF dashboard → Workers → dmv-agentcommunity → Analytics Engine. The
+  analytics `tier` field uses the extended vocabulary (`L1-HIT`, `L2-HIT`,
+  `MISS`, `304`, `KV-HIT`, `SUPABASE`, `405`, `429`, `validation`,
+  `L1-EXCEPTION`, `container-render-failed`, `inflight-rejected`). Schema
+  is documented at the `emitAnalytics()` helper in `worker/index.ts`.
 
 - **Rate limiting**: `/api/card` and `/api/og` are guarded by the Workers
   Rate Limiting API binding `API_RATE_LIMITER` — 100 req/60s per
