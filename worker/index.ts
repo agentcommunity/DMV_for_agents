@@ -140,6 +140,19 @@ const DMV_ORIGIN = 'https://dmv.agentcommunity.org';
 const CRAWLER_UA =
   /Twitterbot|facebookexternalhit|Facebot|LinkedInBot|Slackbot|WhatsApp|Discordbot|TelegramBot|Applebot|Googlebot|bingbot|Pinterest|redditbot|Mastodon|Pleroma|Akkoma|Misskey|Bluesky/i;
 
+// Content-Security-Policy applied to permalink HTML responses served by
+// handlePermalink. Mirrors the /* rule in public/_headers — duplicated here
+// because `run_worker_first: ["/c/*"]` means the Worker constructs the
+// Response directly and Static Assets' _headers rules never get a chance
+// to run on these paths. Keep in sync with public/_headers manually.
+//
+// Includes the sha256 hash for the inline <script type="importmap"> block
+// in index.html. If that block changes, recompute the hash via:
+//   node -e 'const fs=require("fs"),crypto=require("crypto");const m=fs.readFileSync("index.html","utf8").match(/<script type="importmap">([\s\S]*?)<\/script>/);console.log("sha256-"+crypto.createHash("sha256").update(m[1]).digest("base64"));'
+// and update BOTH this constant AND public/_headers.
+const PERMALINK_CSP =
+  "default-src 'self'; script-src 'self' 'sha256-4FXY4zEWzG37E4zo2Jp75PEXIdWH8wCQO29RFVSutWk=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://tcymqfwwphacnosnnzxl.supabase.co https://cdn.jsdelivr.net; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+
 // In-flight request coalescing for the container render path.
 //
 // Module-level Map keyed by the same cacheKey() used for L1/R2. When a
@@ -793,6 +806,7 @@ async function handlePermalink(
         // Prevents the edge from serving a cached crawler variant to a human
         // (or vice versa) since the two branches return different bodies.
         Vary: 'User-Agent',
+        'Content-Security-Policy': PERMALINK_CSP,
       },
     });
   }
@@ -865,6 +879,7 @@ async function handlePermalink(
       'Cache-Control': 'public, max-age=300, s-maxage=3600',
       'X-Permalink-Mode': 'crawler',
       Vary: 'User-Agent',
+      'Content-Security-Policy': PERMALINK_CSP,
     },
   });
 }
