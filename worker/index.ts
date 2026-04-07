@@ -57,6 +57,44 @@ interface Env {
   // Set in wrangler.jsonc `vars`. On the test branch this is the workers.dev
   // subdomain; on cutover it becomes https://dmv.agentcommunity.org.
   PREWARM_ORIGIN: string;
+  // Analytics Engine dataset for structured cache/render/proxy metrics.
+  // Schema: see emitAnalytics() below. Bound in wrangler.jsonc as
+  // analytics_engine_datasets.
+  ANALYTICS: AnalyticsEngineDataset;
+}
+
+// Structured telemetry for cache tiers, badge proxy, and prewarm runs.
+// Emitting is fire-and-forget — writeDataPoint does not need await and
+// failures must never break the user-facing response. See wrangler.jsonc
+// `analytics_engine_datasets` for the dataset binding.
+//
+// Schema:
+//   indexes[0] = category (render | badge | prewarm | error)
+//   blobs[0]   = category
+//   blobs[1]   = tier/status (L1-HIT, L2-HIT, MISS, 304, KV-HIT, SUPABASE, ERROR)
+//   blobs[2]   = path (/api/card, /api/og, /badge/*)
+//   blobs[3]   = cache_key or upstream_path (for debugging outliers)
+//   doubles[0] = latency_ms
+//   doubles[1] = body_size_bytes (0 on 304 / HEAD)
+interface AnalyticsEvent {
+  category: 'render' | 'badge' | 'prewarm' | 'error';
+  tier: string;
+  path: string;
+  key: string;
+  latencyMs: number;
+  sizeBytes: number;
+}
+
+function emitAnalytics(env: Env, ev: AnalyticsEvent): void {
+  try {
+    env.ANALYTICS.writeDataPoint({
+      indexes: [ev.category],
+      blobs: [ev.category, ev.tier, ev.path, ev.key],
+      doubles: [ev.latencyMs, ev.sizeBytes],
+    });
+  } catch (err) {
+    console.error('[analytics] writeDataPoint failed', err);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,8 +302,10 @@ async function handleRender(
       },
     });
   }
-  const ifNoneMatch = request.headers.get('if-none-match');
   const url = new URL(request.url);
+  const startedAt = Date.now();
+  const path = url.pathname;
+  const ifNoneMatch = request.headers.get('if-none-match');
   let name = url.searchParams.get('name');
   const id = url.searchParams.get('id') ?? undefined;
   const type = url.searchParams.get('type') ?? undefined;
@@ -332,6 +372,14 @@ async function handleRender(
       // Conditional request: if the client's If-None-Match matches the cached
       // ETag, return 304 with no body (saves egress on repeat visits).
       if (l1Etag && ifNoneMatchMatches(ifNoneMatch, l1Etag)) {
+        emitAnalytics(env, {
+          category: 'render',
+          tier: '304',
+          path,
+          key,
+          latencyMs: Date.now() - startedAt,
+          sizeBytes: 0,
+        });
         return new Response(null, {
           status: 304,
           headers: {
@@ -352,6 +400,14 @@ async function handleRender(
       const headers = new Headers(l1Hit.headers);
       headers.set('X-Cache', 'L1-HIT');
       headers.set('X-Cache-Key', key);
+      emitAnalytics(env, {
+        category: 'render',
+        tier: 'L1-HIT',
+        path,
+        key,
+        latencyMs: Date.now() - startedAt,
+        sizeBytes: Number(l1Hit.headers.get('content-length') ?? 0),
+      });
       return stripBodyForHead(
         new Response(l1Hit.body, { status: l1Hit.status, headers }),
         method,
@@ -369,6 +425,14 @@ async function handleRender(
     // into L1 on the 304 path because we skipped arrayBuffer() and don't
     // have the bytes to store. The next full-body miss will promote.
     if (ifNoneMatchMatches(ifNoneMatch, synthEtag)) {
+      emitAnalytics(env, {
+        category: 'render',
+        tier: '304',
+        path,
+        key,
+        latencyMs: Date.now() - startedAt,
+        sizeBytes: 0,
+      });
       return new Response(null, {
         status: 304,
         headers: {
@@ -391,6 +455,14 @@ async function handleRender(
       'Content-Length': String(cached.size),
     } as const;
     ctx.waitUntil(putL1(l1Key, bodyBuffer, synthEtag, key));
+    emitAnalytics(env, {
+      category: 'render',
+      tier: 'L2-HIT',
+      path,
+      key,
+      latencyMs: Date.now() - startedAt,
+      sizeBytes: cached.size,
+    });
     return stripBodyForHead(
       new Response(bodyBuffer, { status: 200, headers: responseHeaders }),
       method,
@@ -406,6 +478,14 @@ async function handleRender(
     // Don't cache errors anywhere — let the next request try again.
     const body = await containerResponse.text();
     const upstreamType = containerResponse.headers.get('content-type') ?? 'text/plain';
+    emitAnalytics(env, {
+      category: 'error',
+      tier: `container-${containerResponse.status}`,
+      path,
+      key,
+      latencyMs: Date.now() - startedAt,
+      sizeBytes: 0,
+    });
     return new Response(body, {
       status: containerResponse.status,
       headers: { 'Content-Type': upstreamType, 'X-Source': 'container' },
@@ -437,6 +517,14 @@ async function handleRender(
   );
   ctx.waitUntil(putL1(l1Key, buffer, synthEtag, key));
 
+  emitAnalytics(env, {
+    category: 'render',
+    tier: 'MISS',
+    path,
+    key,
+    latencyMs: Date.now() - startedAt,
+    sizeBytes: buffer.byteLength,
+  });
   return stripBodyForHead(
     new Response(buffer, {
       status: 200,
@@ -832,6 +920,14 @@ export default {
             console.log(
               `[prewarm] ${path} -> ${response.status} x-cache=${response.headers.get('x-cache') ?? 'none'}`,
             );
+            emitAnalytics(env, {
+              category: 'prewarm',
+              tier: response.headers.get('x-cache') ?? 'UNKNOWN',
+              path,
+              key: response.headers.get('x-cache-key') ?? '',
+              latencyMs: 0, // prewarm latency isn't meaningful (background)
+              sizeBytes: 0,
+            });
             // Drain the body so any handleRender ctx.waitUntil work (R2 put,
             // L1 put) actually has something to flush. Without this the
             // Response body sits unread and the underlying buffer/stream
