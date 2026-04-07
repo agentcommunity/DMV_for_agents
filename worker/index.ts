@@ -831,7 +831,7 @@ const BADGE_RESPONSE_HEADERS_TO_STRIP = new Set([
   'upgrade',
 ]);
 
-async function handleBadge(request: Request, env: Env): Promise<Response> {
+async function handleBadge(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const startedAt = Date.now();
   const url = new URL(request.url);
   const tail = url.pathname.slice('/badge'.length); // '' or '/...'
@@ -915,20 +915,22 @@ async function handleBadge(request: Request, env: Env): Promise<Response> {
   // small (~1-5 KB SVGs) so buffering is cheap.
   const buffer = cacheable && upstream.ok ? await upstream.arrayBuffer() : null;
 
-  if (buffer && cacheable && upstream.ok) {
-    // Fire-and-forget KV put. Failures log but never break the response.
+  if (buffer) {
+    // Background KV write, tethered to ctx.waitUntil so the runtime keeps
+    // the work alive past response return. Matches the putL1() pattern
+    // used by handleRender's L1/L2 cache writes.
     const contentType = upstream.headers.get('content-type') ?? 'image/svg+xml';
     const status = upstream.status;
-    (async () => {
-      try {
-        await env.BADGE_CACHE_KV.put(kvKey, buffer, {
+    ctx.waitUntil(
+      env.BADGE_CACHE_KV
+        .put(kvKey, buffer, {
           expirationTtl: 600, // 10 minutes
           metadata: { contentType, status },
-        });
-      } catch (err) {
-        console.error('[badge] KV put failed', { kvKey, err });
-      }
-    })();
+        })
+        .catch((err) => {
+          console.error('[badge] KV put failed', { kvKey, err });
+        }),
+    );
   }
 
   emitAnalytics(env, {
@@ -982,7 +984,7 @@ export default {
 
     // /badge/* → Supabase Edge Function proxy
     if (url.pathname.startsWith('/badge/') || url.pathname === '/badge') {
-      return handleBadge(request, env);
+      return handleBadge(request, env, ctx);
     }
 
     // /c/:certId/:agentName → permalink with crawler OG injection or SPA shell
