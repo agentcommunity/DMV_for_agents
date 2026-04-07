@@ -300,9 +300,10 @@ CLI and MCP are not browser-based and don't send `Origin` headers, so CORS does 
 
 | Component | Hosted on | Notes |
 |-----------|-----------|-------|
-| Web UI (static) | Vercel | index.html + JS/CSS/fonts/models, no SSR |
-| API routes (`/api/card`, `/api/og`) | Vercel Serverless + Edge | Card = Node.js (Canvas2D), OG = Edge (Satori) |
-| Middleware | Vercel Edge | Permalink OG tags for crawlers only |
+| Web UI (static) | Cloudflare Workers Static Assets (`dist/`) | index.html + JS/CSS/fonts/models, no SSR |
+| API routes (`/api/card`, `/api/og`) | Cloudflare Worker → L1 (`caches.default`) → R2 → Cloudflare Container | Both served by the same Skia renderer (`@napi-rs/canvas`); container only invoked on first miss |
+| Permalink crawler OG | Cloudflare Worker HTMLRewriter | `worker/index.ts handlePermalink` — streams index.html and injects per-card `og:*` / `twitter:*` tags for crawler UAs |
+| `/badge/*` | Cloudflare Worker proxy → Supabase Edge Function | `handleBadge` forwards with header hygiene + path-traversal defense |
 | Edge functions (register, lookup, badge) | Supabase Edge Functions (Deno) | Holds service role key |
 | Database | Supabase PostgreSQL | RLS denies anon, service key bypasses |
 | Rate limiting | Upstash Redis | Shared instance with agentcommunity.org |
@@ -340,10 +341,10 @@ Everything below is shipped in this repo and ready to deploy:
 | CORS restricted to known origins | Done | Same file |
 | Input length validation (all fields) | Done | Same file |
 | Retry-After on 429 responses | Done | Same file |
-| Security headers (HSTS, X-Frame, nosniff) | Done | `vercel.json` |
-| HTML edge caching + stale-while-revalidate | Done | `vercel.json` |
-| API input validation (card/og routes) | Done | `api/card.js`, `api/og.js` |
-| API stale-while-revalidate + maxDuration | Done | Same files |
+| Security headers (HSTS, X-Frame, nosniff) | Done | `public/_headers` |
+| HTML edge caching + stale-while-revalidate | Done | `public/_headers` |
+| API input validation (card/og routes) | Done | `worker/index.ts`, `container/server.mjs` |
+| API L1+R2 cache + long-lived immutable PNGs | Done | `worker/index.ts` (cache hierarchy) |
 | Badge cache 1h/24h | Done | `supabase/functions/badge/index.ts` |
 | CLI fetch timeout (30s) + retry on 5xx | Done | `packages/dmv-agent/src/register.ts` |
 | Web fetch timeout (15s) | Done | `js/supabase.js` |
@@ -353,7 +354,7 @@ Everything below is shipped in this repo and ready to deploy:
 | Render loop pauses when tab hidden | Done | `js/TV.js` |
 | CRT scanline throttle in idle | Done | `js/CRTTerminal.js` |
 | Dead code removed (CardPoster.js) | Done | Deleted |
-| .vercelignore for dev artifacts | Done | `.vercelignore` |
+| Dead Vercel artifacts removed (`api/`, `vercel.json`, `middleware.js`) | Done | Deleted post-cutover |
 | Fog leak fixed | Done | `js/TV.js` |
 
 ## What Needs Migration (main site / database)
@@ -420,7 +421,7 @@ Update `handle-dmv-registration` edge function email to:
 1. Run SQL migrations on Supabase (`provisional_dmv` enum, `AGENT` enum, email index)
 2. `supabase functions deploy register-agent` (Redis rate limiting + provisional_dmv)
 3. `supabase functions deploy badge` (cache headers)
-4. Push to Vercel (frontend perf + security headers + API hardening)
+4. `pnpm cf:deploy` (frontend + worker + container: perf + security headers + API hardening)
 5. Ship main site auth hub upgrade (provisional_dmv → pending_profile on sign-in)
 6. Ship main site member count exclusion
 7. Enable `NEXT_PUBLIC_SHOW_AGENT_CARDS=true` on main site

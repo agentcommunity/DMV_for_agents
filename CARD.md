@@ -26,18 +26,18 @@ card-lab-v2.html (Standalone gallery/lab)
 ├── Gallery UI with controls for holo type, palette, etc.
 └── Reference implementation for holo effects
 
-api/card-renderer.js (Server — Node.js port)
+container/src/card-renderer.js (Server — Node.js port)
 ├── @napi-rs/canvas (Skia-based)
 ├── Identical CardDNA + renderCard() layout
-├── Imports generateQRMatrix from api/qr-encode.js
-├── Used by Vercel serverless for badge images
-└── Must stay aligned with card-draw.js
+├── Imports generateQRMatrix from container/src/qr-encode.js
+├── Runs inside the Cloudflare Container behind /api/card and /api/og
+└── Must stay aligned with js/card-draw.js
 
-api/og.js (OG Image — Vercel Edge)
-├── @vercel/og (Satori renderer, not Canvas)
-├── Simplified layout (no full card render)
-├── Same CardDNA hashing for palette/rarity/holo
-└── 1200x630 PNG for social sharing
+container/server.mjs (HTTP wrapper)
+├── Hono-based server on port 8080
+├── /render?format=card → 880x630 PNG direct from renderCard()
+├── /render?format=og   → same card composited on 1200x630 (social share)
+└── /healthz → warmup probe used by worker /healthz
 ```
 
 ## Quick Usage
@@ -218,8 +218,8 @@ CSS opacity transition from 0 to 1 over 1.2s on the DOM wrapper.
 |---------|----------|------|
 | Main site (`?demo`, CRT form) | HoloCard.js → card-draw.js → DOM + CSS overlays | CSS holo (shine/glare/foil/sparkle) |
 | Card lab (`card-lab-v2.html`) | Inline JS → card-draw.js → DOM + CSS overlays | CSS holo (own `.card` class) |
-| Server (badge API) | api/card-renderer.js → @napi-rs/canvas | None (static PNG) |
-| OG image (social share) | api/og.js → @vercel/og Satori | None (simplified layout) |
+| Server (`/api/card`) | container/src/card-renderer.js → @napi-rs/canvas | None (static 880×630 PNG) |
+| OG image (`/api/og`) | Same renderer, composited centered on 1200×630 by container/server.mjs | None (same card, bigger canvas) |
 
 ## QR Code
 
@@ -229,10 +229,10 @@ The QR code on each card is a real, scannable QR code encoding the card's permal
 https://dmv.agentcommunity.org/c/{CERT-ID}/{agent-name}
 ```
 
-Implementation: `js/qr-encode.js` (browser) / `api/qr-encode.js` (server copy). Byte mode, ECL L, versions 1-6 auto-selected by data length. Reed-Solomon error correction over GF(2^8), 8 data masks with penalty scoring.
+Implementation: `js/qr-encode.js` (browser) / `container/src/qr-encode.js` (server copy — byte-identical). Byte mode, ECL L, versions 1-6 auto-selected by data length. Reed-Solomon error correction over GF(2^8), 8 data masks with penalty scoring. `scripts/build-cf.mjs` hard-fails the build if the two files drift.
 
 - **Browser**: HoloCard.js injects the encoder into card-draw.js via `setQREncoder(generateQRMatrix)` at module load. card-draw.js calls `_qrEncoder(url)` in `drawQR()`.
-- **Server**: card-renderer.js imports `generateQRMatrix` directly.
+- **Server**: container/src/card-renderer.js imports `generateQRMatrix` directly from its sibling `qr-encode.js`.
 - **Barcodes**: Code 128B encoding cert ID text and domain name (not URLs). Valid and scannable.
 
 ## Card Download
@@ -249,17 +249,16 @@ These files must stay in sync:
 | File | Format | Must Match |
 |------|--------|------------|
 | `js/card-draw.js` | ES module (browser) | Source of truth |
-| `api/card-renderer.js` | CommonJS (Node.js) | Same CardDNA, same layout, same CARD_VERSION |
+| `container/src/card-renderer.js` | ES module (Node.js, Skia) | Same CardDNA, same layout, same CARD_VERSION |
 | `js/qr-encode.js` | ES module (browser) | QR encoder — source of truth |
-| `api/qr-encode.js` | ES module (Node.js) | Must be identical copy of `js/qr-encode.js` |
-| `api/og.js` | Edge function | Same CardDNA hashing (palette/rarity/holo) |
+| `container/src/qr-encode.js` | ES module (Node.js) | Byte-identical copy of `js/qr-encode.js` — build hard-fails on drift |
 
 When changing card rendering:
 1. Update `js/card-draw.js` first
 2. Bump `CARD_VERSION`
-3. Port changes to `api/card-renderer.js`
-4. If QR encoder changed, copy `js/qr-encode.js` → `api/qr-encode.js`
-5. Update `api/og.js` if DNA/rarity logic changed
+3. Port changes to `container/src/card-renderer.js` (same file structure, `@napi-rs/canvas` instead of the DOM canvas)
+4. If the QR encoder changed, copy `js/qr-encode.js` → `container/src/qr-encode.js` (`scripts/build-cf.mjs` will refuse to build otherwise)
+5. Eyeball `pnpm cf:test:render` output before shipping
 6. Update this document
 
 ## Permalink Flow

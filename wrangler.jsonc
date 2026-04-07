@@ -1,17 +1,17 @@
 /**
- * Wrangler config for the DMV cloudflare-migration branch.
+ * Wrangler config for dmv.agentcommunity.org on Cloudflare.
  *
  * Pipeline:
  *   Worker (worker/index.ts) ─┬─ Workers Static Assets (dist/)
  *                             ├─ Container (Node 20 + @napi-rs/canvas)
- *                             └─ R2 (read-through card cache)
+ *                             ├─ R2 (L2 read-through card cache)
+ *                             └─ caches.default (L1 edge cache, in front of R2)
  *
- * NOT yet wired to dmv.agentcommunity.org — DNS cutover is the last step.
+ * Local dev: `pnpm cf:dev`   (runs cf:build → wrangler dev)
+ * Deploy:    `pnpm cf:deploy` (runs cf:build → wrangler deploy)
  *
- * Local dev: `pnpm cf:dev`
- * Deploy:    `pnpm cf:deploy` (runs cf:vendor → cf:build → wrangler deploy)
- *
- * See CLOUDFLARE.md for full architecture and rationale.
+ * See CLOUDFLARE.md for full architecture, cache hierarchy, and
+ * build-time drift invariants enforced by scripts/build-cf.mjs.
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
@@ -112,9 +112,8 @@
 	// main purpose is "first Brave hit is already cache-warm" — any schedule
 	// shorter than a couple hours is overkill. CF rotates cron execution
 	// across PoPs, so over the course of a day the cron touches a reasonable
-	// spread of serving regions. After cutover, bump PREWARM_ORIGIN to
-	// https://dmv.agentcommunity.org. See worker/index.ts `scheduled` handler
-	// and the PREWARM_PATHS constant for the list of URLs warmed.
+	// spread of serving regions. See worker/index.ts `scheduled` handler and
+	// the PREWARM_PATHS constant for the list of URLs warmed.
 	"triggers": {
 		"crons": ["0 * * * *"]
 	},

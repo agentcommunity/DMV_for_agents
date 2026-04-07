@@ -2,19 +2,35 @@
 /**
  * Build script for the Cloudflare Workers Static Assets deploy.
  *
- * Two responsibilities:
+ * Four responsibilities (run in order):
  *
- *   1. Copy the DMV SPA's production-facing files into ./dist, which is what
+ *   1. Sync the PPSupplyMono font from fonts/ into container/fonts/ so the
+ *      Docker build context has it. This used to be a separate `cf:vendor`
+ *      script that also copied api/card-renderer.js + api/qr-encode.js into
+ *      container/src/ — those `api/` copies went away after the Vercel
+ *      cutover, so the container/src/ files are now canonical. The font is
+ *      the one remaining thing that lives outside container/ (because the
+ *      browser uses it too) and has to be mirrored in.
+ *
+ *   2. Drift-check the browser QR encoder against the container copy.
+ *      js/qr-encode.js is served to the browser via Workers Static Assets,
+ *      and container/src/qr-encode.js runs inside the Skia renderer. Cards
+ *      rendered browser-side and server-side must encode the same permalink
+ *      into an identical QR matrix, so the two files have to stay byte-
+ *      identical. The check aborts the build with a clear error if they
+ *      diverge.
+ *
+ *   3. Copy the DMV SPA's production-facing files into ./dist, which is what
  *      wrangler.jsonc points its `assets.directory` at. Anything not listed
  *      here will NOT be uploaded to Cloudflare — keep it explicit so dev
  *      tools, docs, and node_modules never leak into the deploy.
  *
- *   2. Compute a content hash of all container source files and write it
+ *   4. Compute a content hash of all container source files and write it
  *      to worker/container-instance.ts. The Worker uses this hash as the
  *      Durable Object ID when calling getContainer(), which means any
- *      change to the container code (Dockerfile, server.mjs, vendored
- *      renderer, font) automatically spawns a fresh container instance
- *      with the new image. No manual instance-ID bumps required.
+ *      change to the container code (Dockerfile, server.mjs, renderer,
+ *      font) automatically spawns a fresh container instance with the new
+ *      image. No manual instance-ID bumps required.
  *
  * Run before `wrangler deploy` (or via `pnpm cf:deploy` which chains them).
  */
@@ -139,10 +155,77 @@ export const CONTAINER_INSTANCE_ID = '${fullId}' as const;
   console.log(`[cf:build]   container hash: ${fullId}`);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Font sync: fonts/PPSupplyMono-Regular.otf → container/fonts/
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The container Docker build context is ./container, so the font has to sit
+// under container/fonts/ for `COPY fonts/PPSupplyMono-Regular.otf ./fonts/`
+// in container/Dockerfile to resolve. The browser serves the same font out
+// of the repo-root fonts/ directory via Workers Static Assets. Keeping these
+// in sync used to be a manual `cf:vendor` step; now it runs automatically as
+// part of the build so a font swap on the browser side can never ship a
+// stale copy into the container image.
+
+const FONT_SOURCE = 'fonts/PPSupplyMono-Regular.otf';
+const FONT_CONTAINER = 'container/fonts/PPSupplyMono-Regular.otf';
+
+async function syncFont() {
+  const src = join(ROOT, FONT_SOURCE);
+  const dst = join(ROOT, FONT_CONTAINER);
+  if (!(await exists(src))) {
+    throw new Error(`[cf:build] font source missing: ${FONT_SOURCE}`);
+  }
+  await mkdir(dirname(dst), { recursive: true });
+  await copyFile(src, dst);
+  console.log(`[cf:build]   font synced: ${FONT_SOURCE} → ${FONT_CONTAINER}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Drift check: js/qr-encode.js ↔ container/src/qr-encode.js
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The browser and the container both generate QR matrices for the card's
+// permalink URL. If the two files diverge — even by a whitespace character
+// — the browser-rendered preview and the server-rendered PNG can encode
+// subtly different matrices, and users will end up with cards whose QR code
+// resolves differently depending on which side drew them.
+//
+// Abort the build hard if drift is detected. The fix is always to make the
+// two files byte-identical (usually by copying one over the other and
+// committing the result). No auto-sync here because we don't know which
+// side has the intended change.
+
+const QR_BROWSER = 'js/qr-encode.js';
+const QR_CONTAINER = 'container/src/qr-encode.js';
+
+async function checkQrDrift() {
+  const [a, b] = await Promise.all([
+    readFile(join(ROOT, QR_BROWSER)),
+    readFile(join(ROOT, QR_CONTAINER)),
+  ]);
+  if (a.length !== b.length || !a.equals(b)) {
+    throw new Error(
+      `[cf:build] QR encoder drift detected:\n` +
+        `  ${QR_BROWSER} (${a.length} B) ≠ ${QR_CONTAINER} (${b.length} B)\n` +
+        `  Both files must be byte-identical. Fix by copying one onto the other\n` +
+        `  (pick whichever side holds the intended change) and committing.`,
+    );
+  }
+  console.log(`[cf:build]   qr-encode drift ok (${a.length} B identical)`);
+}
+
 async function build() {
   console.log(`[cf:build] dist = ${DIST}`);
 
-  // 1. Container instance ID (worker/container-instance.ts) — must run before
+  // 1. Sync the font into the container build context so the Docker image
+  //    picks up any change to fonts/PPSupplyMono-Regular.otf automatically.
+  await syncFont();
+
+  // 2. Hard-fail on QR encoder drift between browser and container.
+  await checkQrDrift();
+
+  // 3. Container instance ID (worker/container-instance.ts) — must run before
   //    wrangler/tsc so the Worker import resolves.
   await writeContainerInstanceModule();
 

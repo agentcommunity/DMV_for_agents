@@ -13,7 +13,7 @@ No build system for the SPA. Native ES modules via browser importmap. Serve from
 
 ## Deployment
 
-Cloudflare Workers Static Assets + a Cloudflare Container (Node 20 + `@napi-rs/canvas` Skia) for card rendering. Worker `dmv-agentcommunity` on Taqanu account, container instance type `lite`. Deploy: `npx wrangler deploy` from `main`. Local dev: `pnpm cf:dev`. Full details + container rename gotcha: `docs/admin/CLOUDFLARE-MIGRATION.md` in the `agentcommunity_page` repo.
+Cloudflare Workers Static Assets + a Cloudflare Container (Node 20 + `@napi-rs/canvas` Skia) for card rendering. Worker `dmv-agentcommunity` on Taqanu account, container instance type `lite`. Deploy: `pnpm cf:deploy` from `main` (which chains `cf:build` → `wrangler deploy`). Local dev: `pnpm cf:dev`. Architecture, cache hierarchy, and drift invariants: [CLOUDFLARE.md](CLOUDFLARE.md). Broader migration history + container rename gotcha: `docs/admin/CLOUDFLARE-MIGRATION.md` in the `agentcommunity_page` repo.
 
 ## Architecture
 
@@ -99,11 +99,11 @@ In permalink mode:
 `js/qr-encode.js` is a minimal, zero-dependency QR encoder (byte mode, ECL L, versions 1-6, Reed-Solomon over GF(2^8), 8 mask patterns with penalty scoring). It exports `generateQRMatrix(text)` → `{ matrix: boolean[][], size: number }`.
 
 - **Browser**: HoloCard.js imports `generateQRMatrix` and injects it into card-draw.js via `setQREncoder()` at module load time. card-draw.js has no direct import — the encoder is injected to avoid side effects.
-- **Server**: api/card-renderer.js imports `generateQRMatrix` directly from `api/qr-encode.js` (a copy of the same file).
+- **Server**: `container/src/card-renderer.js` imports `generateQRMatrix` directly from `container/src/qr-encode.js`, which is a byte-identical copy of `js/qr-encode.js`.
 - **QR content**: Encodes the full permalink URL `{baseUrl}/c/{certId}/{name}`. Label on card: "SCAN".
 - **Barcodes**: Remain Code 128B encoding cert ID text and domain name (not URLs — URLs are too long for readable barcode bars at current dimensions).
 
-When changing the QR encoder, update both `js/qr-encode.js` and `api/qr-encode.js`.
+When changing the QR encoder, update both `js/qr-encode.js` and `container/src/qr-encode.js` together. `scripts/build-cf.mjs` hard-fails the build if they drift, so `pnpm cf:dev`/`pnpm cf:deploy` will refuse to run until they match.
 
 ## Card Download
 
@@ -115,11 +115,12 @@ Both call `downloadCard()` in app.js which uses `canvas.toBlob()` → hidden anc
 
 ## OG Image Strategy
 
-Two different endpoints serve social previews:
-- **`/api/card`** — Full Canvas2D render (880x630, @napi-rs/canvas). Heavy cold start (~5-10s). Used for `og:image` (iMessage, Facebook, LinkedIn have longer timeouts).
-- **`/api/og`** — Lightweight Satori edge function (1200x630). Near-zero cold start. Used for `twitter:image` (Twitter's crawler times out at ~4s).
+Both social preview endpoints hit the **same** Cloudflare Container running `@napi-rs/canvas` (Skia). The Vercel-era dual-stack (Canvas for og:image, Satori for twitter:image) is gone — there's no cold-start race to design around anymore because the Worker serves 99%+ of requests from L1 `caches.default` or R2 without ever waking the container.
 
-`middleware.js` rewrites `/c/CERT-ID/name` requests and splits `og:image` vs `twitter:image` to the appropriate endpoint.
+- **`/api/card`** — 880×630 card PNG. Full renderer output, used for `/api/card?...` direct downloads and as the canonical card.
+- **`/api/og`** — Same renderer, same card, composited centered on a 1200×630 dark canvas by `container/server.mjs`. Used for both `og:image` AND `twitter:image`.
+
+`/c/CERT-ID/name` crawler injection lives in `worker/index.ts` `handlePermalink` — HTMLRewriter streams `index.html` and overrides `og:*` / `twitter:*` meta tags per permalink. Both meta groups point at `/api/og` now (no need for the old split).
 
 ## Key Patterns
 

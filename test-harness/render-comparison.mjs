@@ -1,15 +1,21 @@
 #!/usr/bin/env node
 /**
- * Visual fidelity bake-off harness.
+ * Visual fidelity harness.
  *
- * Renders the same set of test cards from THREE sources and saves them
- * side-by-side in an HTML page so you can eyeball any differences:
+ * Renders the same set of test cards from two Cloudflare sources and saves
+ * them side-by-side in an HTML page so you can eyeball any differences:
  *
- *   1. PRODUCTION  — current Vercel deployment at https://dmv.agentcommunity.org/api/card
- *                    (this is the "ground truth" we must match)
- *   2. CF WORKER   — local wrangler dev at http://localhost:8787/api/card
- *                    (Worker → Container → @napi-rs/canvas)
- *   3. (optional)  — set CF_DEPLOYED_URL env to also compare a deployed test worker
+ *   1. DEPLOYED  — production worker at https://dmv.agentcommunity.org/api/card
+ *   2. LOCAL     — local `wrangler dev` at http://localhost:8787/api/card
+ *                  (Worker → Container → @napi-rs/canvas)
+ *   3. (optional) — set CF_EXTRA_URL to add a third column, e.g. a staging
+ *                   workers.dev subdomain from a PR deploy
+ *
+ * Both primary sources run the SAME Skia renderer now that the Vercel-era
+ * stack is gone, so any visual drift is a red flag — it means either the
+ * deployed container is on a different content-hash than the local one, or
+ * a change to js/card-draw.js hasn't been mirrored into
+ * container/src/card-renderer.js yet.
  *
  * Output:
  *   test-harness/output/<source>/<case>.png
@@ -31,20 +37,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = join(__dirname, 'output');
 
 const SOURCES = {
-  production: {
-    label: 'Vercel (current production)',
+  deployed: {
+    label: 'Deployed (dmv.agentcommunity.org)',
     baseUrl: 'https://dmv.agentcommunity.org',
   },
-  cfLocal: {
-    label: 'CF Containers (local wrangler dev)',
+  local: {
+    label: 'Local (wrangler dev)',
     baseUrl: process.env.CF_LOCAL_URL ?? 'http://localhost:8787',
   },
 };
 
-if (process.env.CF_DEPLOYED_URL) {
-  SOURCES.cfDeployed = {
-    label: `CF Containers (deployed: ${process.env.CF_DEPLOYED_URL})`,
-    baseUrl: process.env.CF_DEPLOYED_URL,
+if (process.env.CF_EXTRA_URL) {
+  SOURCES.extra = {
+    label: `Extra (${process.env.CF_EXTRA_URL})`,
+    baseUrl: process.env.CF_EXTRA_URL,
   };
 }
 
@@ -166,7 +172,7 @@ async function writeIndexHtml(results) {
 </head>
 <body>
   <h1>DMV card render comparison</h1>
-  <p class="legend">Generated ${new Date().toISOString()}. ${results.length} test cases. Eyeball each row left-to-right — production (Vercel) is the ground truth.</p>
+  <p class="legend">Generated ${new Date().toISOString()}. ${results.length} test cases. Eyeball each row left-to-right — deployed and local should match pixel-for-pixel (same Skia renderer).</p>
   <table>
     <thead><tr><th>Case</th>${headerCells}</tr></thead>
     <tbody>${rows.join('\n')}</tbody>

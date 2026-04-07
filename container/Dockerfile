@@ -1,10 +1,19 @@
-# Card renderer container — runs the EXACT same @napi-rs/canvas (Skia) renderer
-# that DMV uses on Vercel today, just in a CF Containers Docker image.
+# Card renderer container — Node 20 + @napi-rs/canvas (Skia) running behind
+# the dmv-agentcommunity Worker's /api/card and /api/og routes.
 #
-# Build context: this directory (container/). Files vendored here from the
-# repo root via `cp` (api/card-renderer.js → container/src/card-renderer.js,
-# etc.) so the build context is self-contained. To re-sync after upstream
-# changes: rerun the cp commands or use the npm script.
+# Build context: this directory (container/). Everything the renderer needs
+# is committed here:
+#
+#   src/card-renderer.js   — canonical server renderer (drift-checked against
+#                            js/card-draw.js conceptually, and against
+#                            js/qr-encode.js for QR output on every build)
+#   src/qr-encode.js       — QR encoder, byte-identical to js/qr-encode.js;
+#                            scripts/build-cf.mjs hard-fails on drift
+#   fonts/PPSupply...otf   — font, auto-synced from repo-root fonts/ by
+#                            scripts/build-cf.mjs at the start of every
+#                            cf:dev / cf:deploy run
+#   server.mjs             — HTTP wrapper around renderCard() that exposes
+#                            /render?format=card|og and /healthz
 #
 # Wrangler builds this automatically when you `wrangler dev` / `wrangler deploy`.
 
@@ -17,15 +26,15 @@ COPY package.json pnpm-lock.yaml* ./
 RUN corepack enable && corepack prepare pnpm@10.12.1 --activate \
     && pnpm install --prod --no-frozen-lockfile
 
-# Copy renderer source (vendored from ../api/ at branch creation time)
+# Canonical renderer + QR encoder
 COPY src/card-renderer.js src/qr-encode.js ./src/
 
-# Copy the font (vendored from ../fonts/)
+# Font — kept in sync with repo-root fonts/ by scripts/build-cf.mjs
 COPY fonts/PPSupplyMono-Regular.otf ./fonts/
 
-# Copy the HTTP server wrapper (lives at container/server.mjs on disk so the
+# HTTP server wrapper — lives at container/server.mjs on disk so the
 # `./src/card-renderer.js` import resolves the same way locally as in the
-# container — see I-8 in docs/superpowers/plans/2026-04-06-dmv-cf-fix-sprint.md)
+# container.
 COPY server.mjs ./
 
 EXPOSE 8080

@@ -38,7 +38,7 @@ app.get('/render', async (c) => {
   const type = c.req.query('type');
   const format = (c.req.query('format') || 'card').toLowerCase();
 
-  // Validation matches api/card.js
+  // Input validation — matches the worker's pre-flight check.
   if (!name) {
     return c.json({ error: 'name is required' }, 400);
   }

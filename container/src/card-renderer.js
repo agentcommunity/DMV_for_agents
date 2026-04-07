@@ -1,9 +1,12 @@
-// Card renderer — Node.js port of card-draw.js Canvas2D rendering
-// Uses @napi-rs/canvas (Skia-based) for server-side canvas operations.
-// Deterministic: same name → same card, no database needed.
+// Card renderer — Node.js port of js/card-draw.js, running inside the
+// Cloudflare Container that backs /api/card and /api/og. Uses @napi-rs/canvas
+// (Skia-based) for deterministic server-side drawing: same name → same card,
+// no database needed.
 //
 // IMPORTANT: This must stay aligned with js/card-draw.js (browser version).
 // Both use CARD_VERSION=2, landscape 880x630, identical CardDNA hashing.
+// The QR encoder in this directory is drift-checked against js/qr-encode.js
+// on every build (see scripts/build-cf.mjs).
 
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +15,8 @@ import { generateQRMatrix } from './qr-encode.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Register PPSupplyMono font (relative to project root in Vercel)
+// Register PPSupplyMono — the font is vendored into container/fonts/ by
+// scripts/build-cf.mjs from the repo-root fonts/ directory.
 try {
   const fontPath = path.join(__dirname, '..', 'fonts', 'PPSupplyMono-Regular.otf');
   GlobalFonts.registerFromPath(fontPath, 'PPSupplyMono');

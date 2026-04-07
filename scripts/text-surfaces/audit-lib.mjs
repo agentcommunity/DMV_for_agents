@@ -88,14 +88,14 @@ export const SURFACES = [
     label: 'Server card text renderer',
     audience: 'mixed',
     flow: 'card',
-    files: ['api/card-renderer.js'],
+    files: ['container/src/card-renderer.js'],
   },
   {
     id: 'web_metadata',
-    label: 'Web metadata / OG middleware',
+    label: 'Web metadata / crawler OG injection',
     audience: 'crawler',
     flow: 'metadata',
-    files: ['index.html', 'middleware.js', 'api/og.js'],
+    files: ['index.html', 'worker/index.ts'],
   },
   {
     id: 'root_readme',

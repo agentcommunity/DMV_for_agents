@@ -9,10 +9,11 @@
 //     5. Return PNG to caller
 //
 // Endpoints:
-//   GET /api/card     → cached PNG (renders on first miss)
-//   GET /api/og       → TODO — port from api/og.js to workers-og or similar
+//   GET /api/card     → cached PNG, 880×630 card (renders on first miss)
+//   GET /api/og       → cached PNG, 1200×630 composite for OG/Twitter
+//   GET /badge/*      → proxied through to the Supabase badge edge function
+//   GET /c/:id/:name  → SPA shell (crawler UA gets OG meta-injected variant)
 //   GET /healthz      → 200 ok (verifies worker + container reachability)
-//   GET /              → minimal HTML index for sanity-checking deploys
 //
 // Static assets are served by Workers Static Assets (declared in wrangler.jsonc).
 // This Worker only handles dynamic routes.
@@ -227,7 +228,7 @@ async function handleRender(
     }
   }
 
-  // Validation matches api/card.js
+  // Input validation — 32-char name cap, 16-char id cap, type enum.
   if (name.length > 32) return badRequest('name must be 32 characters or fewer');
   if (id && id.length > 16) return badRequest('id must be 16 characters or fewer');
   if (type && !['individual', 'organization', 'agent'].includes(type.toLowerCase())) {

@@ -1,24 +1,22 @@
 # DMV on Cloudflare
 
-> Branch: `cloudflare-migration`. Active migration of `dmv.agentcommunity.org`
-> from Vercel to Cloudflare Workers + Containers + R2 + Workers Static Assets.
->
-> Original DMV files in `api/`, `js/`, `index.html`, `vercel.json`,
-> `middleware.js` are **untouched** on `main` — Vercel production keeps
-> working until DNS cutover.
->
-> Tracking and broader migration plan live in
-> [`agentcommunity_PAGE/docs/admin/CLOUDFLARE-MIGRATION-PLAN.md`](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/admin/CLOUDFLARE-MIGRATION-PLAN.md).
+> `dmv.agentcommunity.org` runs on Cloudflare Workers Static Assets + a
+> Cloudflare Container (Node 20 + `@napi-rs/canvas`) + R2 read-through cache.
+> Worker `dmv-agentcommunity` on the Taqanu account. The Vercel-era stack
+> (`api/`, `vercel.json`, `middleware.js`) has been removed; git history is
+> the only reference for what it looked like.
 
-## Why
+## Why Cloudflare
 
-Vercel bandwidth + serverless invocation costs become a problem at scale
-(specifically: a planned Brave new tab takeover that will hit DMV with
-millions of impressions). Cloudflare's $5/mo Workers plan includes
-unlimited bandwidth, free static asset serving, generous container
-allowances, and zero-egress R2 — making it ~10× cheaper at the projected
-load. Visual fidelity is preserved via Cloudflare Containers running the
-exact same `@napi-rs/canvas` (Skia) renderer DMV uses today.
+Vercel bandwidth + serverless invocation cost was a problem at the traffic
+profile DMV was being asked to absorb (a planned Brave new tab takeover
+pointing millions of impressions at card permalinks). Cloudflare's $5/mo
+Workers plan gives unlimited static-asset bandwidth, free egress from R2,
+and generous container allowances, which adds up to roughly 10× cheaper at
+the projected load. Visual fidelity is preserved because the container runs
+the exact same `@napi-rs/canvas` (Skia) renderer the Vercel serverless
+function used — the renderer source just moved from `api/card-renderer.js`
+into `container/src/card-renderer.js` where it's now canonical.
 
 ## Architecture
 
@@ -35,29 +33,42 @@ exact same `@napi-rs/canvas` (Skia) renderer DMV uses today.
 │        ▲                                │                    │
 │        │ index.html, js/, css/,         ▼                    │
 │        │ models/tv1.glb, audio/,    ┌────────┐               │
-│        │ images/, fonts/, _headers  │   R2   │ ── HIT ──┐    │
-│        │                            │ cache  │          │    │
-│        │                            └───┬────┘          │    │
-│        │                                │ MISS          │    │
-│        │                                ▼               │    │
-│        │                         ┌──────────────┐       │    │
-│        │                         │  Container   │       │    │
-│        │                         │  (Node 20 +  │       │    │
-│        │                         │   Skia card  │       │    │
-│        │                         │   renderer)  │       │    │
-│        │                         └──────┬───────┘       │    │
-│        │                                │ PNG           │    │
-│        │                                ├───────────────┘    │
-│        │                                │                    │
+│        │ images/, fonts/, _headers  │ caches │ ── L1 HIT ─┐  │
+│        │                            │.default│            │  │
+│        │                            └───┬────┘            │  │
+│        │                                │ MISS            │  │
+│        │                                ▼                 │  │
+│        │                            ┌────────┐            │  │
+│        │                            │   R2   │ ── L2 ──┐  │  │
+│        │                            │ cache  │         │  │  │
+│        │                            └───┬────┘         │  │  │
+│        │                                │ MISS         │  │  │
+│        │                                ▼              │  │  │
+│        │                         ┌──────────────┐      │  │  │
+│        │                         │  Container   │      │  │  │
+│        │                         │  (Node 20 +  │      │  │  │
+│        │                         │   Skia card  │      │  │  │
+│        │                         │   renderer)  │      │  │  │
+│        │                         └──────┬───────┘      │  │  │
+│        │                                │ PNG          │  │  │
+│        │                                ├──────────────┘  │  │
+│        │                                ├─────────────────┘  │
 │        ▼                                ▼                    │
 │   Workers Static Assets (dist/)    Response to caller       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 The Worker is the only entry point. `assets.run_worker_first` in
-`wrangler.jsonc` ensures dynamic routes (`/api/*`, `/c/*`, `/badge/*`,
-`/healthz`) hit the Worker first; everything else is served directly from
+`wrangler.jsonc` makes dynamic routes (`/api/*`, `/c/*`, `/badge/*`,
+`/healthz`) hit the Worker first; every other path falls through to
 edge-cached static assets at zero invocation cost.
+
+The cache hierarchy is **L1 `caches.default` → L2 R2 → L3 Container**. L1 is
+in-region edge cache (fastest, free); R2 is the cross-region source of
+truth so a cold PoP can warm L1 without re-rendering; the container is only
+invoked when both miss. Every cached response carries an `X-Cache` header
+(`L1-HIT` / `L2-HIT` / `MISS`) so `wrangler tail` shows exactly what's
+being served.
 
 ## Routes
 
@@ -65,50 +76,63 @@ edge-cached static assets at zero invocation cost.
 |---|---|---|
 | `/` and any non-matching path | Workers Static Assets | Serves `dist/index.html` (the SPA shell with the TV) |
 | `/models/tv1.glb`, `/audio/*`, `/css/*`, `/js/*`, etc. | Workers Static Assets | Direct edge cache, free egress |
-| `/api/card?name=&id=&type=` | Worker → R2 → Container | 880×630 PNG (raw card). R2 read-through cache; container only invoked on first miss per unique card |
-| `/api/og?name=&id=&type=` | Worker → R2 → Container | 1200×630 PNG (the same Skia card composited centered on a 1200×630 canvas with matching dark background — perfect for OG/Twitter). R2-cached separately |
-| `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS`, inject card-specific `<title>`, `og:*`, `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
-| `/badge/*` | Worker (proxy) | Forwards to the existing Supabase Edge Function (unchanged) |
-| `/healthz` | Worker | `{worker, container}` health probe — pings the container too |
+| `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
+| `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
+| `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
+| `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
+| `/healthz` | Worker | `{ worker, container }` health probe — pings the container too |
 
 ## Card rendering
 
-The card renderer (`api/card-renderer.js`) is the **exact same code** that
-runs on Vercel today, vendored into `container/src/` at branch creation.
-`@napi-rs/canvas` (Skia native binary) runs unchanged inside a Node 20
-Alpine container managed by Cloudflare. There is no port to a different
-canvas implementation, no WASM rebuild, no Satori workaround.
+`container/src/card-renderer.js` is the canonical Node port of the browser
+renderer (`js/card-draw.js`). Same `CardDNA` hashing, same `CARD_VERSION`,
+same 880×630 landscape layout. `@napi-rs/canvas` runs unchanged inside a
+Node 20 Alpine container managed by Cloudflare. No WASM rebuild, no Satori
+workaround, no separate OG path.
 
-A bake-off across 11 representative cards (rarity/palette/holo/account-type
-permutations) confirmed **byte-identical PNG output** between this stack
-and current Vercel production — same Skia binary + same code + same fonts
-→ same MD5. See `test-harness/render-comparison.mjs`.
+For OG/Twitter, `container/src/server.mjs` composites the 880×630 card
+centered on a 1200×630 canvas with the matching dark background. The card's
+internal layout is unchanged — social crawlers get a beautiful 1.91:1 image
+from the same Skia renderer.
 
-For OG/Twitter, the same renderer produces an 880×630 card which is then
-composited centered onto a 1200×630 canvas (matching dark background)
-inside the container — see `container/src/server.mjs`. This gives social
-crawlers a beautiful 1.91:1 image with no separate Satori-based fallback.
+### Drift invariants enforced at build time
+
+`scripts/build-cf.mjs` runs at the start of every `cf:dev` and `cf:deploy`
+and hard-fails on:
+
+1. **QR encoder drift** — `js/qr-encode.js` (served to the browser via
+   Workers Static Assets) must be byte-identical to
+   `container/src/qr-encode.js` (loaded by the container renderer).
+   Divergence would mean the browser preview and the server PNG encode
+   subtly different QR matrices for the same permalink.
+2. **Font drift** — `fonts/PPSupplyMono-Regular.otf` (browser) is copied
+   into `container/fonts/PPSupplyMono-Regular.otf` so the Docker build
+   context picks up any font swap automatically.
+
+`js/card-draw.js` ↔ `container/src/card-renderer.js` alignment (CardDNA,
+layout, rarity logic) is **not** checked mechanically — they have different
+runtime targets (browser DOM vs Node + Skia) so a byte diff doesn't make
+sense. When the browser renderer changes, port the change by hand and
+eyeball the bake-off output (`pnpm cf:test:render` — see below).
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `worker/index.ts` | Worker entry — routes, R2 cache, HTMLRewriter middleware, Supabase badge proxy |
-| `wrangler.jsonc` | Container binding, R2 binding, Workers Static Assets binding, DO migration |
+| `worker/index.ts` | Worker entry — routes, L1/R2/container cache hierarchy, HTMLRewriter permalink middleware, `/badge/*` Supabase proxy, cron prewarm |
+| `worker/container-instance.ts` | **Generated** by `scripts/build-cf.mjs` — content-hash of container sources that doubles as the Durable Object instance ID |
+| `wrangler.jsonc` | Static Assets + Container binding, R2 binding, DO migration, cron trigger, `PREWARM_ORIGIN` |
 | `tsconfig.json` | TypeScript config for the worker |
 | `container/Dockerfile` | Node 20 Alpine + `@napi-rs/canvas` |
-| `container/package.json` | Container deps |
-| `container/src/server.mjs` | Hono HTTP wrapper around `renderCard()`, format=card and format=og support |
-| `container/src/card-renderer.js` | Vendored from `api/card-renderer.js` (refresh via `pnpm cf:vendor`) |
-| `container/src/qr-encode.js` | Vendored from `api/qr-encode.js` |
-| `container/fonts/PPSupplyMono-Regular.otf` | Vendored from `fonts/` |
-| `scripts/build-cf.mjs` | Build script — copies production-facing static files into `dist/` for Workers Static Assets |
-| `public/_headers` | Cache + security headers ported from `vercel.json` |
+| `container/package.json` | Container runtime deps (Hono + `@napi-rs/canvas`) |
+| `container/server.mjs` | HTTP wrapper around `renderCard()` — `/render?format=card|og` + `/healthz` |
+| `container/src/card-renderer.js` | Canonical server renderer (Skia + `CardDNA`) |
+| `container/src/qr-encode.js` | QR encoder, byte-identical to `js/qr-encode.js` |
+| `container/fonts/PPSupplyMono-Regular.otf` | Auto-synced from `fonts/` by `scripts/build-cf.mjs` |
+| `scripts/build-cf.mjs` | Font sync → QR drift check → `dist/` copy → container-hash write |
+| `public/_headers` | Cache + security headers for Workers Static Assets |
 | `test-harness/test-cases.json` | 11 representative cards covering rarity/palette/account-type permutations |
-| `test-harness/render-comparison.mjs` | Compares the deployed CF Worker output against current Vercel production |
-
-The Vercel-era files (`api/`, `vercel.json`, `middleware.js`) remain in
-place so `main` keeps deploying to Vercel until DNS cutover.
+| `test-harness/render-comparison.mjs` | Compares local `wrangler dev` output against the deployed worker for eyeball visual regression |
 
 ## Development
 
@@ -118,49 +142,87 @@ place so `main` keeps deploying to Vercel until DNS cutover.
 # Install
 pnpm install
 
-# One-time R2 bucket setup
+# One-time R2 bucket setup (already done in the Taqanu account — only needed
+# if you're bootstrapping a fresh account or a new environment)
 pnpm wrangler login
 pnpm wrangler r2 bucket create dmv-card-cache-test
 pnpm wrangler r2 bucket create dmv-card-cache-test-preview
 
-# Local dev — builds container, runs worker on http://localhost:8787
+# Local dev — runs build-cf.mjs then wrangler dev on http://localhost:8787
 pnpm cf:dev
 
-# Deploy to workers.dev test URL
+# Deploy to production (dmv-agentcommunity worker, dmv.agentcommunity.org)
 pnpm cf:deploy
 
-# Visual fidelity check vs Vercel production (run after cf:dev or cf:deploy)
-CF_LOCAL_URL=https://dmv-card-test.<account>.workers.dev pnpm cf:test:render
+# Visual fidelity spot-check: local vs deployed
+CF_LOCAL_URL=http://localhost:8787 pnpm cf:test:render
 open test-harness/output/index.html
 ```
 
-The `cf:deploy` script chains:
+`pnpm cf:deploy` chains:
 
-1. `cf:vendor` — copies `api/card-renderer.js`, `api/qr-encode.js`, `fonts/PPSupplyMono-Regular.otf` into `container/`
-2. `cf:build` — copies production static files into `dist/`
-3. `wrangler deploy` — builds container image, pushes to CF registry, deploys worker
+1. `pnpm cf:build` — syncs the font into `container/fonts/`, hard-fails on
+   QR encoder drift, writes `worker/container-instance.ts` with the fresh
+   container content-hash, and copies the production-facing static files
+   into `dist/`.
+2. `wrangler deploy` — builds the container image, pushes it to the CF
+   registry, and rolls out the Worker.
 
-## What this is NOT (yet)
+## Operational notes
 
-- Not connected to `dmv.agentcommunity.org` DNS — that's the final cutover step (coordinated with main site Phase 3)
-- Container config: `max_instances: 1`, `instance_type` defaults to `lite` (1/4 vCPU, 256 MiB — free on the $5 Workers plan), `sleepAfter: 10m`, singleton routing via `getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID)`. This is right-sized for DMV's expected load (a few thousand requests over the Brave window) — the main site (`agentcommunity_page`) is the 25M-impression hot path, not DMV. An earlier commit bumped DMV to a 5-slot `basic` pool in anticipation of the takeover; reverted once the traffic picture became clearer. Note on naming: the actual default instance type is `lite`, not `dev` as a review run once claimed — verified from the CF Containers docs and the wrangler deploy diff. Valid types are `lite`, `basic`, `standard-1` through `standard-4`.
-- Email and Supabase Edge Functions (`register-agent`, `lookup-agent`, `badge`) are **not migrated** — they stay on Supabase, which is the right place for them
-- Browser-side `js/supabase.js` and the `dmv-agent` MCP package still POST directly to the Supabase function URL — the Worker only proxies `/badge/*` so far. Hardening plan to fix this lives in [DMV_HARDENING.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/DMV_HARDENING.md) (Phase A: Worker proxy + edge rate limits, Phase B: Turnstile on browser path + MCP migration, Phase C: close the bypass via `X-Forwarded-By` enforcement)
-- Custom OTP email flow for DMV (different branding from main site) is a separate piece of future work — see [RESEND_DMV.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/RESEND_DMV.md)
-- **No automated worker tests by design.** The test plan is `test-harness/render-comparison.mjs` (the bake-off — 11 cards byte-compared against current Vercel production) plus manual smoke testing of `/healthz`, `/api/card`, `/api/og`, `/c/:id/:name` (crawler + human UA), and `/badge/*`. Worker code is small enough that adding miniflare/vitest scaffolding would cost more than it returns. Re-evaluate when the worker grows or after the Brave takeover lands real traffic.
-- Cache API request coalescing in front of R2 is **not yet implemented**. With `max_instances: 1` and the current test traffic this isn't a problem. **It is a Brave-takeover blocker** — a thundering-herd of unique cards on launch day would each independently miss R2 and call the container, eating tail latency. Tracked as I-6 in the post-review fix sprint, deferred to a separate Brave-takeover-prep sprint.
+- **Container sizing**: `max_instances: 1`, `instance_type` defaults to
+  `lite` (1/4 vCPU, 256 MiB — free on the $5 Workers plan), `sleepAfter:
+  10m`, singleton routing via
+  `getContainer(env.CARD_RENDERER, CONTAINER_INSTANCE_ID)`. Right-sized for
+  DMV's actual load — the main `agentcommunity_page` worker is the
+  25M-impression hot path, not DMV. If DMV ever needs a pool, see git
+  history around commit `fafef20` for the version-namespaced pool
+  implementation.
 
-## Related future work
+- **Cache invalidation**: `CONTAINER_INSTANCE_ID` is the sha256 of every
+  container source file. Any change to the Dockerfile, `server.mjs`,
+  `src/*`, or the font changes the hash, which forces the Durable Object to
+  spawn a fresh container instance on the next request AND namespaces the
+  R2 + L1 keys under the new version. Old cache entries become orphaned
+  (R2 is cheap, they sit until purge).
 
-The full backlog of post-migration items lives in the main `agentcommunity_PAGE` repo:
+- **Cron prewarm**: hourly cron hits the hot OG + card URLs from inside the
+  Worker so the first Brave hit in any cold PoP is an L1-HIT. Paths live in
+  `PREWARM_PATHS` in `worker/index.ts`. CF rotates cron execution across
+  PoPs so over the course of a day the prewarm reaches a reasonable spread
+  of serving regions. `PREWARM_ORIGIN` lives in `wrangler.jsonc vars` and
+  points at `https://dmv.agentcommunity.org`.
 
-- **[DMV_HARDENING.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/DMV_HARDENING.md)** — layered API hardening plan (Worker proxy + Workers Rate Limiting binding + Turnstile + closing the Supabase bypass)
-- **[RESEND_DMV.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/RESEND_DMV.md)** — DMV-branded OTP email flow via `admin.generateLink()` + Resend direct send
-- **[CLOUDFLARE-MIGRATION-PLAN.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/admin/CLOUDFLARE-MIGRATION-PLAN.md)** — broader migration plan (DMV is Phase 6a)
-- **[CLOUDFLARE-MIGRATION-HANDOFF.md](https://github.com/agentcommunity/agentcommunity_PAGE/blob/main/docs/admin/CLOUDFLARE-MIGRATION-HANDOFF.md)** — current migration state and decisions
+- **Observability**: `observability.enabled = true` in `wrangler.jsonc`.
+  Use `pnpm cf:tail` to stream live logs. Every card response carries
+  `X-Cache: L1-HIT | L2-HIT | MISS` and `X-Cache-Key`, which makes cache
+  health visible at a glance.
 
-## Status
+- **No automated worker tests by design**. The worker code is small enough
+  that adding miniflare/vitest scaffolding would cost more than it returns.
+  Test plan is `test-harness/render-comparison.mjs` (eyeball bake-off) plus
+  manual smoke of `/healthz`, `/api/card`, `/api/og`, `/c/:id/:name`
+  (crawler UA + human UA), and `/badge/*`. Revisit if the worker grows.
 
-Bake-off complete (visual fidelity verified, 11/11 cards byte-identical to
-Vercel). Phase 6a mechanically complete on this branch. Awaiting browser
-acceptance test + DNS cutover.
+## Known gaps (separate sprints)
+
+- **Cache API request coalescing** is not yet implemented. Under a
+  thundering herd of unique cards (brand-new viral card hit at launch),
+  concurrent first-misses can each independently call the container and
+  eat tail latency. Flagged as Brave-takeover prep in the post-review fix
+  sprint.
+
+- **API hardening** — `js/supabase.js` (browser) and `packages/dmv-agent/`
+  (CLI + MCP) still POST directly to the Supabase `register-agent` edge
+  function. Only `/badge/*` is worker-proxied so far. Layered hardening
+  plan (Worker proxy + Workers Rate Limiting + Turnstile + closing the
+  Supabase bypass) lives in `DMV_HARDENING.md` in the `agentcommunity_page`
+  repo.
+
+- **DMV-branded OTP email flow** — custom branding via
+  `admin.generateLink()` + Resend direct send is future work. See
+  `RESEND_DMV.md` in the `agentcommunity_page` repo.
+
+- **R2 bucket name** — still `dmv-card-cache-test` for historical reasons.
+  Functional; cosmetic rename deferred (requires bucket create + cutover +
+  purge).
