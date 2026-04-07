@@ -9,7 +9,11 @@ uv run python -m http.server 8080
 # open http://localhost:8080
 ```
 
-No build system. Native ES modules via browser importmap. Serve from project root.
+No build system for the SPA. Native ES modules via browser importmap. Serve from project root.
+
+## Deployment
+
+Cloudflare Workers Static Assets + a Cloudflare Container (Node 20 + `@napi-rs/canvas` Skia) for card rendering. Worker `dmv-agentcommunity` on Taqanu account, container instance type `lite`. Deploy: `npx wrangler deploy` from `main`. Local dev: `pnpm cf:dev`. Full details + container rename gotcha: `docs/admin/CLOUDFLARE-MIGRATION.md` in the `agentcommunity_page` repo.
 
 ## Architecture
 

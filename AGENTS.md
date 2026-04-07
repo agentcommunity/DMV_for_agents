@@ -2,6 +2,8 @@
 
 Terse docs for agents. File-by-file, function-by-function.
 
+**Deployment:** Cloudflare Workers Static Assets + Cloudflare Container (Skia card renderer). Worker `dmv-agentcommunity` on Taqanu account, instance type `lite`. Deploy: `npx wrangler deploy` from `main`. Full context: `docs/admin/CLOUDFLARE-MIGRATION.md` in `agentcommunity_page` repo.
+
 ---
 
 ## File Map
