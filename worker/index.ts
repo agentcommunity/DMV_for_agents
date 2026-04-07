@@ -292,8 +292,19 @@ async function handleRender(
   ctx: ExecutionContext,
   format: RenderFormat,
 ): Promise<Response> {
+  const url = new URL(request.url);
+  const startedAt = Date.now();
+  const path = url.pathname;
   const method = request.method;
   if (method !== 'GET' && method !== 'HEAD') {
+    emitAnalytics(env, {
+      category: 'error',
+      tier: '405',
+      path,
+      key: '',
+      latencyMs: Date.now() - startedAt,
+      sizeBytes: 0,
+    });
     return new Response('Method Not Allowed', {
       status: 405,
       headers: {
@@ -302,10 +313,24 @@ async function handleRender(
       },
     });
   }
-  const url = new URL(request.url);
-  const startedAt = Date.now();
-  const path = url.pathname;
   const ifNoneMatch = request.headers.get('if-none-match');
+  // Emit an analytics event for validation-error returns (4xx). Used by
+  // the bad() helper below and directly for 405. tier is passed in so the
+  // dataset can distinguish 'validation', '405', '429', etc.
+  const emitError = (tier: string): void => {
+    emitAnalytics(env, {
+      category: 'error',
+      tier,
+      path,
+      key: '',
+      latencyMs: Date.now() - startedAt,
+      sizeBytes: 0,
+    });
+  };
+  const bad = (msg: string): Response => {
+    emitError('validation');
+    return badRequest(msg);
+  };
   let name = url.searchParams.get('name');
   const id = url.searchParams.get('id') ?? undefined;
   const type = url.searchParams.get('type') ?? undefined;
@@ -317,15 +342,15 @@ async function handleRender(
     if (format === 'og') {
       name = DEFAULT_OG_NAME;
     } else {
-      return badRequest('name is required');
+      return bad('name is required');
     }
   }
 
   // Input validation — 32-char name cap, 16-char id cap, type enum.
-  if (name.length > 63) return badRequest('name must be 63 characters or fewer');
-  if (id && id.length > 16) return badRequest('id must be 16 characters or fewer');
+  if (name.length > 63) return bad('name must be 63 characters or fewer');
+  if (id && id.length > 16) return bad('id must be 16 characters or fewer');
   if (type && !['individual', 'organization', 'agent'].includes(type.toLowerCase())) {
-    return badRequest('type must be individual, organization, or agent');
+    return bad('type must be individual, organization, or agent');
   }
 
   const params: RenderParams = { id, name, type, format };
@@ -415,6 +440,14 @@ async function handleRender(
     }
   } catch (err) {
     console.error('[L1] caches.default.match failed', { key, err });
+    emitAnalytics(env, {
+      category: 'error',
+      tier: 'L1-EXCEPTION',
+      path,
+      key,
+      latencyMs: Date.now() - startedAt,
+      sizeBytes: 0,
+    });
   }
 
   // 2. L2 lookup — R2 cross-region cache.
