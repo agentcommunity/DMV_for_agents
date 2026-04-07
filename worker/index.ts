@@ -70,6 +70,10 @@ interface Env {
   // Workers Rate Limiting API binding. Configured in wrangler.jsonc under
   // the top-level `ratelimits` array. 100 req/60s per IP+path across /api/*.
   API_RATE_LIMITER: RateLimit;
+  // KV cache for /badge/* responses. 10 min TTL. Keyed by
+  // `badge:${pathname}${search}`. Values are raw bytes with content-type
+  // stored in the KV metadata.
+  BADGE_CACHE_KV: KVNamespace;
 }
 
 // Structured telemetry for cache tiers, badge proxy, and prewarm runs.
@@ -827,23 +831,20 @@ const BADGE_RESPONSE_HEADERS_TO_STRIP = new Set([
   'upgrade',
 ]);
 
-async function handleBadge(request: Request): Promise<Response> {
+async function handleBadge(request: Request, env: Env): Promise<Response> {
+  const startedAt = Date.now();
   const url = new URL(request.url);
-  // /badge/foo/bar → /badge/foo/bar (Supabase function path matches).
-  // Strip the prefix so we can validate the resolved path below.
   const tail = url.pathname.slice('/badge'.length); // '' or '/...'
 
-  // I-3: path traversal defense. Defense-in-depth — reject obvious badness
-  // first, then validate by URL parsing on the upstream side.
+  // I-3: path traversal defense.
   if (tail.includes('..') || tail.includes('//')) {
     return new Response('Not Found', {
       status: 404,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
   }
+
   const targetUrl = new URL(`${SUPABASE_FUNCTIONS_ORIGIN}/badge${tail}${url.search}`);
-  // After URL normalisation, make sure we're still inside /functions/v1/badge.
-  // If a URL trick squeaked past the textual check, this catches it.
   if (!targetUrl.pathname.startsWith('/functions/v1/badge')) {
     return new Response('Not Found', {
       status: 404,
@@ -851,14 +852,46 @@ async function handleBadge(request: Request): Promise<Response> {
     });
   }
 
-  // Build a clean header set instead of forwarding the request verbatim. (I-2)
+  // KV cache key: pathname + search. GET only — non-GET (HEAD, etc.) bypass
+  // so we don't serve a cached GET body to a HEAD request or similar.
+  const kvKey = `badge:${url.pathname}${url.search}`;
+  const cacheable = request.method === 'GET';
+
+  if (cacheable) {
+    try {
+      const hit = await env.BADGE_CACHE_KV.getWithMetadata<{
+        contentType: string;
+        status: number;
+      }>(kvKey, 'arrayBuffer');
+      if (hit.value && hit.metadata) {
+        emitAnalytics(env, {
+          category: 'badge',
+          tier: 'KV-HIT',
+          path: url.pathname,
+          key: tail || '/',
+          latencyMs: Date.now() - startedAt,
+          sizeBytes: hit.value.byteLength,
+        });
+        return new Response(hit.value, {
+          status: hit.metadata.status,
+          headers: {
+            'Content-Type': hit.metadata.contentType,
+            'X-Badge-Cache': 'KV-HIT',
+            'Cache-Control': 'public, max-age=300, s-maxage=600',
+          },
+        });
+      }
+    } catch (err) {
+      console.error('[badge] KV get failed', { kvKey, err });
+    }
+  }
+
+  // MISS — forward to Supabase as before.
   const upstreamHeaders = new Headers();
   for (const name of BADGE_FORWARD_REQUEST_HEADERS) {
     const value = request.headers.get(name);
     if (value !== null) upstreamHeaders.set(name, value);
   }
-  // Standard reverse-proxy hints so the Supabase function knows the original
-  // client. cf-connecting-ip is the CF-attested client IP.
   const clientIp = request.headers.get('cf-connecting-ip');
   if (clientIp) upstreamHeaders.set('x-forwarded-for', clientIp);
   upstreamHeaders.set('x-forwarded-host', url.host);
@@ -870,15 +903,44 @@ async function handleBadge(request: Request): Promise<Response> {
     body: request.body,
   });
 
-  // Strip hop-by-hop + set-cookie headers from the response. (I-2)
   const responseHeaders = new Headers();
   upstream.headers.forEach((value, key) => {
     if (!BADGE_RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
       responseHeaders.set(key, value);
     }
   });
+  responseHeaders.set('X-Badge-Cache', 'MISS');
 
-  return new Response(upstream.body, {
+  // Buffer the body so we can both return it AND store it in KV. Badges are
+  // small (~1-5 KB SVGs) so buffering is cheap.
+  const buffer = cacheable && upstream.ok ? await upstream.arrayBuffer() : null;
+
+  if (buffer && cacheable && upstream.ok) {
+    // Fire-and-forget KV put. Failures log but never break the response.
+    const contentType = upstream.headers.get('content-type') ?? 'image/svg+xml';
+    const status = upstream.status;
+    (async () => {
+      try {
+        await env.BADGE_CACHE_KV.put(kvKey, buffer, {
+          expirationTtl: 600, // 10 minutes
+          metadata: { contentType, status },
+        });
+      } catch (err) {
+        console.error('[badge] KV put failed', { kvKey, err });
+      }
+    })();
+  }
+
+  emitAnalytics(env, {
+    category: 'badge',
+    tier: upstream.ok ? 'SUPABASE' : `SUPABASE-${upstream.status}`,
+    path: url.pathname,
+    key: tail || '/',
+    latencyMs: Date.now() - startedAt,
+    sizeBytes: buffer ? buffer.byteLength : 0,
+  });
+
+  return new Response(buffer ?? upstream.body, {
     status: upstream.status,
     headers: responseHeaders,
   });
@@ -920,7 +982,7 @@ export default {
 
     // /badge/* → Supabase Edge Function proxy
     if (url.pathname.startsWith('/badge/') || url.pathname === '/badge') {
-      return handleBadge(request);
+      return handleBadge(request, env);
     }
 
     // /c/:certId/:agentName → permalink with crawler OG injection or SPA shell
