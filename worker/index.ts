@@ -509,7 +509,10 @@ async function handlePermalink(
   const rewriter = new HTMLRewriter()
     .on('title', {
       element(el) {
-        el.setInnerContent(escapeHtml(title));
+        // setInnerContent defaults to { html: false }, which escapes the
+        // content as text on output. Passing a raw string here is correct;
+        // wrapping it in escapeHtml() would double-escape `&`, `<`, `>`, `"`.
+        el.setInnerContent(title);
       },
     })
     .on('meta[property="og:title"]', setContent(title))
