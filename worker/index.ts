@@ -213,6 +213,17 @@ async function renderViaContainer(env: Env, params: RenderParams): Promise<Respo
   return container.fetch(url.toString());
 }
 
+// Strip the response body for HEAD requests while preserving status and
+// headers. Used by handleRender so the HEAD path exercises the same cache
+// lookups + headers as GET without shipping the PNG bytes.
+function stripBodyForHead(response: Response, method: string): Response {
+  if (method !== 'HEAD') return response;
+  return new Response(null, {
+    status: response.status,
+    headers: response.headers,
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Routes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +239,17 @@ async function handleRender(
   ctx: ExecutionContext,
   format: RenderFormat,
 ): Promise<Response> {
+  const method = request.method;
+  if (method !== 'GET' && method !== 'HEAD') {
+    return new Response('Method Not Allowed', {
+      status: 405,
+      headers: {
+        Allow: 'GET, HEAD',
+        'Content-Type': 'text/plain; charset=utf-8',
+      },
+    });
+  }
+  const ifNoneMatch = request.headers.get('if-none-match');
   const url = new URL(request.url);
   let name = url.searchParams.get('name');
   const id = url.searchParams.get('id') ?? undefined;
@@ -283,45 +305,71 @@ async function handleRender(
   try {
     const l1Hit = await caches.default.match(l1Key);
     if (l1Hit) {
-      // L1 entries already carry Content-Type / Cache-Control / ETag /
-      // Content-Length from the put() — we just rewrite X-Cache so the caller
-      // can tell which tier served them, and re-emit X-Cache-Key for debug.
+      const l1Etag = l1Hit.headers.get('etag');
+      // Conditional request: if the client's If-None-Match matches the cached
+      // ETag, return 304 with no body (saves egress on repeat visits).
+      if (l1Etag && ifNoneMatch === l1Etag) {
+        return new Response(null, {
+          status: 304,
+          headers: {
+            'X-Cache': 'L1-HIT',
+            'X-Cache-Key': key,
+            ETag: l1Etag,
+            // Fallback to the canonical cache profile rather than an empty
+            // string — some intermediaries reject or treat empty
+            // Cache-Control as no-cache.
+            'Cache-Control':
+              l1Hit.headers.get('cache-control') ??
+              'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+          },
+        });
+      }
       const headers = new Headers(l1Hit.headers);
       headers.set('X-Cache', 'L1-HIT');
       headers.set('X-Cache-Key', key);
-      return new Response(l1Hit.body, { status: l1Hit.status, headers });
+      return stripBodyForHead(
+        new Response(l1Hit.body, { status: l1Hit.status, headers }),
+        method,
+      );
     }
   } catch (err) {
-    // Cache API failures should never break the response — fall through to L2.
     console.error('[L1] caches.default.match failed', { key, err });
   }
 
-  // 2. L2 lookup — R2 cross-region cache. Slower than L1 but cheaper than
-  //    re-rendering, and acts as the source of truth across PoPs.
+  // 2. L2 lookup — R2 cross-region cache.
   const cached = await env.CARD_CACHE.get(key);
   if (cached) {
-    // Buffer the body so we can both stream it to the client AND put a
-    // separate copy into L1 via waitUntil. R2 R2Object body is a single-use
-    // ReadableStream, so we materialise it.
+    // Conditional request short-circuit: no need to materialise the body if
+    // the client already has this ETag. Note: we do NOT promote this entry
+    // into L1 on the 304 path because we skipped arrayBuffer() and don't
+    // have the bytes to store. The next full-body miss will promote.
+    if (ifNoneMatch && ifNoneMatch === cached.httpEtag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          'X-Cache': 'L2-HIT',
+          'X-Cache-Key': key,
+          ETag: cached.httpEtag,
+          'Cache-Control':
+            'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+        },
+      });
+    }
     const bodyBuffer = await cached.arrayBuffer();
     const responseHeaders = {
       'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+      'Cache-Control':
+        'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
       'X-Cache': 'L2-HIT',
       'X-Cache-Key': key,
       ETag: cached.httpEtag,
       'Content-Length': String(cached.size),
     } as const;
-
-    // Promote into L1 in the background so the next PoP-local request hits L1.
     ctx.waitUntil(putL1(l1Key, bodyBuffer, cached.httpEtag, key));
-
-    // M-4: surface ETag + Content-Length on the cache HIT path so CDNs and
-    // browsers can do conditional requests / accurate progress bars.
-    return new Response(bodyBuffer, {
-      status: 200,
-      headers: responseHeaders,
-    });
+    return stripBodyForHead(
+      new Response(bodyBuffer, { status: 200, headers: responseHeaders }),
+      method,
+    );
   }
 
   // 3. Both caches miss — invoke container.
@@ -362,17 +410,28 @@ async function handleRender(
       }
     })(),
   );
-  ctx.waitUntil(putL1(l1Key, buffer, undefined, key));
+  // Synthetic ETag so the L1-HIT-after-this-miss path can honor
+  // If-None-Match. Cards are deterministic from (key, CACHE_VERSION), so
+  // the key itself is a stable identifier. We wrap it in quotes per
+  // RFC 7232 §2.3 strong-etag format.
+  const missEtag = `"${key}"`;
+  ctx.waitUntil(putL1(l1Key, buffer, missEtag, key));
 
-  return new Response(buffer, {
-    status: 200,
-    headers: {
-      'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
-      'X-Cache': 'MISS',
-      'X-Cache-Key': key,
-    },
-  });
+  return stripBodyForHead(
+    new Response(buffer, {
+      status: 200,
+      headers: {
+        'Content-Type': 'image/png',
+        'Cache-Control':
+          'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+        'X-Cache': 'MISS',
+        'X-Cache-Key': key,
+        'Content-Length': String(buffer.byteLength),
+        ETag: missEtag,
+      },
+    }),
+    method,
+  );
 }
 
 // L1 (caches.default) put helper — wraps the cache write in try/catch so a
