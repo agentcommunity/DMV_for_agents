@@ -67,11 +67,27 @@ interface Env {
 // when serving from workers.dev — crawlers should always see canonical URLs.
 const DMV_ORIGIN = 'https://dmv.agentcommunity.org';
 
-// Crawler user-agent matcher — ported verbatim from middleware.js so we
-// preserve identical bot detection. Order: social/messaging crawlers first,
-// then search engines.
+// Crawler user-agent matcher. Order: social/messaging crawlers first, then
+// search engines. Patterns are distinctive enough that false positives on
+// real user browsers are extremely unlikely.
+//
+// Covered:
+//   - Twitter/X                 → Twitterbot
+//   - Facebook + Threads        → facebookexternalhit, Facebot
+//   - LinkedIn                  → LinkedInBot
+//   - Messaging                 → Slackbot, WhatsApp, Discordbot, TelegramBot
+//   - iMessage + Safari link    → Applebot
+//   - Search engines            → Googlebot, bingbot
+//   - Pinterest                 → Pinterest (matches Pinterest/0.2 + Pinterestbot/1.0)
+//   - Reddit                    → redditbot
+//   - Fediverse (ActivityPub)   → Mastodon, Pleroma, Akkoma, Misskey
+//   - Bluesky card fetcher      → Bluesky (matches "Bluesky Cardyb/1.0")
+//
+// Non-matching UAs fall through to the human SPA path, which still has
+// generic OG tags from the static index.html — so a missed crawler degrades
+// to generic branding rather than breaking.
 const CRAWLER_UA =
-  /Twitterbot|facebookexternalhit|Facebot|LinkedInBot|Slackbot|WhatsApp|Discordbot|TelegramBot|Applebot|Googlebot|bingbot/i;
+  /Twitterbot|facebookexternalhit|Facebot|LinkedInBot|Slackbot|WhatsApp|Discordbot|TelegramBot|Applebot|Googlebot|bingbot|Pinterest|redditbot|Mastodon|Pleroma|Akkoma|Misskey|Bluesky/i;
 
 // Permalink path: /c/CERT-ID or /c/CERT-ID/agent-name
 const PERMALINK_RE = /^\/c\/([^/]+)(?:\/([^/]+))?$/;
@@ -472,7 +488,7 @@ async function handlePermalink(
   // middleware used: with R2 caching, the once-per-card render cost is paid
   // up front and every subsequent crawler hit is free.
   const ogImage = `${DMV_ORIGIN}/api/og?id=${encodeURIComponent(certId)}&name=${encodeURIComponent(agentName)}`;
-  const twitterAlt = `DMV certificate card for ${displayName}`;
+  const imageAlt = `DMV certificate card for ${displayName}`;
 
   // HTMLRewriter handlers — replace `content` attributes on existing meta tags.
   // The default index.html already has og:* and twitter:* tags pointing at
@@ -483,6 +499,13 @@ async function handlePermalink(
     },
   });
 
+  // Override tags that exist in the static index.html — each setContent call
+  // swaps the existing `content` attribute in place. og:image:type stays as
+  // the static "image/png" (deterministic, no per-card variation).
+  //
+  // og:image:alt and twitter:image:alt both exist in the static HTML with
+  // generic DMV copy; here we override them with per-card alt text so screen
+  // readers on FB/LinkedIn and Twitter announce the actual agent name.
   const rewriter = new HTMLRewriter()
     .on('title', {
       element(el) {
@@ -494,17 +517,15 @@ async function handlePermalink(
     .on('meta[property="og:image"]', setContent(ogImage))
     .on('meta[property="og:image:width"]', setContent('1200'))
     .on('meta[property="og:image:height"]', setContent('630'))
+    .on('meta[property="og:image:alt"]', setContent(imageAlt))
     .on('meta[property="og:url"]', setContent(permalink))
     .on('meta[name="twitter:title"]', setContent(title))
     .on('meta[name="twitter:description"]', setContent(description))
     .on('meta[name="twitter:image"]', setContent(ogImage))
-    // Inject the elements that aren't in the default index.html.
+    .on('meta[name="twitter:image:alt"]', setContent(imageAlt))
+    // rel=canonical doesn't exist in the default index.html, so append it.
     .on('head', {
       element(el) {
-        el.append(
-          `<meta name="twitter:image:alt" content="${escapeHtml(twitterAlt)}">`,
-          { html: true },
-        );
         el.append(
           `<link rel="canonical" href="${escapeHtml(permalink)}">`,
           { html: true },
