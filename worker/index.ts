@@ -552,6 +552,9 @@ async function handlePermalink(
         'Content-Type': 'text/html; charset=utf-8',
         // Same cache profile as the index.html _headers rule.
         'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+        // Prevents the edge from serving a cached crawler variant to a human
+        // (or vice versa) since the two branches return different bodies.
+        Vary: 'User-Agent',
       },
     });
   }
@@ -623,6 +626,7 @@ async function handlePermalink(
       // Match the previous Vercel middleware cache profile.
       'Cache-Control': 'public, max-age=300, s-maxage=3600',
       'X-Permalink-Mode': 'crawler',
+      Vary: 'User-Agent',
     },
   });
 }
