@@ -15,7 +15,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "dmv-card-test",
+	"name": "dmv-agentcommunity",
 	"main": "worker/index.ts",
 	// Taqanu account — same as main agentcommunity_page worker.
 	// Not a secret: the account ID is visible in any workers.dev subdomain
