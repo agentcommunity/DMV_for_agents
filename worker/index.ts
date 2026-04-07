@@ -224,6 +224,21 @@ function stripBodyForHead(response: Response, method: string): Response {
   });
 }
 
+// Match an If-None-Match header against a stored ETag per RFC 7232 §3.2.
+// Supports the "*" wildcard, comma-separated lists, and weak comparison
+// (W/"x" matches "x"). Returns true when the client already has a matching
+// cached representation and the server should return 304.
+function ifNoneMatchMatches(headerValue: string | null, etag: string): boolean {
+  if (!headerValue) return false;
+  const trimmed = headerValue.trim();
+  if (trimmed === '*') return true;
+  const stripWeak = (s: string) => s.replace(/^W\//, '');
+  const normalized = stripWeak(etag);
+  return trimmed
+    .split(',')
+    .some((candidate) => stripWeak(candidate.trim()) === normalized);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Routes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -277,6 +292,14 @@ async function handleRender(
   const key = cacheKey(params);
   const l1Key = l1CacheKey(request, params);
 
+  // Synthetic strong ETag shared across all cache tiers (L1, L2, miss).
+  // The cache key already encodes CACHE_VERSION + format + type + name + id,
+  // so it is a deterministic content identifier. Using the same ETag from
+  // L1/L2/miss means clients that cached the ETag from any tier will get
+  // 304 on the next conditional request from any tier (no wasted full-body
+  // responses after L1 evictions).
+  const synthEtag = `"${key}"`;
+
   // ───────────────────────────────────────────────────────────────────────
   //  Cache hierarchy (I-6 — added before Brave new tab takeover)
   //
@@ -308,7 +331,7 @@ async function handleRender(
       const l1Etag = l1Hit.headers.get('etag');
       // Conditional request: if the client's If-None-Match matches the cached
       // ETag, return 304 with no body (saves egress on repeat visits).
-      if (l1Etag && ifNoneMatch === l1Etag) {
+      if (l1Etag && ifNoneMatchMatches(ifNoneMatch, l1Etag)) {
         return new Response(null, {
           status: 304,
           headers: {
@@ -324,6 +347,8 @@ async function handleRender(
           },
         });
       }
+      // L1 entries inherit Content-Type/Cache-Control/ETag/Content-Length from
+      // the putL1() call — we just overlay X-Cache/X-Cache-Key per request.
       const headers = new Headers(l1Hit.headers);
       headers.set('X-Cache', 'L1-HIT');
       headers.set('X-Cache-Key', key);
@@ -343,13 +368,13 @@ async function handleRender(
     // the client already has this ETag. Note: we do NOT promote this entry
     // into L1 on the 304 path because we skipped arrayBuffer() and don't
     // have the bytes to store. The next full-body miss will promote.
-    if (ifNoneMatch && ifNoneMatch === cached.httpEtag) {
+    if (ifNoneMatchMatches(ifNoneMatch, synthEtag)) {
       return new Response(null, {
         status: 304,
         headers: {
           'X-Cache': 'L2-HIT',
           'X-Cache-Key': key,
-          ETag: cached.httpEtag,
+          ETag: synthEtag,
           'Cache-Control':
             'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
         },
@@ -362,10 +387,10 @@ async function handleRender(
         'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
       'X-Cache': 'L2-HIT',
       'X-Cache-Key': key,
-      ETag: cached.httpEtag,
+      ETag: synthEtag,
       'Content-Length': String(cached.size),
     } as const;
-    ctx.waitUntil(putL1(l1Key, bodyBuffer, cached.httpEtag, key));
+    ctx.waitUntil(putL1(l1Key, bodyBuffer, synthEtag, key));
     return stripBodyForHead(
       new Response(bodyBuffer, { status: 200, headers: responseHeaders }),
       method,
@@ -410,12 +435,7 @@ async function handleRender(
       }
     })(),
   );
-  // Synthetic ETag so the L1-HIT-after-this-miss path can honor
-  // If-None-Match. Cards are deterministic from (key, CACHE_VERSION), so
-  // the key itself is a stable identifier. We wrap it in quotes per
-  // RFC 7232 §2.3 strong-etag format.
-  const missEtag = `"${key}"`;
-  ctx.waitUntil(putL1(l1Key, buffer, missEtag, key));
+  ctx.waitUntil(putL1(l1Key, buffer, synthEtag, key));
 
   return stripBodyForHead(
     new Response(buffer, {
@@ -427,7 +447,7 @@ async function handleRender(
         'X-Cache': 'MISS',
         'X-Cache-Key': key,
         'Content-Length': String(buffer.byteLength),
-        ETag: missEtag,
+        ETag: synthEtag,
       },
     }),
     method,
