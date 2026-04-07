@@ -43,6 +43,12 @@ export class CardRenderer extends Container {
   }
 }
 
+// Ambient type for the Workers Rate Limiting API binding. Not exported by
+// @cloudflare/workers-types at all versions; define locally.
+interface RateLimit {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
 interface Env {
   CARD_RENDERER: DurableObjectNamespace<CardRenderer>;
   CARD_CACHE: R2Bucket;
@@ -61,6 +67,9 @@ interface Env {
   // Schema: see emitAnalytics() below. Bound in wrangler.jsonc as
   // analytics_engine_datasets.
   ANALYTICS: AnalyticsEngineDataset;
+  // Workers Rate Limiting API binding. Configured in wrangler.jsonc under
+  // the top-level `ratelimits` array. 100 req/60s per IP+path across /api/*.
+  API_RATE_LIMITER: RateLimit;
 }
 
 // Structured telemetry for cache tiers, badge proxy, and prewarm runs.
@@ -351,6 +360,37 @@ async function handleRender(
   if (id && id.length > 16) return bad('id must be 16 characters or fewer');
   if (type && !['individual', 'organization', 'agent'].includes(type.toLowerCase())) {
     return bad('type must be individual, organization, or agent');
+  }
+
+  // Rate limit BEFORE cache lookup: a flood of unique-key requests would
+  // otherwise each do an L1 lookup + R2 GET + container fetch before we
+  // noticed. Key is `${ip}:${pathname}` so /api/card and /api/og have
+  // independent budgets per IP. Prewarm cron hits have no client IP (CF
+  // doesn't set cf-connecting-ip on worker-internal fetches) and skip via
+  // UA check anyway.
+  const prewarmUa = 'dmv-cf-prewarm/1.0';
+  const userAgent = request.headers.get('user-agent') ?? '';
+  const clientIp = request.headers.get('cf-connecting-ip') ?? '';
+  if (clientIp && userAgent !== prewarmUa) {
+    try {
+      const rlKey = `${clientIp}:${path}`;
+      const { success } = await env.API_RATE_LIMITER.limit({ key: rlKey });
+      if (!success) {
+        emitError('429');
+        return new Response('Rate limit exceeded', {
+          status: 429,
+          headers: {
+            'Retry-After': '60',
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Window': '60',
+          },
+        });
+      }
+    } catch (err) {
+      // Rate limiter failure should NEVER break responses — log and continue.
+      console.error('[ratelimit] API_RATE_LIMITER.limit failed', err);
+    }
   }
 
   const params: RenderParams = { id, name, type, format };
