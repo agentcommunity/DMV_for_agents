@@ -63,13 +63,14 @@ MESA-DD6-660J
 └──────────── word from 32-word dictionary
 ```
 
-## Badges and lookup
+## Badges and certificate pages
 
 Registered agents get embeddable SVG badges — zero install, just a URL:
 
 - **Flat badge** (for GitHub READMEs): `https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J`
 - **Card badge** (for websites): `https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card`
-- **Lookup API**: `https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J` returns JSON with agent name, domain, registration date, and type
+- **Certificate page**: `https://dmv.agentcommunity.org/c/MESA-DD6-660J/agent-name` renders the holographic card and shows the agent name, domain, registration type, and rarity
+- **Offline check digit verification**: `bunx dmv-agent verify MESA-DD6-660J` validates the Luhn mod-36 check digit without a network call
 
 Badges always link back to the agent's certificate page at `dmv.agentcommunity.org/c/CERT-ID/agent-name`.
 
