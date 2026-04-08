@@ -248,6 +248,22 @@ Deno.serve(async (req) => {
   const badgeCardUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}&style=card`
 
   // Insert
+  //
+  // We intentionally DO NOT set `status` here. The PAGE-side schema
+  // (agentCommunity_PAGE/supabase/migrations/20260203000000_baseline.sql:3345)
+  // declares status as `DEFAULT 'pending_profile'::registration_status NOT NULL`,
+  // and PAGE's DMV integration identifies DMV rows by `certificate_id IS NOT NULL`,
+  // not by any status value. PAGE's registration_status enum never had a
+  // `provisional_dmv` value — the earlier AUTH_DMV.md plan that assumed one
+  // was superseded by the actual PAGE design shipped in migrations
+  // 20260210999999 + 20260211000000 + 20260211000100.
+  //
+  // DMV rows are safe at `pending_profile` because:
+  //   - Welcome email trigger skips `certificate_id IS NOT NULL` rows
+  //   - Endorsement email trigger skips `certificate_id IS NOT NULL` rows
+  //   - `on_dmv_registration` trigger fires specifically on
+  //     `certificate_id IS NOT NULL` rows and handles the DMV lifecycle
+  //   - `handle-dmv-registration` edge function creates/links the auth user
   const { error: insertError } = await supabase
     .from('registrations')
     .insert({
@@ -258,7 +274,6 @@ Deno.serve(async (req) => {
       email,
       certificate_id: certificateId,
       signup_source: signupSource,
-      status: 'provisional_dmv',
       metadata: {
         agent_description: description,
         client_ip: ip,
@@ -277,7 +292,7 @@ Deno.serve(async (req) => {
         { status: 409, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
       )
     }
-    console.error('Supabase insert error:', insertError.message)
+    console.error('Supabase insert error:', JSON.stringify(insertError, null, 2))
     return new Response(
       JSON.stringify({ error: 'Registration failed. Please try again.' }),
       { status: 500, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
