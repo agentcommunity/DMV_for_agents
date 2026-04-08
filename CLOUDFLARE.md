@@ -27,8 +27,11 @@ into `container/src/card-renderer.js` where it's now canonical.
 │   ┌──────────────────┐  ┌─────────────────────────────┐    │
 │   │ Static Assets    │  │ Dynamic routes              │    │
 │   │ (free, edge-     │  │  /api/card  /api/og         │    │
-│   │  cached)         │  │  /c/:id/:name (HTMLRewriter)│    │
+│   │  cached)         │  │  /api/register (Turnstile + │    │
+│   │                  │  │     shared CF limits + KV)  │    │
+│   │                  │  │  /c/:id/:name (HTMLRewriter)│    │
 │   │                  │  │  /badge/*  (Supabase proxy) │    │
+│   │                  │  │  /healthz                   │    │
 │   └──────────────────┘  └──────────────┬──────────────┘    │
 │        ▲                                │                    │
 │        │ index.html, js/, css/,         ▼                    │
@@ -78,6 +81,7 @@ being served.
 | `/models/tv1.glb`, `/audio/*`, `/css/*`, `/js/*`, etc. | Workers Static Assets | Direct edge cache, free egress |
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
+| `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint for browser, CLI, MCP, and JS API. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (server-side hostname + `dmv_register` action check) → shared CF rate limiters → forward to Supabase. CLI/MCP path: validate JSON → require `machine_fingerprint` → shared CF rate limiters → DMV-local KV fingerprint cooldown → forward. Anti-abuse ordering matches `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4 — CAPTCHA always runs before shared counters |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
 | `/healthz` | Worker | `{ worker, container }` health probe — pings the container too |
@@ -119,9 +123,10 @@ eyeball the bake-off output (`pnpm cf:test:render` — see below).
 
 | Path | Purpose |
 |---|---|
-| `worker/index.ts` | Worker entry — routes, L1/R2/container cache hierarchy, HTMLRewriter permalink middleware, `/badge/*` Supabase proxy, cron prewarm |
+| `worker/index.ts` | Worker entry — routes, L1/R2/container cache hierarchy, HTMLRewriter permalink middleware, `/api/register` handler (Turnstile + CF rate limits + Supabase forward), `/badge/*` Supabase proxy, cron prewarm |
+| `worker/rate-limit-kv.ts` | DMV-local KV-backed cooldown helper (`incrementKvCooldown`). Increment-then-hold pattern for the CLI/MCP fingerprint cooldown counter in `REGISTER_COOLDOWN_KV`. |
 | `worker/container-instance.ts` | **Generated** by `scripts/build-cf.mjs` — content-hash of container sources that doubles as the Durable Object instance ID |
-| `wrangler.jsonc` | Static Assets + Container binding, R2 binding, DO migration, cron trigger, `PREWARM_ORIGIN` |
+| `wrangler.jsonc` | Static Assets + Container binding, R2 binding, DO migration, cron trigger, `PREWARM_ORIGIN`, register-path bindings (`REGISTER_COOLDOWN_KV`, shared `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL`) |
 | `tsconfig.json` | TypeScript config for the worker |
 | `container/Dockerfile` | Node 20 Alpine + `@napi-rs/canvas` |
 | `container/package.json` | Container runtime deps (Hono + `@napi-rs/canvas`) |
@@ -209,15 +214,52 @@ open test-harness/output/index.html
   `L1-EXCEPTION`, `container-render-failed`, `inflight-rejected`). Schema
   is documented at the `emitAnalytics()` helper in `worker/index.ts`.
 
-- **Rate limiting**: `/api/card` and `/api/og` are guarded by the Workers
-  Rate Limiting API binding `API_RATE_LIMITER` — 100 req/60s per
-  `${ip}:${pathname}`. Configured under the top-level `ratelimits` array in
-  `wrangler.jsonc`. The limiter runs BEFORE L1 lookup so rejected requests
-  don't eat cache-tier work, and prewarm cron requests bypass via UA check
-  (`dmv-cf-prewarm/1.0`). Rate-limit rejections emit an `error` category
-  Analytics Engine event. For a future zone-level upgrade to Pro+, layer a
-  WAF Rate Limiting Rule on top — WAF runs earlier in the request pipeline
-  and rejected requests don't count as Worker invocations.
+- **Rate limiting**: two distinct surfaces, both via the Workers Rate
+  Limiting API.
+
+  **Render path** (`/api/card`, `/api/og`): guarded by `API_RATE_LIMITER`
+  — 100 req/60s per `${ip}:${pathname}`, namespace `1001`. Runs BEFORE L1
+  lookup so rejected requests don't eat cache-tier work; prewarm cron
+  requests bypass via UA check (`dmv-cf-prewarm/1.0`). DMV-local namespace.
+
+  **Register path** (`/api/register`): guarded by two SHARED bindings —
+  `RL_OTP_EMAIL` (5 req/60s, namespace `4005`) and `RL_OTP_IP_EMAIL`
+  (4 req/60s, namespace `4007`). Both `namespace_id` values are shared at
+  the Cloudflare account level with `agentCommunity_PAGE`, so a single
+  attacker spending email-keyed quota on PAGE has less of it available on
+  DMV. Plus the DMV-local KV cooldown via `REGISTER_COOLDOWN_KV` for
+  CLI/MCP machine fingerprints (`dmv:register:fingerprint:<sha256>`).
+  CAPTCHA (Turnstile) runs BEFORE both shared counters on the browser
+  path so invalid tokens cannot exhaust quota for real users. PAGE's
+  `RL_AUTH` (4001) and `RL_OTP_IP` (4006) are intentionally NOT bound by
+  DMV — plain-IP limits are too blunt for shared corporate networks and
+  PAGE's live OTP path doesn't use `RL_AUTH` anyway.
+
+  Cross-repo coupling drift points (rare, watch these): if PAGE renames a
+  shared namespace_id, DMV silently drifts; if PAGE changes the
+  email-normalization function, DMV's keys land in a different keyspace
+  within the same namespace. Both are mitigated by keeping the relevant
+  helpers in sync manually.
+
+  Rate-limit rejections emit `register_attempt` Analytics Engine events
+  with status blob `rate_limited` (matching PAGE's vocabulary). For a
+  future zone-level upgrade to Pro+, layer a WAF Rate Limiting Rule on
+  top — WAF runs earlier in the request pipeline and rejected requests
+  don't count as Worker invocations.
+
+- **Turnstile**: `/api/register` browser path requires a valid Turnstile
+  token (`cf-turnstile-response` field in the JSON body). The site key
+  `0x4AAAAAAC2BwC5T9LSdndaK` is public and served via
+  `<meta name="dmv-turnstile-site-key">` in `index.html`. The secret key
+  is installed as the `TURNSTILE_SECRET_KEY` worker secret (encrypted,
+  via Cloudflare dashboard — `wrangler secret put` is currently blocked
+  on this worker by a version-mismatch guard, see
+  `docs/plans/2026-04-08-handoff-prompt.md`). `verifyTurnstileToken` in
+  `worker/index.ts` checks `success` AND `hostname` matches the request
+  host AND `action` equals `dmv_register` — handoff prompt §5 requirement
+  to prevent token reuse across properties or routes. CLI/MCP traffic
+  bypasses Turnstile (headless clients can't solve it) and instead
+  proves identity with `machine_fingerprint`.
 
 - **Badge KV cache**: `/badge/*` is proxied through the Worker to the
   Supabase `badge` edge function with a 10-minute KV read-through cache
@@ -259,12 +301,15 @@ open test-harness/output/index.html
 
 ## Known gaps (separate sprints)
 
-- **API hardening** — `js/supabase.js` (browser) and `packages/dmv-agent/`
-  (CLI + MCP) still POST directly to the Supabase `register-agent` edge
-  function. Only `/badge/*` is worker-proxied so far. Layered hardening
-  plan (Worker proxy + Workers Rate Limiting + Turnstile + closing the
-  Supabase bypass) lives in `DMV_HARDENING.md` in the `agentcommunity_page`
-  repo.
+- **Closing the direct-Supabase bypass** — `/api/register` is now the
+  canonical worker-proxied path for browser, CLI, and MCP traffic, BUT
+  `register-agent` on Supabase still accepts direct calls from older
+  CLI versions and any third-party client that hits the Supabase URL
+  directly. The bypass is intentional for now (graceful migration of
+  pinned `bunx dmv-agent` versions); closing it requires
+  `register-agent` to require an `x-dmv-proxy: v1` header set by the
+  worker. Land after enough adoption of the new CLI version that the
+  drop-off cost is acceptable.
 
 - **DMV-branded OTP email flow** — custom branding via
   `admin.generateLink()` + Resend direct send is future work. See

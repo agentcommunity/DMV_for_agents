@@ -24,9 +24,9 @@ Pre-registration system for `.agent` domain identities. Two interfaces, one back
 
 All flows are **pre-registration** (not registration). Pre-registration records interest in a `.agent` domain. It does not guarantee assignment.
 
-**Web data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → processing bar → `CRTTerminal.onComplete(formData)` fires → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
+**Web data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → invisible Turnstile widget executes → POST to same-origin `/api/register` worker → worker verifies Turnstile (hostname + `dmv_register` action) → worker checks shared CF rate limits → worker forwards to Supabase → review state holds until response, then processing bar plays → `CRTTerminal.onComplete(formData)` fires with the authoritative cert ID → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
 
-**CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to edge function → success screen: view card link (permalink to holographic card), share nudge (invite command + card URL), save card (direct PNG download URL), badge markdown snippet, email verification note.
+**CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to `/api/register` worker (with `signup_source: 'cli'` and `machine_fingerprint`) → worker checks shared CF rate limits → worker checks DMV-local KV fingerprint cooldown → worker forwards to Supabase → success screen: view card link (permalink to holographic card), share nudge (invite command + card URL), save card (direct PNG download URL), badge markdown snippet, email verification note.
 
 **Module graph:**
 ```
@@ -141,7 +141,9 @@ Both social preview endpoints hit the **same** Cloudflare Container running `@na
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
-**Edge functions** (`supabase/functions/`): registration proxy, lookup API, badge SVG generator. All Deno, deployed to Supabase. Zero secrets in client code — all DB writes go through edge functions.
+**Worker `/api/register`** (`worker/index.ts` `handleRegister`): canonical registration entry point for browser, CLI, MCP, and JS API traffic. Owns all anti-abuse: Turnstile verification on browser path (server-side hostname + `dmv_register` action check), shared Cloudflare rate limiters (`RL_OTP_EMAIL` namespace `4005`, `RL_OTP_IP_EMAIL` namespace `4007` — both shared at the CF account level with `agentCommunity_PAGE`), and DMV-local KV fingerprint cooldown (`REGISTER_COOLDOWN_KV`) on CLI/MCP path. CAPTCHA runs BEFORE shared counters so invalid tokens cannot burn quota. Forwards validated requests to the Supabase `register-agent` edge function. See [CLOUDFLARE.md](CLOUDFLARE.md) and `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` for the design rationale.
+
+**Edge functions** (`supabase/functions/`): `register-agent` is now strictly an upstream from the worker (validation + cert ID generation + INSERT only, no rate limiting); `lookup-agent` and `badge` are still directly callable. All Deno, deployed to Supabase. Zero secrets in client code — all DB writes go through edge functions.
 
 **Trigger chain**: register-agent INSERTs with `certificate_id` + `status: 'provisional_dmv'` + `user_id: NULL`. A database trigger (`on_dmv_registration`) on the agentcommunity.org side fires asynchronously (pg_net), creates/finds auth user, sends certificate email, and manages the `user_domains` table. DMV does NOT create auth users or send emails. See [AUTH_DMV.md](AUTH_DMV.md) for the full auth integration flow.
 
@@ -152,8 +154,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 **CLI architecture** (`packages/dmv-agent/src/`):
 - `cli.ts` — Main CLI: boot screen, form flow, submit, content pages (about/terms/charter)
 - `ui.ts` — CRT frame renderer: ASCII art, ANSI green/amber/red colors, box drawing, progress bar. Zero dependencies.
-- `rate-limit.ts` — Machine fingerprint (SHA-256 of hostname+user+platform) + local lockfile (`~/.dmv-agent/registrations.json`, 3/machine/24h)
-- `register.ts` — Edge function client, sends `machine_fingerprint` for server-side enforcement
+- `rate-limit.ts` — Machine fingerprint (SHA-256 of hostname+user+platform) + local lockfile (`~/.dmv-agent/registrations.json`, 3/machine/24h). Advisory client-side check; the worker enforces the real cooldown via `REGISTER_COOLDOWN_KV`.
+- `register.ts` — Worker proxy client, POSTs to `https://dmv.agentcommunity.org/api/register` with `signup_source` (`cli`/`mcp`) and `machine_fingerprint`. The CLI never talks to Supabase directly anymore.
 
 **Go-live checklist**: `packages/dmv-agent/DEPLOY.md`
 

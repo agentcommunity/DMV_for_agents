@@ -21,20 +21,40 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
              │            │             │             │
              ▼            ▼             ▼             ▼
       ┌─────────────────────────────────────────────────────┐
-      │         register-agent edge function                │
-      │              (Supabase / Deno)                      │
+      │      Cloudflare Worker — POST /api/register         │
+      │           (worker/index.ts handleRegister)           │
       │                                                     │
-      │  1. Validate all fields + length limits             │
-      │  2. Redis rate limiting (Upstash, fail-open)        │
-      │     ├─ 3 per IP+email / 10 min                     │
-      │     ├─ 5 per email / 10 min                         │
-      │     └─ 10 per IP / 10 min                           │
-      │  3. Lifetime cap (DB, only if rate limit passes)    │
-      │     └─ 3 per email (unendorsed) / 10 (endorsed)    │
-      │  4. Generate certificate_id (FNV-1a + Luhn)         │
-      │  5. INSERT with status = 'provisional_dmv'          │
-      │  6. Return cert ID + permalink + badge URLs         │
-      └──────────────────────┬──────────────────────────────┘
+      │  1. Validate JSON shape                             │
+      │  2. Browser path: verify Turnstile siteverify       │
+      │     (success + hostname + action=dmv_register)      │
+      │     CLI/MCP path: require machine_fingerprint       │
+      │  3. Shared CF rate limiters (BOTH paths)            │
+      │     ├─ RL_OTP_EMAIL    (5/60s, ns 4005, shared)    │
+      │     └─ RL_OTP_IP_EMAIL (4/60s, ns 4007, shared)    │
+      │  4. CLI/MCP only: DMV-local KV cooldown             │
+      │     └─ REGISTER_COOLDOWN_KV (fingerprint hash)      │
+      │  5. Forward to Supabase ────────────────────────────┼──┐
+      │                                                     │  │
+      │  Anti-abuse always runs BEFORE upstream forward.    │  │
+      │  CAPTCHA always runs BEFORE shared counters.        │  │
+      └─────────────────────────────────────────────────────┘  │
+                                                                 │
+      ┌──────────────────────────────────────────────────────┐  │
+      │         register-agent edge function                  │◄─┘
+      │              (Supabase / Deno)                        │
+      │                                                       │
+      │  1. Validate all fields + length limits               │
+      │  2. Lifetime cap (DB)                                 │
+      │     └─ 3 per email (unendorsed) / 10 (endorsed)      │
+      │  3. Generate certificate_id (FNV-1a + Luhn)           │
+      │  4. INSERT with status = 'provisional_dmv'            │
+      │  5. Return cert ID + permalink + badge URLs           │
+      │                                                       │
+      │  NOTE: Upstash Redis rate limiting REMOVED in the    │
+      │  2026-04-08 hardening pass. The worker owns           │
+      │  anti-abuse now; this function is strictly an         │
+      │  upstream that validates and INSERTs.                 │
+      └──────────────────────┬────────────────────────────────┘
                              │
                              │ DB trigger fires async
                              │ (on_dmv_registration)
@@ -121,7 +141,7 @@ Exposes `register_agent` and `verify_certificate` tools. `operator_name` is requ
 Both CLI and MCP enforce:
 - Machine fingerprint: SHA-256 of hostname + username + platform
 - Local lockfile: `~/.dmv-agent/registrations.json`, max 3 registrations per 24h
-- Lockfile is advisory — server-side Redis + lifetime cap are the real enforcement
+- Lockfile is advisory — the worker's `REGISTER_COOLDOWN_KV` cooldown plus the shared CF rate limits are the real enforcement
 
 ### What agents get back
 
@@ -138,56 +158,73 @@ The agent (or its operator) receives a certificate email. To become a verified m
 
 ## Rate Limiting Architecture
 
-Six layers, from cheapest to most expensive:
+The Cloudflare Worker is the single anti-abuse choke point. The Supabase edge function trusts that anything reaching it has already cleared the worker's gates (with one exception: a temporary direct-Supabase bypass for legacy CLI versions, scheduled to close once adoption of the new CLI is high enough).
+
+Five effective layers on the register path, ordered cheapest-to-most-expensive:
 
 ```
-Request arrives
+Request arrives at Worker /api/register
      │
      ▼
 ┌─────────────────────────────────┐
-│  Layer 1: Client lockfile       │  CLI + MCP only
-│  3 / machine / 24h             │  Advisory, easily bypassed
+│  Layer 0: Client lockfile        │  CLI + MCP only
+│  3 / machine / 24h              │  Advisory, easily bypassed
 └──────────────┬──────────────────┘
                │
                ▼
 ┌─────────────────────────────────┐
-│  Layer 2: Redis per-IP+email    │  Upstash, sub-ms
-│  3 / 10 min                     │  Tightest server-side limit
+│  Layer 1: Worker validation     │  Reject malformed JSON,
+│  Schema + length limits         │  unknown signup_source, etc.
 └──────────────┬──────────────────┘
                │ pass
                ▼
 ┌─────────────────────────────────┐
-│  Layer 3: Redis per-email       │  Upstash, sub-ms
-│  5 / 10 min                     │  Catches email rotation
+│  Layer 2a: Turnstile (browser)  │  Browser path only.
+│  Validates success +            │  Action=dmv_register,
+│  hostname + action              │  hostname must match.
+│                                 │  CAPTCHA before counters!
+│  Layer 2b: Fingerprint required │  CLI/MCP path only.
+│  (CLI/MCP)                     │  Headless cannot solve CAPTCHA.
 └──────────────┬──────────────────┘
                │ pass
                ▼
 ┌─────────────────────────────────┐
-│  Layer 4: Redis per-IP          │  Upstash, sub-ms
-│  10 / 10 min                    │  Lenient for shared IPs
+│  Layer 3: Shared CF limiters    │  Both paths.
+│  RL_OTP_EMAIL    5/60s ns 4005 │  ns IDs SHARED with PAGE
+│  RL_OTP_IP_EMAIL 4/60s ns 4007 │  at the CF account level.
 └──────────────┬──────────────────┘
                │ pass
                ▼
 ┌─────────────────────────────────┐
-│  Layer 5: DB lifetime cap       │  Postgres query
-│  3 (unendorsed) / 10 (endorsed)│  Only runs for non-rate-limited requests
+│  Layer 4: KV cooldown           │  CLI/MCP only.
+│  REGISTER_COOLDOWN_KV           │  Threshold-then-hold.
+│  Key: dmv:register:fingerprint: │  DMV-local namespace.
+│       <sha256(fingerprint)>     │  NOT shared with PAGE.
+└──────────────┬──────────────────┘
+               │ pass — forward to Supabase
+               ▼
+┌─────────────────────────────────┐
+│  Layer 5: DB lifetime cap       │  Postgres query in
+│  3 (unendorsed) / 10 (endorsed)│  register-agent edge fn.
 └──────────────┬──────────────────┘
                │ pass
                ▼
 ┌─────────────────────────────────┐
-│  Layer 6: DB unique constraint  │  certificate_id is UNIQUE
-│  Same name+email+type = 409    │  Deterministic dedup
+│  Layer 6: DB unique constraint  │  certificate_id is UNIQUE.
+│  Same name+email+type = 409    │  Deterministic dedup.
 └──────────────┬──────────────────┘
                │ pass
                ▼
          Registration created
 ```
 
-**Fail-open design:** If Upstash Redis is unreachable, layers 2-4 are skipped and the request falls through to the DB lifetime cap (layer 5). This prevents a Redis outage from blocking all registrations while still maintaining abuse protection.
+**Why CAPTCHA before counters:** if shared CF limiters ran first, an attacker submitting invalid Turnstile tokens could exhaust the 5/60s email quota for real users. Browser path: validate → Turnstile → counters → forward. CLI/MCP path: validate → fingerprint → counters → KV cooldown → forward. This ordering is non-negotiable per `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4.
 
-**Redis key design:** All keys are SHA-256 hashed (`dmv:email:{hash}`, `dmv:ip:{hash}`, `dmv:ip-email:{ipHash}:{emailHash}`). Neither emails nor IPs are stored in Redis as plaintext. Key prefixes don't collide with main site prefixes (`otp:email:`, etc.) on the shared Upstash instance.
+**Cross-repo coupling with `agentCommunity_PAGE`:** the `4005` and `4007` namespace_ids are SHARED at the Cloudflare account level. A signup attempt that consumes email quota on PAGE has less email quota available on DMV. This is intentional — those two counters represent the same abuse surface across both properties. PAGE's `RL_AUTH` (4001) and `RL_OTP_IP` (4006) are NOT shared by DMV; plain-IP limits are too blunt for shared corporate networks and PAGE's live OTP path doesn't use `RL_AUTH` anyway. The coupling matters in three drift scenarios documented in `worker/index.ts` and `CLOUDFLARE.md`.
 
-**Rate limit responses:** 429 with `Retry-After` header (computed from Redis reset timestamp). 403 for lifetime cap (includes `current`, `limit`, `endorsed` fields in JSON body).
+**KV cooldown key design:** keys are SHA-256 hashed (`dmv:register:fingerprint:<hash>`). Fingerprints are never stored in KV as plaintext. Key prefix does not collide with PAGE's `KV_RATE_LIMIT` namespace because DMV uses a separate, DMV-local KV namespace (`REGISTER_COOLDOWN_KV` id `ec0cdc55c2f94267af84f0218c961a00`). PAGE's OTP cooldown uses `c0e0d88fff1a4c59805ab85c7a03100f` — fully separate.
+
+**Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `{ error: 'fingerprint_cooldown', ... }` with the cooldown duration. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
 
 ## Certificate ID System
 
@@ -302,11 +339,12 @@ CLI and MCP are not browser-based and don't send `Origin` headers, so CORS does 
 |-----------|-----------|-------|
 | Web UI (static) | Cloudflare Workers Static Assets (`dist/`) | index.html + JS/CSS/fonts/models, no SSR |
 | API routes (`/api/card`, `/api/og`) | Cloudflare Worker → L1 (`caches.default`) → R2 → Cloudflare Container | Both served by the same Skia renderer (`@napi-rs/canvas`); container only invoked on first miss |
+| Registration anti-abuse (`/api/register`) | Cloudflare Worker (`handleRegister`) | Turnstile + shared CF rate limits + DMV-local KV cooldown. Forwards to Supabase. |
 | Permalink crawler OG | Cloudflare Worker HTMLRewriter | `worker/index.ts handlePermalink` — streams index.html and injects per-card `og:*` / `twitter:*` tags for crawler UAs |
 | `/badge/*` | Cloudflare Worker proxy → Supabase Edge Function | `handleBadge` forwards with header hygiene + path-traversal defense |
-| Edge functions (register, lookup, badge) | Supabase Edge Functions (Deno) | Holds service role key |
+| Edge functions (register, lookup, badge) | Supabase Edge Functions (Deno) | Holds service role key. `register-agent` is now strictly an upstream from the worker (validation + cert ID + INSERT, no rate limiting). |
 | Database | Supabase PostgreSQL | RLS denies anon, service key bypasses |
-| Rate limiting | Upstash Redis | Shared instance with agentcommunity.org |
+| Rate limiting (DMV) | Cloudflare Workers Rate Limiting API + Workers KV | `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` shared with `agentCommunity_PAGE` at the CF account level, `REGISTER_COOLDOWN_KV` is DMV-local. Upstash removed. |
 | NPM package | npm registry | `@agentcommunity/dmv-agent` + `dmv-agent` alias |
 
 ## Security Model
@@ -317,30 +355,39 @@ Principle: never trust the client.
 Client code:     validates → POST JSON → reads response
                  (no secrets, no DB access, just fetch())
 
-Edge function:   validates again → rate limits → generates cert → INSERTs
-                 (holds service role key, server-side authority)
+Worker:          validates → CAPTCHA (browser) or fingerprint (CLI/MCP)
+                 → shared CF rate limits → DMV-local KV cooldown
+                 → forward to Supabase
+                 (holds TURNSTILE_SECRET_KEY, owns anti-abuse)
+
+Edge function:   validates again → lifetime cap → generates cert → INSERTs
+                 (holds service role key, validates upstream, no
+                  rate limiting — that's the worker's job now)
 
 Database:        RLS denies all anon access
                  (only reachable through edge function with service key)
 ```
 
-No database credentials exist in any client code — web, CLI, MCP, or JS API. The only public-facing URL is the edge function endpoint, which validates and rate-limits everything.
+No database credentials exist in any client code — web, CLI, MCP, or JS API. The only public-facing URL for registration is `https://dmv.agentcommunity.org/api/register` on the worker. The Supabase edge function URL is also still public (legacy bypass for older CLI versions); closing it is tracked under "Known gaps" in `CLOUDFLARE.md`.
 
 ---
 
-## What's Implemented (DMV side, as of 2026-04-01)
+## What's Implemented (DMV side, as of 2026-04-08)
 
 Everything below is shipped in this repo and ready to deploy:
 
 | Feature | Status | Where |
 |---------|--------|-------|
-| Redis triple rate limiting | Done | `supabase/functions/register-agent/index.ts` |
-| Lifetime cap (3/10 per email) | Done | Same file |
-| Fail-open Redis error handling | Done | Same file |
+| Worker `/api/register` proxy | Done | `worker/index.ts` `handleRegister` |
+| Cloudflare Turnstile (browser) | Done | `worker/index.ts` `verifyTurnstileToken`, `index.html` widget mount |
+| Shared CF rate limits with PAGE | Done | `wrangler.jsonc` `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` (ns 4005/4007) |
+| DMV-local KV fingerprint cooldown | Done | `worker/rate-limit-kv.ts`, `REGISTER_COOLDOWN_KV` binding |
+| Upstash Redis REMOVED from edge fn | Done | `supabase/functions/register-agent/index.ts` (-90 lines) |
+| Lifetime cap (3/10 per email) | Done | `supabase/functions/register-agent/index.ts` |
 | `provisional_dmv` status on INSERT | Done | Same file |
 | CORS restricted to known origins | Done | Same file |
 | Input length validation (all fields) | Done | Same file |
-| Retry-After on 429 responses | Done | Same file |
+| Retry-After on 429 responses | Done | Worker (`/api/register`) and edge function (lifetime cap) |
 | Security headers (HSTS, X-Frame, nosniff) | Done | `public/_headers` |
 | HTML edge caching + stale-while-revalidate | Done | `public/_headers` |
 | API input validation (card/og routes) | Done | `worker/index.ts`, `container/server.mjs` |
@@ -418,15 +465,20 @@ Update `handle-dmv-registration` edge function email to:
 
 ## Deploy Order
 
-1. Run SQL migrations on Supabase (`provisional_dmv` enum, `AGENT` enum, email index)
-2. `supabase functions deploy register-agent` (Redis rate limiting + provisional_dmv)
+1. Run SQL migrations on Supabase (`provisional_dmv` enum, `AGENT` enum, email index) — historical, already done
+2. `supabase functions deploy register-agent` (now without Upstash; validation + lifetime cap + cert ID + INSERT)
 3. `supabase functions deploy badge` (cache headers)
-4. `pnpm cf:deploy` (frontend + worker + container: perf + security headers + API hardening)
-5. Ship main site auth hub upgrade (provisional_dmv → pending_profile on sign-in)
-6. Ship main site member count exclusion
-7. Enable `NEXT_PUBLIC_SHOW_AGENT_CARDS=true` on main site
+4. **Provision worker secrets** in the Cloudflare dashboard for `dmv-agentcommunity`:
+   - `TURNSTILE_SECRET_KEY` (encrypted secret) — `wrangler secret put` is currently blocked on this worker by a version-mismatch guard, see `docs/plans/2026-04-08-handoff-prompt.md` §69 for the operational workaround
+5. **Provision worker bindings** (one-time, already done — listed for reference):
+   - `REGISTER_COOLDOWN_KV` namespace via `pnpm wrangler kv namespace create REGISTER_COOLDOWN_KV` (+ `--preview`), then paste both ids into `wrangler.jsonc`
+6. `pnpm cf:deploy` (frontend + worker + container: perf + security headers + `/api/register` + Turnstile + shared CF rate limits + KV cooldown)
+7. **First-submission smoke test:** open `pnpm cf:tail` in another shell and submit a real browser registration. If Turnstile siteverify rejects with `invalid-input-secret`, the dashboard-pasted secret has a typo or trailing whitespace.
+8. Ship main site auth hub upgrade (provisional_dmv → pending_profile on sign-in)
+9. Ship main site member count exclusion
+10. Enable `NEXT_PUBLIC_SHOW_AGENT_CARDS=true` on main site
 
-Steps 1-4 can ship together. Steps 5-7 can ship later — `provisional_dmv` registrations will simply wait until the auth hub upgrade is deployed.
+Steps 1-7 can ship together. Steps 8-10 can ship later — `provisional_dmv` registrations will simply wait until the auth hub upgrade is deployed.
 
 ## Testing the Full Flow
 
