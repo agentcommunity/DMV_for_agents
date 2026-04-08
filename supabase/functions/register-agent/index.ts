@@ -124,9 +124,38 @@ function getCorsHeaders(req: Request) {
 
 // --- Handler ---
 
+// Proxy header gate — only the DMV worker at dmv.agentcommunity.org/api/register
+// is allowed to call this function. The worker sets `x-dmv-proxy: v1` on every
+// forwarded request (see worker/index.ts handleRegister). Any direct POST to
+// this Supabase URL without that header is rejected with 403.
+//
+// This closes the direct-Supabase bypass that existed during the 2026-04-08
+// migration window for legacy CLI versions. Adoption of the worker-proxied
+// @agentcommunity/dmv-agent CLI is complete, so there are no known legitimate
+// direct callers anymore. OPTIONS preflights are exempt (browsers don't send
+// custom headers on preflight, and we still want CORS to work for any future
+// debugging).
+const DMV_PROXY_HEADER = 'x-dmv-proxy'
+const DMV_PROXY_VERSION = 'v1'
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: getCorsHeaders(req) })
+  }
+
+  const proxyHeader = req.headers.get(DMV_PROXY_HEADER)
+  if (proxyHeader !== DMV_PROXY_VERSION) {
+    return new Response(
+      JSON.stringify({
+        error: 'direct_access_deprecated',
+        message:
+          'Direct access to this edge function is no longer supported. Use ' +
+          'https://dmv.agentcommunity.org/api/register (the DMV worker proxy) ' +
+          'or update @agentcommunity/dmv-agent to the latest version via ' +
+          '`bunx dmv-agent register`.',
+      }),
+      { status: 403, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+    )
   }
 
   if (req.method !== 'POST') {
