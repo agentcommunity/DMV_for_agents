@@ -4,6 +4,12 @@
 node_modules/
 supabase/.temp/
 
+# Git worktrees — local-only, should never be tracked or packaged
+# (npm publish from repo root would otherwise walk into .worktrees/
+#  and double-ship everything; root package.json "private": true is
+#  the hard safety, this is belt-and-suspenders)
+.worktrees/
+
 # Cloudflare migration build outputs
 dist/
 .wrangler/
