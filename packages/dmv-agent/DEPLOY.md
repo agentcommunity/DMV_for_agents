@@ -243,8 +243,8 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 ### Things to watch
 
 - **Cloudflare dashboard → Workers → dmv-agentcommunity → Logs** — `/api/register` invocation count, error rate, Turnstile siteverify failures
-- **Cloudflare dashboard → Workers → dmv-agentcommunity → Analytics Engine → `dmv_worker_events`** — query `register_attempt` events by status (`2xx`, `4xx`, `5xx`, `rate_limited`, `fingerprint_cooldown`, `turnstile_required`, `turnstile_failed`, `validation`, `invalid_json`)
-- **Supabase dashboard → Edge Functions → register-agent** — invocation count, error rate, latency (now strictly worker-forwarded plus the temporary direct bypass)
+- **Cloudflare dashboard → Workers → dmv-agentcommunity → Analytics Engine → `dmv_worker_events`** — query events where `category = 'register'` and group by the tier blob. Actual tier values: `405`, `validation`, `invalid_json`, `turnstile_required`, `turnstile_failed`, `machine_fingerprint_required`, `rate_limited`, `fingerprint_cooldown`, `supabase` (successful forward, 2xx upstream), and `supabase_<status>` (forwarded but upstream returned a non-2xx, e.g., `supabase_403` for lifetime-cap, `supabase_500` for DB errors)
+- **Supabase dashboard → Edge Functions → register-agent** — invocation count, error rate, latency (now strictly worker-forwarded — direct access returns 403 via the `x-dmv-proxy` gate)
 - **Supabase dashboard → Table Editor → registrations** — row count, any anomalies
 - **Rate limiting** — shared CF limits are 5/email/60s and 4/(IP+email)/60s. Adjust in `wrangler.jsonc` `ratelimits` array, but remember the namespace IDs are shared with `agentCommunity_PAGE` — coordinate with that repo before changing values.
 - **Duplicate certs** — 409 responses mean same user tried to re-register the same agent (expected, they get their cert ID back)

@@ -178,6 +178,19 @@ The `--no-verify-jwt` is not optional. See quirk #1.
 
 This was a long arc: started with "add rate limiting and Turnstile to DMV registration" and ended with a cross-repo schema design discovery that revealed a latent bug in the DMV edge function that had been there since the Upstash days but never triggered because the function had never actually been exercised end-to-end in production. The hardening itself was straightforward; the debugging loop that followed the first production deploy was the interesting part. Read `AUTH_DMV.md` "Status Lifecycle" section for the full story.
 
-If you pick this up and something is broken, the single highest-leverage thing is: tail the worker (`pnpm cf:tail`), reproduce the failure, and look at the analytics events in the `dmv_worker_events` Analytics Engine dataset. The worker emits `register_attempt` events with status tiers (`2xx`, `4xx`, `5xx`, `rate_limited`, `fingerprint_cooldown`, `turnstile_required`, `turnstile_failed`, `validation`, `invalid_json`) that tell you exactly which gate a failing request hit.
+If you pick this up and something is broken, the single highest-leverage thing is: tail the worker (`pnpm cf:tail`), reproduce the failure, and look at the analytics events in the `dmv_worker_events` Analytics Engine dataset. The worker emits events with `category: 'register'` and a tier blob that tells you exactly which gate a failing request hit. Actual tier vocabulary (from `worker/index.ts` `emitRegisterAnalytics` call sites):
+
+  - `'405'` — non-POST method
+  - `'validation'` — JSON shape / field validation failed
+  - `'invalid_json'` — request body wasn't parseable JSON
+  - `'turnstile_required'` — browser path missing `cf-turnstile-response`
+  - `'turnstile_failed'` — Turnstile siteverify rejected the token
+  - `'machine_fingerprint_required'` — CLI/MCP path missing `machine_fingerprint`
+  - `'rate_limited'` — shared CF limiter (`RL_OTP_EMAIL` or `RL_OTP_IP_EMAIL`) fired
+  - `'fingerprint_cooldown'` — DMV-local KV cooldown fired
+  - `'supabase'` — request successfully forwarded and Supabase returned 2xx
+  - `'supabase_<status>'` — request forwarded but Supabase returned a non-2xx (e.g., `supabase_403` for lifetime-cap hits, `supabase_400` for Supabase validation, `supabase_500` for DB errors)
+
+So a query like `tier = 'supabase_500'` pinpoints upstream DB failures, `tier LIKE 'supabase_%'` shows all upstream errors, and `tier NOT LIKE 'supabase%'` shows everything the worker rejected before it ever hit Supabase.
 
 Good luck.
