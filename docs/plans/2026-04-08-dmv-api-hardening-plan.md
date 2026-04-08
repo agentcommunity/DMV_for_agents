@@ -23,12 +23,13 @@
 
 **What's NEW and what's PRESERVED:**
 - **NEW:** `/api/register` worker route with Turnstile verification, rate limiting, upstream forwarding
-- **NEW:** browser Turnstile widget embedded in the CRT terminal form
+- **NEW:** browser Turnstile widget using **Invisible widget mode** (configured in the Cloudflare dashboard) so the CRT canvas aesthetic stays intact. Invisible widget mode guarantees the widget never shows any UI at all — no checkbox, no iframe, no challenge overlay — even for visitors who trip Cloudflare's heuristics. Those visitors pass silently or fail silently via error-callback. The render call uses `execution: 'execute'` so the challenge is deferred until form submit rather than running on page load, and on submit `turnstile.execute()` is called and the token is awaited before the `/api/register` POST. A "Protected by Cloudflare" attribution is added to the page footer (Cloudflare ToS requirement for Turnstile deployments).
 - **NEW:** server-side `machine_fingerprint` verification in the Supabase edge function (was sent by CLI but unverified)
 - **NEW:** closed Supabase-direct bypass (final step, staged after client adoption)
 - **PRESERVED:** existing Upstash Redis rate limits in `register-agent` (6 layers documented in ARCHITECTURE.md)
 - **PRESERVED:** existing machine fingerprint generation in `packages/dmv-agent/src/rate-limit.ts`
 - **PRESERVED:** certificate ID generation + database write flow (unchanged)
+- **PRESERVED:** the CRT terminal's pure-Canvas2D rendering — no DOM form fields are added; Turnstile's mount div sits outside the TV scene and is visually silent for the happy path.
 
 **Hard constraints:**
 - **Do NOT break existing CLI users.** `bunx dmv-agent` installations in the wild hit Supabase direct. Support dual paths for at least 2 weeks before closing the bypass.
@@ -58,7 +59,7 @@
 | (wrangler secrets) | 1 | `TURNSTILE_SECRET_KEY` via `wrangler secret put` |
 | `worker/index.ts` | 2 | `handleRegister` handler, `verifyTurnstile` helper, dispatch in `fetch`, Env interface |
 | `supabase/functions/register-agent/index.ts` | 3 | Server-side `machine_fingerprint` verification via Upstash Redis |
-| `index.html` | 4 | Turnstile widget inside the CRT form |
+| `index.html` | 4 | Turnstile script, `#turnstile-container` mount div (off-screen, never visibly renders because of Invisible widget mode), `dmv-turnstile-site-key` meta tag, and footer attribution line |
 | `js/supabase.js` | 5 | `REGISTER_ENDPOINT` → `/api/register`, pass Turnstile token |
 | `packages/dmv-agent/src/register.ts` | 6 | `REGISTER_ENDPOINT` → `https://dmv.agentcommunity.org/api/register`, bump package version |
 | `packages/dmv-agent/package.json` | 6 | Version bump |
@@ -76,23 +77,36 @@
 
 **Dashboard prereq (you, the user, do this once — sub-agent cannot):**
 1. https://dash.cloudflare.com → Turnstile → Add Site
-2. Site name: `dmv.agentcommunity.org`
-3. Domain: `dmv.agentcommunity.org`
-4. Widget mode: **Managed** (recommended — automatic challenge escalation based on risk score)
-5. Copy the Site Key (public, looks like `0x4AAA...`) and Secret Key (private, looks like `0x4AAA...`)
-6. Pass the site key to the sub-agent via the task dispatch. Install the secret key via `wrangler secret put TURNSTILE_SECRET_KEY` (do this interactively).
+2. Widget name: `dmv_agentcommunity`
+3. Hostname: `dmv.agentcommunity.org`
+4. Widget mode: **Invisible** — fits the CRT's fully-canvas UI constraint. The widget never shows UI, even for suspicious visitors; they pass silently or fail silently (error-callback fires). The tradeoff is that visitors who trip Cloudflare's heuristics can't recover via an interactive challenge — they just get blocked. Acceptable for DMV because we have four additional defense layers (worker `REGISTER_RATE_LIMITER` + Upstash per-IP / per-email / per-IP+email / per-fingerprint) and pre-registration visitors can retry from a cleaner IP/session.
+5. Pre-clearance ("Skip future security rule challenges for verified visitors"): **No**. DMV has no zone-level WAF rules or Bot Fight Mode that would benefit from the 30-min clearance cookie. Enable later if/when zone-level rules are added.
+6. Copy the Site Key (public, looks like `0x4AAA...`) and Secret Key (private, looks like `0x4AAA...`)
+7. Pass the site key to the sub-agent via the task dispatch. Install the secret key — see Step 1 below for the recommended path.
 
-- [ ] **Step 1: Install `TURNSTILE_SECRET_KEY` as a wrangler secret**
+- [ ] **Step 1: Install `TURNSTILE_SECRET_KEY` on the Worker**
+
+The Worker uses versioned-secrets semantics, which means `pnpm wrangler secret put` will refuse to add a secret if the latest uploaded Worker version isn't the currently deployed one (orphan-version guard). The cleanest install path that sidesteps the version state machine entirely is the Cloudflare dashboard:
+
+1. https://dash.cloudflare.com → Workers & Pages → `dmv-agentcommunity`
+2. Settings → Variables and Secrets → Add variable
+3. Type: **Secret (encrypted)**
+4. Name: `TURNSTILE_SECRET_KEY`
+5. Value: paste the private key from the Turnstile dashboard
+6. Save
+
+If you prefer CLI and the Worker version state is clean (i.e., `wrangler versions list` shows the latest uploaded == latest deployed), this works:
 
 ```bash
-cd /path/to/worktree
 pnpm wrangler secret put TURNSTILE_SECRET_KEY
-# Paste the secret key from the dashboard when prompted
+# Paste the secret key from the Turnstile dashboard when prompted
 ```
 
-Verify:
+If you hit the "latest version isn't currently deployed" error, use the dashboard path above, or use `pnpm wrangler versions secret put TURNSTILE_SECRET_KEY` (creates a pending version without deploying — the secret becomes active when Task 9 later runs `pnpm cf:deploy`).
+
+Verify (read-only, works regardless of version state):
 ```bash
-pnpm wrangler secret list
+pnpm wrangler secret list --name dmv-agentcommunity
 ```
 Expected: `TURNSTILE_SECRET_KEY` appears in the list.
 
@@ -732,49 +746,86 @@ In `index.html` head section, after the existing `<link rel="preconnect" href="h
 
 `?render=explicit` means we control when the widget renders (not auto on page load) — important because the CRT form is inside a 3D scene and shouldn't trigger Turnstile until the user actually fills the form.
 
-- [ ] **Step 2: Add Turnstile widget container inside the CRT form**
+- [ ] **Step 2: Add the Turnstile mount div**
 
-Find the review/submit screen of the CRT terminal flow in `index.html`. This is typically a `<div>` that holds the submit button. Add a Turnstile container right before the submit button:
+Because the widget is configured in **Invisible mode** in the Cloudflare dashboard, it never renders any UI — ever. No checkbox, no iframe overlay, no interactive challenge popup. So the mount div only needs to exist as a DOM anchor for the Turnstile script to attach to; its position and visibility are irrelevant. We use an off-screen absolutely-positioned div rather than `display:none` because some browsers pause iframes inside `display:none` ancestors, which could interfere with Turnstile's silent background verification.
+
+Add this near the end of `<body>` in `index.html`, after any existing overlay divs:
 
 ```html
-<div id="turnstile-container" style="display:none"></div>
+<!-- Turnstile mount anchor. The widget uses Invisible mode (dashboard config)
+     so it never renders any visible UI — this div is purely a DOM anchor
+     for turnstile.render(). Positioned off-screen rather than display:none
+     because some browsers pause iframes inside display:none ancestors,
+     which could break Turnstile's silent background verification. -->
+<div id="turnstile-container"
+     aria-hidden="true"
+     style="position:absolute;left:-9999px;top:-9999px;width:0;height:0;opacity:0;pointer-events:none"></div>
 ```
 
-The container starts hidden. `CRTTerminal.js` will un-hide it and explicitly render the widget when the form reaches the review/submit screen. See Task 5 for the JS glue.
+That's it. No shell wrapper, no grace timer, no conditional un-hiding. The CRT canvas and Three.js scene are completely untouched by Turnstile.
+
+- [ ] **Step 2b: Add Cloudflare Turnstile attribution to the footer**
+
+Cloudflare's Turnstile ToS requires attribution when using the service, regardless of widget mode. Add a small attribution to the existing page footer (or create one if none exists). In `index.html`, inside the footer area (look for `<footer>` or the existing bottom status strip), add:
+
+```html
+<span class="dmv-turnstile-attribution" style="font-size:1.1rem;opacity:0.6">
+  Bot protection by
+  <a href="https://www.cloudflare.com/products/turnstile/" target="_blank" rel="noopener noreferrer" style="color:inherit">Cloudflare Turnstile</a>
+</span>
+```
+
+Style to taste — the attribution is required but can be subtle. If the footer doesn't have a reasonable spot, add a minimal one-liner below the existing status strip.
 
 - [ ] **Step 3: Update CSP to allow the Turnstile origin**
 
-The CSP in `public/_headers` currently allows `https://cdn.jsdelivr.net` in `script-src` and `connect-src`. Add `https://challenges.cloudflare.com` to BOTH:
+**DRIFT NOTE (2026-04-08):** Commit `65b82e4 fix(cf): allow blob: in img-src and connect-src CSP for GLTF textures` landed on main after this plan was originally written. That commit added `blob:` to `img-src` and `connect-src` in BOTH `public/_headers` and `worker/index.ts` `PERMALINK_CSP`. **Before editing, re-read both files and use the actual current strings** rather than the strings quoted below — the Turnstile additions must be layered on top of the blob: additions, not instead of them.
 
-Find the CSP line in `public/_headers`:
+The CSP in `public/_headers` as of commit `65b82e4` reads:
 ```
-Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-4FXY4zEWzG37E4zo2Jp75PEXIdWH8wCQO29RFVSutWk=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://tcymqfwwphacnosnnzxl.supabase.co https://cdn.jsdelivr.net; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
-```
-
-Change to (added `https://challenges.cloudflare.com` in `script-src`, `frame-src`, and `connect-src`):
-
-```
-Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-4FXY4zEWzG37E4zo2Jp75PEXIdWH8wCQO29RFVSutWk=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://challenges.cloudflare.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://tcymqfwwphacnosnnzxl.supabase.co https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-4FXY4zEWzG37E4zo2Jp75PEXIdWH8wCQO29RFVSutWk=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: https://tcymqfwwphacnosnnzxl.supabase.co https://cdn.jsdelivr.net; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 ```
 
-Turnstile renders its challenge UI inside an iframe, so `frame-src` is required.
+Change to (added `https://challenges.cloudflare.com` in `script-src`, `connect-src`, and a new `frame-src` directive — keep the `blob:` tokens that were added in `65b82e4`):
 
-**Also update `PERMALINK_CSP` in `worker/index.ts`** to the exact same string (it's duplicated per the code comment at the constant declaration). Don't forget this — the permalink path will break under the old CSP if the SPA's importmap changes, and adding Turnstile doesn't affect the importmap, but consistency matters.
+```
+Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-4FXY4zEWzG37E4zo2Jp75PEXIdWH8wCQO29RFVSutWk=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://challenges.cloudflare.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: https://tcymqfwwphacnosnnzxl.supabase.co https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+```
+
+Turnstile's Invisible mode still creates a hidden iframe internally for the silent verification handshake, so `frame-src` is required even though the user never sees the iframe.
+
+**Also update `PERMALINK_CSP` in `worker/index.ts`** to the exact same string (it's duplicated per the code comment at the constant declaration, around line 153). The current `PERMALINK_CSP` as of commit `65b82e4` is byte-identical to the `public/_headers` CSP above (the `blob:` fix touched both in lockstep), so the same find-and-replace applies. Don't forget this — if the two drift, `/c/:cert/:name` permalink responses get a different CSP than the root SPA, which is how the 2026-04-07 plan's Task 8 hit a bug.
+
+**Verification before commit:**
+```bash
+grep -c 'challenges.cloudflare.com' public/_headers       # → should be 3 (script-src, connect-src, frame-src)
+grep -c 'challenges.cloudflare.com' worker/index.ts       # → should be 3 (same three directives inside PERMALINK_CSP)
+grep -c "'self' data: blob:" public/_headers              # → should be 1 (img-src — preserved from 65b82e4)
+grep -c "'self' blob: https://tcymqfwwphacnosnnzxl" public/_headers  # → should be 1 (connect-src start — preserved from 65b82e4)
+```
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add index.html public/_headers worker/index.ts
 git commit -m "$(cat <<'EOF'
-feat(web): add Turnstile script + container and update CSP
+feat(web): add Invisible Turnstile mount + attribution + CSP updates
 
 - Loads Turnstile API from challenges.cloudflare.com with ?render=explicit
-  so the widget only renders when the CRT form reaches the submit screen
-- Adds hidden #turnstile-container div inside the form flow (the CRT
-  terminal JS un-hides and mounts on demand)
+  so we control the render lifecycle from CRTTerminal.js
+- Adds #turnstile-container mount div OUTSIDE the CRT canvas, positioned
+  off-screen (position:absolute, left:-9999px). Widget is configured in
+  Invisible mode in the Cloudflare dashboard so it never produces any
+  visible UI — the mount div exists purely as a DOM anchor for the
+  Turnstile script, and the 3D TV scene stays completely untouched
+- Adds the required "Bot protection by Cloudflare Turnstile" attribution
+  in the page footer (Turnstile ToS)
+- Adds dmv-turnstile-site-key meta tag so the JS can read the public key
+  without a build-time injection step
 - Extends CSP script-src, connect-src, and new frame-src with
-  https://challenges.cloudflare.com (frame-src because Turnstile renders
-  its challenge UI in an iframe)
+  https://challenges.cloudflare.com (frame-src because Turnstile still
+  creates a hidden iframe internally even in Invisible mode)
 - Keeps PERMALINK_CSP in worker/index.ts byte-identical to public/_headers
 - preconnect hint to challenges.cloudflare.com for faster widget load
 
@@ -829,53 +880,146 @@ export async function insertRegistration(formData, signupSource = 'ui', turnstil
 }
 ```
 
-- [ ] **Step 3: Render the Turnstile widget in the CRT form flow**
+- [ ] **Step 3: Render the Turnstile widget (Invisible mode)**
 
-In `js/CRTTerminal.js` (or wherever the form's review/submit phase transitions), find the point where the form reaches the submit screen. Add:
+In `js/CRTTerminal.js` (or wherever the form's review/submit phase transitions), add the following widget manager. Because the Turnstile widget is configured in **Invisible mode** in the Cloudflare dashboard, no visible UI ever renders — we don't need the shell-unhide dance, grace timers, or interactive-challenge handling. We just need:
+
+1. **`execution: 'execute'`** in the render call so the challenge is deferred until form submit (don't burn Turnstile quota on visitors who abandon the form before submit).
+2. A Promise-wrap around the single-arg `turnstile.execute(widgetId)` API, using render-time callbacks + a module-level pending-resolver slot. Cloudflare's documented `execute()` signature is single-argument (`execute(widgetId | selector)`) — per-execute callback overrides are NOT part of the public API, so the render-time callbacks + pending slot pattern is the canonical way to Promise-wrap.
+3. A hard timeout (15s) in case the silent verification hangs.
+4. `turnstile.reset(widgetId)` on failure so the next attempt starts clean.
 
 ```js
-// Turnstile widget management. Rendered lazily on form submit screen to
-// avoid unnecessary network / compute during earlier phases. Uses the
-// ?render=explicit API so we control when the iframe is created.
+// Turnstile widget management — Invisible widget mode.
+//
+// The widget is configured in Invisible mode in the Cloudflare dashboard,
+// so turnstile.render() never produces any visible UI — the #turnstile-container
+// mount div stays off-screen and empty-looking to the user. All verification
+// happens silently in a background iframe.
+//
+// Lifecycle:
+//   1. mountTurnstileWidget() is called once when the CRT form reaches the
+//      review/submit phase. It calls turnstile.render() with execution='execute',
+//      which creates the widget but does NOT run the challenge.
+//   2. On submit, executeTurnstile() stores fresh resolve/reject handlers in
+//      the pending slot, then calls turnstile.execute(widgetId). The render-
+//      time callback fires (silently, no UI), consumes the pending slot, and
+//      the promise settles with the token.
+//   3. On error/expiry/timeout the promise rejects with a descriptive Error,
+//      and we reset the widget via turnstile.reset(widgetId) so the next
+//      submit attempt starts fresh.
+
 let turnstileWidgetId = null;
-let turnstileToken = null;
+let turnstileRenderAttempted = false;
+
+// Single-slot pending resolver. Overwritten on each executeTurnstile() call.
+// Only one verification-in-flight is possible at a time, which matches the
+// CRT submit button's single-click-then-disable UX.
+let pendingTurnstileResolve = null;
+let pendingTurnstileReject = null;
+let pendingTurnstileTimer = null;
+
+function _settleTurnstile(ok, value) {
+  const resolve = pendingTurnstileResolve;
+  const reject = pendingTurnstileReject;
+  pendingTurnstileResolve = null;
+  pendingTurnstileReject = null;
+  if (pendingTurnstileTimer) {
+    clearTimeout(pendingTurnstileTimer);
+    pendingTurnstileTimer = null;
+  }
+  if (ok && resolve) resolve(value);
+  else if (!ok && reject) reject(value);
+}
 
 function mountTurnstileWidget() {
-  const container = document.getElementById('turnstile-container');
-  if (!container) return;
-  if (turnstileWidgetId !== null) return; // already mounted
+  if (turnstileRenderAttempted && turnstileWidgetId !== null) return;
   if (typeof window.turnstile === 'undefined') {
-    console.warn('[turnstile] script not loaded yet');
+    console.warn('[turnstile] script not loaded yet — will retry on first execute');
+    return;
+  }
+  turnstileRenderAttempted = true;
+
+  const container = document.getElementById('turnstile-container');
+  if (!container) {
+    console.warn('[turnstile] #turnstile-container missing');
     return;
   }
 
-  container.style.display = 'block';
-  turnstileWidgetId = window.turnstile.render(container, {
-    sitekey: document.querySelector('meta[name="dmv-turnstile-site-key"]')?.content,
-    theme: 'dark', // match CRT aesthetic
-    callback: (token) => {
-      turnstileToken = token;
-      console.log('[turnstile] token received');
-    },
-    'error-callback': () => {
-      console.error('[turnstile] challenge errored');
-      turnstileToken = null;
-    },
-    'expired-callback': () => {
-      console.warn('[turnstile] token expired');
-      turnstileToken = null;
-    },
+  const siteKey = document.querySelector('meta[name="dmv-turnstile-site-key"]')?.content;
+  if (!siteKey) {
+    console.error('[turnstile] dmv-turnstile-site-key meta tag missing');
+    return;
+  }
+
+  try {
+    turnstileWidgetId = window.turnstile.render(container, {
+      sitekey: siteKey,
+      execution: 'execute',  // don't run challenge until we call execute()
+      callback: (token) => _settleTurnstile(true, token),
+      'error-callback': (errorCode) => {
+        console.error('[turnstile] challenge errored', errorCode);
+        _settleTurnstile(false, new Error(`Turnstile error: ${errorCode || 'unknown'}`));
+      },
+      'expired-callback': () => {
+        _settleTurnstile(false, new Error('Turnstile token expired — please retry'));
+      },
+    });
+  } catch (err) {
+    console.error('[turnstile] render failed', err);
+    turnstileWidgetId = null;
+  }
+}
+
+function executeTurnstile({ timeoutMs = 15000 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (typeof window.turnstile === 'undefined') {
+      return reject(new Error('Turnstile script not loaded'));
+    }
+    if (turnstileWidgetId === null) {
+      mountTurnstileWidget();
+      if (turnstileWidgetId === null) {
+        return reject(new Error('Turnstile widget failed to mount'));
+      }
+    }
+
+    // Overwrite any stale pending slot (shouldn't happen in normal flow, but
+    // defend against rapid double-clicks that somehow bypass the submit
+    // button's disabled state).
+    if (pendingTurnstileResolve || pendingTurnstileReject) {
+      _settleTurnstile(false, new Error('Turnstile verification superseded'));
+    }
+
+    pendingTurnstileResolve = resolve;
+    pendingTurnstileReject = reject;
+
+    pendingTurnstileTimer = setTimeout(() => {
+      if (turnstileWidgetId !== null) {
+        try { window.turnstile.reset(turnstileWidgetId); } catch { /* ignore */ }
+      }
+      _settleTurnstile(false, new Error('Turnstile verification timed out'));
+    }, timeoutMs);
+
+    try {
+      window.turnstile.execute(turnstileWidgetId);
+    } catch (err) {
+      _settleTurnstile(false, err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
 
-function getTurnstileToken() {
-  return turnstileToken;
+function resetTurnstile() {
+  if (turnstileWidgetId !== null && typeof window.turnstile !== 'undefined') {
+    try { window.turnstile.reset(turnstileWidgetId); } catch { /* ignore */ }
+  }
 }
 ```
 
-Call `mountTurnstileWidget()` when the form reaches the review/submit phase. Call `getTurnstileToken()` when submitting and pass the returned value as the third argument to `insertRegistration(formData, 'ui', token)`.
-
-If `getTurnstileToken()` returns null at submit time, either block submission with a user-facing error ("Please complete the challenge") OR wait for the Turnstile callback to fire and retry. The UX depends on how the CRT terminal handles async state today — match the existing pattern.
+**Wire-up:**
+- Call `mountTurnstileWidget()` when the CRT form transitions into the review/submit phase. Idempotent — repeated calls are no-ops once the widget is rendered.
+- When the user clicks the CRT submit button, `await executeTurnstile()` **before** calling `insertRegistration()`. Pass the resolved token as the third argument: `await insertRegistration(formData, 'ui', token)`.
+- If `executeTurnstile()` rejects, surface a CRT-styled error matching the existing form-validation error pattern ("VERIFICATION FAILED — PLEASE RETRY"), reset the submit button, and call `resetTurnstile()` so the widget is ready for the next attempt. Do NOT fall back to calling `insertRegistration()` without a token — the worker will reject it (400 turnstile-missing or 403 turnstile-failed).
+- The submit button MUST be disabled between click and the promise settling, so a double-click doesn't create two `pendingTurnstileResolve` slots (the second would supersede the first via the safety check inside `executeTurnstile`).
 
 - [ ] **Step 4: Expose the Turnstile site key to the browser JS**
 
@@ -901,35 +1045,72 @@ This is the hardest part of the plan to smoke locally because Turnstile's test s
 
 - `1x00000000000000000000AA` — always passes (use for happy-path testing)
 - `2x00000000000000000000AB` — always fails
-- `3x00000000000000000000FF` — always challenges (interactive)
 
-For local smoke, temporarily set the `TURNSTILE_SITE_KEY` in `wrangler.jsonc` to `1x00000000000000000000AA` AND set the `TURNSTILE_SECRET_KEY` via `wrangler secret put` to `1x0000000000000000000000000000000AA` (the matching test secret).
+Matching test secret keys:
+- `1x0000000000000000000000000000000AA` — always passes
+- `2x0000000000000000000000000000000AA` — always fails
+
+(There's also a `3x00000000000000000000FF` / `3x000...AA` always-interactive-challenge pair, but it's not useful here — **Invisible widget mode will ignore the interactive-challenge request** and fail via the error-callback path instead. Don't smoke test with it; the result would be the same as the always-fail test keys and would just confuse the interpretation.)
+
+For local smoke, temporarily set three things to the test values:
+1. `wrangler.jsonc` `vars.TURNSTILE_SITE_KEY` → `1x00000000000000000000AA`
+2. `index.html` `<meta name="dmv-turnstile-site-key">` → `1x00000000000000000000AA`
+3. Install the matching test secret: use the Cloudflare dashboard (Worker Settings → Variables and Secrets) to edit `TURNSTILE_SECRET_KEY` to `1x0000000000000000000000000000000AA`. Dashboard path avoids the `wrangler secret put` version-mismatch issue.
 
 Then:
 ```bash
 pnpm cf:build
 pnpm cf:dev
 # Open http://localhost:<port>/
-# Complete the CRT form flow, submit, verify the form succeeds end-to-end
-# (the POST should hit /api/register, Turnstile verify, and forward to Supabase)
+# 1. Complete the CRT form flow to the review/submit screen.
+# 2. Verify in devtools:
+#    - #turnstile-container exists in the DOM and is positioned off-screen
+#      (position:absolute, left:-9999px)
+#    - No Cloudflare iframe visibly overlays the page at any point
+#    - window.turnstile exists and turnstileWidgetId was assigned
+# 3. Click submit. Open the Network tab and confirm:
+#    - A POST to /api/register (same-origin, NOT supabase.co)
+#    - Request body includes `cf-turnstile-response: <test token>` (the test
+#      key always returns the string "XXXX.DUMMY.TOKEN.XXXX" or similar)
+#    - Response is 200/201, or a specific Supabase-side error (e.g. duplicate
+#      email, agent name taken) — anything EXCEPT a worker-side Turnstile
+#      rejection. If you see `{"error":"Turnstile token required..."}` or
+#      `{"error":"Turnstile verification failed"}`, token capture or
+#      siteverify is broken.
+# 4. Failure path: swap all three values to the always-fail test keys
+#    (`2x00000000000000000000AB` in wrangler.jsonc + meta tag,
+#    `2x0000000000000000000000000000000AA` in dashboard secret). Rebuild
+#    and reload. Submit the form and verify the CRT surfaces a
+#    "VERIFICATION FAILED" error without POSTing to /api/register — the
+#    error surfaces from executeTurnstile() via error-callback, NOT from
+#    the worker (the POST never fires).
 ```
 
-**IMPORTANT: revert the test site key + secret back to the real values before committing or deploying.**
+**IMPORTANT: revert the test site key + secret back to the real values in all three places (wrangler.jsonc, index.html meta tag, dashboard secret) before committing or deploying.** Grep for `1x00000000000000000000AA` and `2x00000000000000000000AB` before committing to catch any leftover test keys.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add js/supabase.js js/CRTTerminal.js index.html
 git commit -m "$(cat <<'EOF'
-feat(web): route registration through /api/register with Turnstile
+feat(web): route registration through /api/register with Invisible Turnstile
 
 Browser registration flow now:
-1. Loads Turnstile API from challenges.cloudflare.com (deferred, explicit render)
-2. Mounts the widget when the CRT form reaches the submit screen
-3. Captures the response token via callback
-4. POSTs to /api/register (worker proxy) instead of Supabase direct
-5. Sends the token in the cf-turnstile-response body field
-6. Worker verifies with siteverify and forwards to Supabase on success
+1. Mounts the Turnstile widget lazily when the CRT form reaches the review
+   phase, with execution=execute so the challenge is deferred until form
+   submit. Widget is configured in Invisible mode in the Cloudflare
+   dashboard so no UI ever renders — visitors pass or fail silently.
+2. On submit, turnstile.execute() is called and the render-time callback
+   resolves a module-level pending promise via executeTurnstile().
+   Zero visible UI, CRT aesthetic fully preserved.
+3. Resolved token is sent as cf-turnstile-response in the /api/register
+   POST body; the worker proxy verifies and forwards to Supabase.
+4. Failed/expired/timed-out verification surfaces a CRT-styled
+   "VERIFICATION FAILED" error and calls turnstile.reset() so the next
+   attempt starts fresh. In Invisible mode, failure means the visitor
+   tripped Cloudflare's silent heuristics — no interactive fallback path
+   is available (by design; DMV has four other defense layers).
+5. 15s hard timeout in case silent verification hangs.
 
 Turnstile site key is exposed via <meta name="dmv-turnstile-site-key">
 (public, safe to commit). Secret key stays in wrangler secrets.
@@ -966,9 +1147,11 @@ Everything else in the file stays the same. The CLI already sends `machine_finge
 
 - [ ] **Step 2: Bump the package version**
 
-Open `packages/dmv-agent/package.json`, find the `version` field, bump it according to the existing semver scheme. If the current version is `0.3.2`, bump to `0.4.0` (minor bump — routing change is a meaningful behavior shift, even though the user-visible API is unchanged).
+Open `packages/dmv-agent/package.json`, find the `version` field, bump it according to the existing semver scheme.
 
-Also check `packages/dmv-agent-alias/package.json` if it exists (alias package); keep versions in sync.
+**Current state (verified 2026-04-08):** `packages/dmv-agent/package.json` is at `0.1.0`. Bump to `0.2.0` (minor — routing change is a meaningful behavior shift even though the user-visible API is unchanged).
+
+Also bump `packages/dmv-agent-alias/package.json` (the unscoped `dmv-agent` alias wrapper committed in `e3d5d0d`). Current: `0.1.0`. Bump to `0.2.0` AND update the `dependencies["@agentcommunity/dmv-agent"]` field from `">=0.1.0"` to `">=0.2.0"` so users installing the unscoped alias automatically pull the newer scoped package.
 
 - [ ] **Step 3: Rebuild and smoke test the CLI locally**
 
@@ -1006,14 +1189,15 @@ Old CLI versions that still POST direct to Supabase continue to work
 for now — the bypass closure is staged for ~2 weeks after this release
 ships to allow users time to upgrade.
 
-Bumps version to X.Y.Z (minor — routing change).
+Bumps @agentcommunity/dmv-agent to 0.2.0 and the unscoped
+dmv-agent alias to 0.2.0 (minor — routing change).
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
 
-(Replace `X.Y.Z` with the actual bumped version.)
+(Version already pinned above at 0.2.0 based on the 2026-04-08 current-state check.)
 
 ---
 
@@ -1312,14 +1496,20 @@ EOF
 
 ## Self-review notes
 
-- **Spec coverage:** Closes the "API hardening" known gap from the 2026-04-07 plan. Adds Turnstile to browser flows (the original audit's explicit recommendation), server-side fingerprint verification for CLI flows, and a worker proxy layer that consolidates the registration path under the same rate-limiting + observability umbrella as the render path.
+- **Spec coverage:** Closes the "API hardening" known gap from the 2026-04-07 plan. Adds Turnstile to browser flows (the original audit's explicit recommendation) in **Invisible widget mode** (configured in the Cloudflare dashboard) so the CRT aesthetic is fully preserved — zero visitors see any Turnstile UI, ever. The tradeoff (visitors who fail the silent heuristic can't recover via an interactive challenge) is acceptable because DMV has four additional defense layers on the registration path (worker `REGISTER_RATE_LIMITER` + three Upstash limiters + new per-fingerprint limiter) and pre-registration visitors can retry from a cleaner IP/session. Adds server-side fingerprint verification for CLI flows and a worker proxy layer that consolidates the registration path under the same rate-limiting + observability umbrella as the render path.
 - **Scope boundary:** This plan does NOT change the cert ID generation, database schema, email flow, or the 6 existing Upstash rate limiters on `register-agent`. It only ADDS layers.
 - **Staged rollout:** Task 11 (bypass closure) is explicitly deferred. Running it prematurely breaks old CLI installs. The `x-dmv-proxy: v1` sentinel header is added in Task 2 so the closure check in Task 11 has something to key on when the time comes.
 - **Dashboard prereq:** Turnstile widget creation requires one-time dashboard access. Sub-agents can't do it. Flagged in Task 1.
 - **Secret management:** `TURNSTILE_SECRET_KEY` uses `wrangler secret put` (encrypted at rest, not in source). `TURNSTILE_SITE_KEY` is public and can live in `wrangler.jsonc vars`. The browser reads the site key from a `<meta>` tag in `index.html`.
 - **Test site keys:** Turnstile provides test keys (`1x00000000000000000000AA` etc.) that always pass/fail — flagged in Task 5 Step 5 for local development. Remember to revert before deploy.
 - **CLI env var override:** `DMV_API_ENDPOINT` lets developers point at staging or local without code changes. Defaults to the production worker URL.
-- **CSP impact:** Adding `challenges.cloudflare.com` to `script-src`, `connect-src`, and new `frame-src` is required for the Turnstile widget. Both `public/_headers` and `worker/index.ts` `PERMALINK_CSP` must be updated in lockstep (per the existing CSP drift comment in the worker).
+- **CSP impact:** Adding `challenges.cloudflare.com` to `script-src`, `connect-src`, and new `frame-src` is required for the Turnstile widget. `frame-src` is still required in Invisible mode because Turnstile creates a hidden internal iframe for the silent verification — even though no UI is shown to the user, the iframe still exists in the DOM and CSP must allow it. Both `public/_headers` and `worker/index.ts` `PERMALINK_CSP` must be updated in lockstep (per the existing CSP drift comment in the worker).
+- **Widget mode caveats (important for sub-agents):**
+  - Widget visibility is controlled at TWO layers: the **dashboard widget mode** (`Managed` / `Non-interactive` / `Invisible`, chosen when the widget is created) and the **client-side render params** (`appearance`, `execution`, `size`, `theme`). DMV uses **Invisible** at the dashboard layer, which guarantees no UI is ever shown regardless of client-side params.
+  - The `size: 'invisible'` render param does NOT exist — Context7 docs (queried 2026-04-08) show only `size: 'normal' | 'flexible' | 'compact'`. Visibility is a dashboard-widget-mode concern, not a client-side size concern.
+  - Because the dashboard mode is Invisible, `appearance: 'interaction-only'` is moot (there's no UI to conditionally show) and `theme: 'dark'` is moot (there's no UI to theme). The plan's render config includes only `sitekey`, `execution: 'execute'`, and the three callbacks.
+  - The `turnstile.execute()` API is documented as single-argument (`execute(widgetId | selector)`) — per-execute callback overrides are NOT part of the public API, so Task 5's Promise-wrap uses render-time callbacks + module-level pending-resolver state. Don't invent a two-arg signature.
+- **Attribution:** Cloudflare's Turnstile ToS requires visible attribution regardless of widget mode. Task 4 Step 2b adds a small "Bot protection by Cloudflare Turnstile" line to the page footer. Don't hide or remove it.
 
 ### Research log
 
