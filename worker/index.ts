@@ -20,6 +20,7 @@
 
 import { Container, getContainer } from '@cloudflare/containers';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
+import { incrementKvCooldown } from './rate-limit-kv';
 
 // Cloudflare Containers ship as Durable Objects under the hood.
 // `defaultPort` is the port the container's HTTP server listens on.
@@ -70,10 +71,18 @@ interface Env {
   // Workers Rate Limiting API binding. Configured in wrangler.jsonc under
   // the top-level `ratelimits` array. 100 req/60s per IP+path across /api/*.
   API_RATE_LIMITER: RateLimit;
+  // Shared signup abuse counters with PAGE. Only the email and IP+email
+  // surfaces are shared across products.
+  RL_OTP_EMAIL: RateLimit;
+  RL_OTP_IP_EMAIL: RateLimit;
   // KV cache for /badge/* responses. 10 min TTL. Keyed by
   // `badge:${pathname}${search}`. Values are raw bytes with content-type
   // stored in the KV metadata.
   BADGE_CACHE_KV: KVNamespace;
+  // DMV-local coarse cooldown state for machine-fingerprint registration
+  // limits on CLI/MCP flows. Intentionally not shared with PAGE.
+  REGISTER_COOLDOWN_KV: KVNamespace;
+  TURNSTILE_SECRET_KEY: string;
 }
 
 // Structured telemetry for cache tiers, badge proxy, and prewarm runs.
@@ -90,7 +99,7 @@ interface Env {
 //   doubles[0] = latency_ms
 //   doubles[1] = body_size_bytes (0 on 304 / HEAD)
 interface AnalyticsEvent {
-  category: 'render' | 'badge' | 'prewarm' | 'error';
+  category: 'render' | 'badge' | 'prewarm' | 'register' | 'error';
   tier: string;
   path: string;
   key: string;
@@ -151,7 +160,7 @@ const CRAWLER_UA =
 //   node -e 'const fs=require("fs"),crypto=require("crypto");const m=fs.readFileSync("index.html","utf8").match(/<script type="importmap">([\s\S]*?)<\/script>/);console.log("sha256-"+crypto.createHash("sha256").update(m[1]).digest("base64"));'
 // and update BOTH this constant AND public/_headers.
 const PERMALINK_CSP =
-  "default-src 'self'; script-src 'self' 'sha256-4FXY4zEWzG37E4zo2Jp75PEXIdWH8wCQO29RFVSutWk=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: https://tcymqfwwphacnosnnzxl.supabase.co https://cdn.jsdelivr.net; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self' 'sha256-4FXY4zEWzG37E4zo2Jp75PEXIdWH8wCQO29RFVSutWk=' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://challenges.cloudflare.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: https://tcymqfwwphacnosnnzxl.supabase.co https://cdn.jsdelivr.net https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 
 // In-flight request coalescing for the container render path.
 //
@@ -182,6 +191,19 @@ const PERMALINK_RE = /^\/c\/([^/]+)(?:\/([^/]+))?$/;
 
 // Supabase functions origin for /badge/* proxy.
 const SUPABASE_FUNCTIONS_ORIGIN = 'https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1';
+const DMV_REGISTER_PATH = '/api/register';
+const DMV_TURNSTILE_ACTION = 'dmv_register';
+
+// Browser Turnstile tokens must be minted for the same hostname that served
+// the DMV page. In production this is dmv.agentcommunity.org; in local dev
+// this naturally becomes localhost / 127.0.0.1 when using Cloudflare's test
+// keys.
+const TURNSTILE_VERIFY_ENDPOINT = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
+// Allow 3 successful registrations per machine fingerprint in a rolling 24h
+// window; block the 4th and later attempts until the existing TTL expires.
+const FINGERPRINT_COOLDOWN_THRESHOLD = 4;
+const FINGERPRINT_COOLDOWN_SECONDS = 24 * 60 * 60;
 
 // URLs the cron prewarm handler hits to keep L1/L2 caches warm in whichever
 // PoP CF schedules the cron in. Add featured-agent OG cards here when we
@@ -219,12 +241,176 @@ function badRequest(msg: string): Response {
   });
 }
 
+function jsonResponse(body: unknown, status: number, headers?: HeadersInit): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(headers ?? {}),
+    },
+  });
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function stripPort(hostname: string): string {
+  return hostname.trim().toLowerCase().replace(/:\d+$/, '');
+}
+
+function getExpectedHostname(request: Request): string {
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  if (forwardedHost) return stripPort(forwardedHost);
+  return stripPort(new URL(request.url).hostname);
+}
+
+function getClientIp(request: Request): string {
+  return request.headers.get('cf-connecting-ip')
+    ?? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? '127.0.0.1';
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((part) => part.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+type SignupSource = 'ui' | 'cli' | 'mcp' | 'api';
+type RegistrationType = 'AGENT' | 'INDIVIDUAL' | 'ORGANIZATION';
+
+interface CanonicalRegisterBody {
+  agent_name: string;
+  email: string;
+  operator_name: string | null;
+  organization_name: string | null;
+  description: string | null;
+  signup_source: SignupSource;
+  registration_type: RegistrationType;
+  machine_fingerprint?: string;
+  'cf-turnstile-response'?: string;
+}
+
+interface TurnstileVerifyResponse {
+  success?: boolean;
+  hostname?: string;
+  action?: string;
+}
+
+function parseRegisterBody(body: unknown): { value: CanonicalRegisterBody | null; error: string | null } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { value: null, error: 'invalid_request' };
+  }
+
+  const raw = body as Record<string, unknown>;
+  const agentName = typeof raw.agent_name === 'string' ? raw.agent_name.trim() : '';
+  if (!agentName) return { value: null, error: 'agent_name is required' };
+  if (agentName.length < 3) return { value: null, error: 'agent_name must be at least 3 characters' };
+  if (agentName.length > 63) return { value: null, error: 'agent_name must be at most 63 characters' };
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(agentName)) {
+    return { value: null, error: 'agent_name must be lowercase alphanumeric (hyphens allowed in middle)' };
+  }
+
+  const email = typeof raw.email === 'string' ? raw.email.trim().toLowerCase() : '';
+  if (!email) return { value: null, error: 'email is required' };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { value: null, error: 'Invalid email format' };
+  }
+  if (email.length > 254) return { value: null, error: 'email must be 254 characters or fewer' };
+
+  const operatorName = typeof raw.operator_name === 'string' ? raw.operator_name.trim() : '';
+  if (operatorName.length > 100) {
+    return { value: null, error: 'operator_name must be 100 characters or fewer' };
+  }
+
+  const organizationName = typeof raw.organization_name === 'string' ? raw.organization_name.trim() : '';
+  if (organizationName.length > 100) {
+    return { value: null, error: 'organization_name must be 100 characters or fewer' };
+  }
+
+  const description = typeof raw.description === 'string' ? raw.description.trim() : '';
+  if (description.length > 500) {
+    return { value: null, error: 'description must be 500 characters or fewer' };
+  }
+
+  const signupSourceRaw = typeof raw.signup_source === 'string' ? raw.signup_source.trim() : 'api';
+  if (!['ui', 'cli', 'mcp', 'api'].includes(signupSourceRaw)) {
+    return { value: null, error: 'signup_source must be ui, cli, mcp, or api' };
+  }
+  const signup_source = signupSourceRaw as SignupSource;
+
+  const registrationTypeRaw = typeof raw.registration_type === 'string' ? raw.registration_type.trim() : 'AGENT';
+  if (!['AGENT', 'INDIVIDUAL', 'ORGANIZATION'].includes(registrationTypeRaw)) {
+    return { value: null, error: 'registration_type must be AGENT, INDIVIDUAL, or ORGANIZATION' };
+  }
+  const registration_type = registrationTypeRaw as RegistrationType;
+
+  if ((registration_type === 'INDIVIDUAL' || registration_type === 'ORGANIZATION') && !operatorName) {
+    return { value: null, error: 'operator_name (full_name) is required for INDIVIDUAL and ORGANIZATION registrations' };
+  }
+
+  if (registration_type === 'ORGANIZATION' && !organizationName) {
+    return { value: null, error: 'organization_name is required for ORGANIZATION registrations' };
+  }
+
+  const canonical: CanonicalRegisterBody = {
+    agent_name: agentName,
+    email,
+    operator_name: operatorName || null,
+    organization_name: organizationName || null,
+    description: description || null,
+    signup_source,
+    registration_type,
+  };
+
+  if (typeof raw.machine_fingerprint === 'string' && raw.machine_fingerprint.trim()) {
+    canonical.machine_fingerprint = raw.machine_fingerprint.trim();
+  } else if (raw.machine_fingerprint != null && raw.machine_fingerprint !== '') {
+    return { value: null, error: 'machine_fingerprint must be a non-empty string' };
+  }
+
+  if (typeof raw['cf-turnstile-response'] === 'string' && raw['cf-turnstile-response'].trim()) {
+    canonical['cf-turnstile-response'] = raw['cf-turnstile-response'].trim();
+  } else if (raw['cf-turnstile-response'] != null && raw['cf-turnstile-response'] !== '') {
+    return { value: null, error: 'cf-turnstile-response must be a non-empty string' };
+  }
+
+  return { value: canonical, error: null };
+}
+
+async function verifyTurnstileToken(
+  token: string,
+  request: Request,
+  env: Env,
+): Promise<boolean> {
+  const formData = new URLSearchParams();
+  formData.set('secret', env.TURNSTILE_SECRET_KEY);
+  formData.set('response', token);
+  formData.set('remoteip', getClientIp(request));
+
+  try {
+    const response = await fetch(TURNSTILE_VERIFY_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString(),
+    });
+
+    if (!response.ok) return false;
+    const payload = await response.json() as TurnstileVerifyResponse;
+    if (payload.success !== true) return false;
+    if (stripPort(payload.hostname ?? '') !== getExpectedHostname(request)) return false;
+    if (payload.action !== DMV_TURNSTILE_ACTION) return false;
+    return true;
+  } catch (error) {
+    console.error('[turnstile] siteverify failed', error);
+    return false;
+  }
 }
 
 type RenderFormat = 'card' | 'og';
@@ -741,6 +927,209 @@ const handleOg = (request: Request, env: Env, ctx: ExecutionContext) =>
   handleRender(request, env, ctx, 'og');
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  /api/register — browser Turnstile + shared CF limits + local fingerprint
+//  cooldown + upstream Supabase proxy
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REGISTER_FORWARD_REQUEST_HEADERS = [
+  'content-type',
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'user-agent',
+] as const;
+
+const REGISTER_RESPONSE_HEADERS_TO_STRIP = new Set([
+  'set-cookie',
+  'connection',
+  'transfer-encoding',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'upgrade',
+]);
+
+function emitRegisterAnalytics(
+  env: Env,
+  tier: string,
+  key: string,
+  latencyMs: number,
+  sizeBytes = 0,
+): void {
+  emitAnalytics(env, {
+    category: 'register',
+    tier,
+    path: DMV_REGISTER_PATH,
+    key,
+    latencyMs,
+    sizeBytes,
+  });
+}
+
+async function handleRegister(request: Request, env: Env): Promise<Response> {
+  const startedAt = Date.now();
+  const method = request.method;
+
+  if (method !== 'POST') {
+    emitRegisterAnalytics(env, '405', method, Date.now() - startedAt);
+    return new Response('Method Not Allowed', {
+      status: 405,
+      headers: {
+        Allow: 'POST',
+        'Content-Type': 'text/plain; charset=utf-8',
+      },
+    });
+  }
+
+  let parsedBody: CanonicalRegisterBody | null = null;
+  try {
+    const body = await request.json();
+    const parsed = parseRegisterBody(body);
+    if (parsed.error || !parsed.value) {
+      emitRegisterAnalytics(env, 'validation', parsed.error ?? 'invalid_request', Date.now() - startedAt);
+      return jsonResponse({ error: parsed.error ?? 'invalid_request' }, 400);
+    }
+    parsedBody = parsed.value;
+  } catch {
+    emitRegisterAnalytics(env, 'invalid_json', 'invalid_json', Date.now() - startedAt);
+    return jsonResponse({ error: 'Invalid JSON' }, 400);
+  }
+
+  const clientIp = getClientIp(request);
+  const emailHash = await sha256Hex(parsedBody.email);
+  const ipHash = await sha256Hex(clientIp);
+  const ipEmailHash = await sha256Hex(`${ipHash}:${emailHash}`);
+
+  if (parsedBody.signup_source === 'ui') {
+    const token = parsedBody['cf-turnstile-response'];
+    if (!token) {
+      emitRegisterAnalytics(env, 'turnstile_required', emailHash, Date.now() - startedAt);
+      return jsonResponse(
+        {
+          error: 'turnstile_required',
+          message: 'Verification failed. Please retry.',
+        },
+        400,
+      );
+    }
+
+    const turnstileValid = await verifyTurnstileToken(token, request, env);
+    if (!turnstileValid) {
+      emitRegisterAnalytics(env, 'turnstile_failed', emailHash, Date.now() - startedAt);
+      return jsonResponse(
+        {
+          error: 'turnstile_failed',
+          message: 'Verification failed. Please retry.',
+        },
+        400,
+      );
+    }
+  } else {
+    if (!parsedBody.machine_fingerprint) {
+      emitRegisterAnalytics(env, 'machine_fingerprint_required', emailHash, Date.now() - startedAt);
+      return jsonResponse(
+        {
+          error: 'machine_fingerprint_required',
+          message: 'machine_fingerprint is required for CLI and MCP registration',
+        },
+        400,
+      );
+    }
+  }
+
+  const [emailLimit, ipEmailLimit] = await Promise.all([
+    env.RL_OTP_EMAIL.limit({ key: `otp:email:${emailHash}` }),
+    env.RL_OTP_IP_EMAIL.limit({ key: `otp:ip-email:${ipEmailHash}` }),
+  ]);
+
+  if (!emailLimit.success || !ipEmailLimit.success) {
+    emitRegisterAnalytics(env, 'rate_limited', emailHash, Date.now() - startedAt);
+    return jsonResponse(
+      {
+        error: 'rate_limited',
+        message: 'Too many requests. Please wait 60 seconds and try again.',
+        retry_after_seconds: 60,
+      },
+      429,
+      { 'Retry-After': '60' },
+    );
+  }
+
+  if (parsedBody.signup_source !== 'ui' && parsedBody.machine_fingerprint) {
+    const fingerprintHash = await sha256Hex(parsedBody.machine_fingerprint);
+    const cooldown = await incrementKvCooldown(
+      env.REGISTER_COOLDOWN_KV,
+      `dmv:register:fingerprint:${fingerprintHash}`,
+      FINGERPRINT_COOLDOWN_THRESHOLD,
+      FINGERPRINT_COOLDOWN_SECONDS,
+    );
+
+    if (cooldown !== null) {
+      emitRegisterAnalytics(env, 'fingerprint_cooldown', fingerprintHash, Date.now() - startedAt);
+      return jsonResponse(
+        {
+          error: 'fingerprint_cooldown',
+          message: 'Too many registrations from this machine. Please wait before trying again.',
+          retry_after_seconds: cooldown,
+        },
+        429,
+        { 'Retry-After': String(cooldown) },
+      );
+    }
+  }
+
+  const upstreamHeaders = new Headers();
+  for (const name of REGISTER_FORWARD_REQUEST_HEADERS) {
+    const value = request.headers.get(name);
+    if (value !== null) upstreamHeaders.set(name, value);
+  }
+  upstreamHeaders.set('x-forwarded-for', clientIp);
+  upstreamHeaders.set('x-forwarded-host', new URL(request.url).host);
+  upstreamHeaders.set('x-forwarded-proto', new URL(request.url).protocol.replace(':', ''));
+  upstreamHeaders.set('x-dmv-proxy', 'v1');
+
+  const upstreamBody = {
+    agent_name: parsedBody.agent_name,
+    email: parsedBody.email,
+    operator_name: parsedBody.operator_name,
+    organization_name: parsedBody.organization_name,
+    description: parsedBody.description,
+    signup_source: parsedBody.signup_source,
+    registration_type: parsedBody.registration_type,
+    machine_fingerprint: parsedBody.machine_fingerprint,
+  };
+
+  const upstream = await fetch(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
+    method: 'POST',
+    headers: upstreamHeaders,
+    body: JSON.stringify(upstreamBody),
+  });
+
+  const bodyText = await upstream.text();
+  const responseHeaders = new Headers();
+  upstream.headers.forEach((value, key) => {
+    if (!REGISTER_RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
+      responseHeaders.set(key, value);
+    }
+  });
+
+  emitRegisterAnalytics(
+    env,
+    upstream.ok ? 'supabase' : `supabase_${upstream.status}`,
+    emailHash,
+    Date.now() - startedAt,
+    bodyText.length,
+  );
+
+  return new Response(bodyText, {
+    status: upstream.status,
+    headers: responseHeaders,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  /c/:certId/:agentName — permalink with crawler OG injection
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -1086,6 +1475,8 @@ async function handleHealthz(env: Env): Promise<Response> {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === DMV_REGISTER_PATH) return handleRegister(request, env);
 
     // /api/card → container-rendered 880x630 PNG with R2 cache
     if (url.pathname === '/api/card') return handleCard(request, env, ctx);
