@@ -123,9 +123,11 @@ export class CRTTerminal {
 
     // Completion callback
     this.onComplete = null;
+    this.onSubmit = null;
     this.onCopyAgentCli = null;
     this.agentCliCommand = 'bunx dmv-agent register';
     this.agentMcpCommand = 'bunx dmv-agent';
+    this.isSubmitting = false;
 
     // Boot sequence text — phase 2a (init lines, shown first)
     this.bootLinesInit = [
@@ -688,6 +690,8 @@ export class CRTTerminal {
     this.bootPhase = 5;
     this.reviewReading = null;
     this.inputActive = true;
+    this.isSubmitting = false;
+    this.validationError = null;
     this._reviewStartIndex = this.lines.length;
     this.lines.push({ text: '', color: this.textColor, typed: 999 });
     this.lines.push({ text: '  ─────────────────────────────────', color: this.dimColor, typed: 0 });
@@ -707,23 +711,26 @@ export class CRTTerminal {
     const boxWidth = 340;
     const boxHeight = 48;
     const x = this.padding + 16;
+    const isBusy = this.isSubmitting;
 
-    ctx.strokeStyle = this.headerColor;
+    ctx.strokeStyle = isBusy ? this.dimColor : this.headerColor;
     ctx.lineWidth = 2;
     ctx.strokeRect(x, startY, boxWidth, boxHeight);
 
     ctx.font = `${this.fontSize}px "Courier New", monospace`;
-    ctx.fillStyle = this.headerColor;
-    ctx.shadowColor = this.headerColor;
+    ctx.fillStyle = isBusy ? this.dimColor : this.headerColor;
+    ctx.shadowColor = isBusy ? this.dimColor : this.headerColor;
     ctx.shadowBlur = this.glowBlur;
-    ctx.fillText('  SUBMIT REGISTRATION', x + 12, startY + 16);
+    ctx.fillText(isBusy ? '  VERIFYING...' : '  SUBMIT REGISTRATION', x + 12, startY + 16);
     ctx.shadowBlur = 0;
 
     ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText('  Tap or press Enter', x + 12, startY + 34);
+    ctx.fillText(isBusy ? '  Please wait' : '  Tap or press Enter', x + 12, startY + 34);
 
-    this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
+    if (!isBusy) {
+      this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
+    }
   }
 
   drawFormNextButton(ctx, inputY) {
@@ -949,6 +956,32 @@ export class CRTTerminal {
     return false;
   }
 
+  async submitRegistration() {
+    if (this.isSubmitting) return;
+
+    this.validationError = null;
+    this.isSubmitting = true;
+    this.inputActive = false;
+    this.dirty = true;
+
+    try {
+      if (this.onSubmit) {
+        const result = await this.onSubmit(this.getFormData());
+        if (result?.certificateId) {
+          this._certificateId = result.certificateId;
+        }
+      }
+      this.startProcessing();
+    } catch (err) {
+      this.isSubmitting = false;
+      this.inputActive = true;
+      this.validationError = err instanceof Error
+        ? err.message
+        : 'Registration failed. Please try again.';
+      this.dirty = true;
+    }
+  }
+
   handleReviewInput(key) {
     this.dirty = true;
     // Reading mode
@@ -990,10 +1023,11 @@ export class CRTTerminal {
       return;
     }
 
+    if (this.isSubmitting) return;
+
     // Submit
     if (key === 'Enter') {
-      this.inputActive = false;
-      this.startProcessing();
+      void this.submitRegistration();
       return;
     }
 
@@ -1098,6 +1132,8 @@ export class CRTTerminal {
 
   startProcessing() {
     this.bootPhase = 6;
+    this.isSubmitting = false;
+    this.validationError = null;
     this._certLineIndex = null;
     // Remove review/submit section — no longer needed
     if (this._reviewStartIndex != null) {
@@ -1207,7 +1243,7 @@ export class CRTTerminal {
       this.processProgress = Math.min((this.processProgress || 0) + 0.8, 100);
       if (this.processProgress >= 100) {
         this.bootPhase = 7;
-        this._certificateId = this.generateId();
+        this._certificateId = this._certificateId || this.generateId();
         const agentField = this.fields.find(f => f.key === 'agentName');
         const nameField = this.fields.find(f => f.key === 'userName');
         const typeLabel = this.accountType === 'org' ? 'ORGANIZATION' : 'INDIVIDUAL';
@@ -1534,6 +1570,16 @@ export class CRTTerminal {
 
     if (this.bootPhase === 5 && !this.reviewReading && reviewButtonsY !== null) {
       this.drawReviewButtons(ctx, reviewButtonsY);
+    }
+
+    if (this.bootPhase === 5 && !this.reviewReading && submitButtonY !== null && this.validationError) {
+      ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
+      ctx.fillStyle = this.headerColor;
+      ctx.shadowColor = this.headerColor;
+      ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
+      ctx.fillText(`  ✗ ${this.validationError}`, this.padding + 16, submitButtonY + this.lineHeight * 3);
+      ctx.shadowBlur = 0;
+      ctx.font = `${this.fontSize}px "Courier New", monospace`;
     }
 
     if (this.bootPhase === 5 && this.reviewReading) {

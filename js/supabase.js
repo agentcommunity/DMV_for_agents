@@ -2,7 +2,7 @@
 // No database credentials in client code.
 
 const REGISTER_ENDPOINT =
-  'https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent';
+  '/api/register';
 
 // Feature flag — set to true when ready to persist registrations
 export const SUPABASE_ENABLED = true;
@@ -13,9 +13,10 @@ export const SUPABASE_ENABLED = true;
  *
  * @param {object} formData - from CRTTerminal.getFormData()
  * @param {string} signupSource - 'ui' | 'mcp' | 'api'
+ * @param {string | null} turnstileToken
  * @returns {object} { data, error }
  */
-export async function insertRegistration(formData, signupSource = 'ui') {
+export async function insertRegistration(formData, signupSource = 'ui', turnstileToken = null) {
   if (!SUPABASE_ENABLED) {
     console.log('[dmv] Persistence disabled. Registration data:', formData);
     return { data: null, error: null };
@@ -33,6 +34,9 @@ export async function insertRegistration(formData, signupSource = 'ui') {
     signup_source: signupSource,
     registration_type: registrationType,
   };
+  if (turnstileToken) {
+    body['cf-turnstile-response'] = turnstileToken;
+  }
 
   try {
     const controller = new AbortController();
@@ -54,8 +58,8 @@ export async function insertRegistration(formData, signupSource = 'ui') {
     }
 
     if (!res.ok) {
-      console.error('[dmv] Registration error:', json.error);
-      return { data: null, error: { message: json.error } };
+      console.error('[dmv] Registration error:', json.error || json.message);
+      return { data: null, error: { message: json.message || json.error || `Registration failed (HTTP ${res.status})` } };
     }
 
     return { data: json, error: null };
