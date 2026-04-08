@@ -99,8 +99,9 @@ The Department of Machine Verification is the identity registration system for t
  │  │    → validate input + registration_type          │                   │
  │  │    → lifetime cap: 3/email or 10 if endorsed      │                   │
  │  │    → generate certificate ID (FNV-1a + Luhn)     │                   │
- │  │    → INSERT into registrations (status:           │                   │
- │  │      provisional_dmv, user_id: NULL)              │                   │
+ │  │    → INSERT into registrations (certificate_id    │                   │
+ │  │      set, status omitted → DB default              │                   │
+ │  │      'pending_profile' applies, user_id NULL)      │                   │
  │  │    → return cert ID + permalink + badge URLs     │                   │
  │  │    → DB trigger fires → agentcommunity.org       │                   │
  │  │      creates auth user + sends magic link +      │                   │
@@ -128,7 +129,9 @@ The Department of Machine Verification is the identity registration system for t
  │  │  certificate_id     TEXT (UNIQUE partial index) │                   │
  │  │  email              TEXT                       │                   │
  │  │  signup_source      TEXT (ui/cli/mcp/api)      │                   │
- │  │  status             TEXT (provisional_dmv)     │                   │
+ │  │  status             ENUM (default:              │                   │
+ │  │                      pending_profile — DMV      │                   │
+ │  │                      does NOT set this)         │                   │
  │  │  user_id            UUID (nullable — set by    │                   │
  │  │                      trigger, not by DMV)      │                   │
  │  │  full_name          TEXT (nullable)            │                   │
@@ -351,8 +354,8 @@ To prevent copy drift across user-facing surfaces, the repo includes a text audi
 ### Accepted exceptions (intentional divergence)
 
 1. `status-language-drift`
-   - DB row starts `provisional_dmv` until email verification.
-   - Card text remains `VERIFIED` by design (public artifact, no DB status crawl at card render time).
+   - DB row starts at `pending_profile` (the DB default) immediately on INSERT, even before the operator has verified the email via sign-in. DMV does not set status; it relies on `certificate_id IS NOT NULL` as the DMV marker per the PAGE-side integration.
+   - Card text says `VERIFIED` by design (public artifact, no DB status crawl at card render time). The gap between "card says VERIFIED" and "operator hasn't signed in yet to claim it" is intentional and accepted.
 2. `web-crt-email-reminder-gap`
    - Web CRT completion avoids extra verification copy.
    - Verification/link/badge details are handled via follow-up email flow.

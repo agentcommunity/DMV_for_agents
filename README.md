@@ -125,7 +125,7 @@ npm run text:check
 
 Two differences are currently intentional and tracked as accepted exceptions:
 
-- Card copy shows `VERIFIED` even while DB status is still `provisional_dmv` during email verification.
+- Card copy shows `VERIFIED` even though the operator hasn't signed in yet to claim the domain. The DB row starts at the default status `pending_profile` (PAGE's schema default); DMV uses `certificate_id IS NOT NULL` as the DMV marker rather than a dedicated status value.
 - Web CRT completion copy stays minimal; verification/link/badge details are delivered in email follow-ups.
 
 Details: [Text Surface Audit](docs/text-surface-audit.md)

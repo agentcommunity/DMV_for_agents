@@ -43,21 +43,26 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │         register-agent edge function                  │◄─┘
       │              (Supabase / Deno)                        │
       │                                                       │
-      │  1. Validate all fields + length limits               │
-      │  2. Lifetime cap (DB)                                 │
+      │  1. Verify x-dmv-proxy: v1 header from the worker     │
+      │  2. Validate all fields + length limits               │
+      │  3. Lifetime cap (DB)                                 │
       │     └─ 3 per email (unendorsed) / 10 (endorsed)      │
-      │  3. Generate certificate_id (FNV-1a + Luhn)           │
-      │  4. INSERT with status = 'provisional_dmv'            │
-      │  5. Return cert ID + permalink + badge URLs           │
+      │  4. Generate certificate_id (FNV-1a + Luhn)           │
+      │  5. INSERT with certificate_id set (status defaults   │
+      │     to pending_profile via baseline.sql:3345)         │
+      │  6. Return cert ID + permalink + badge URLs           │
       │                                                       │
       │  NOTE: Upstash Redis rate limiting REMOVED in the    │
       │  2026-04-08 hardening pass. The worker owns           │
       │  anti-abuse now; this function is strictly an         │
-      │  upstream that validates and INSERTs.                 │
+      │  upstream that validates and INSERTs. The gate on     │
+      │  the x-dmv-proxy header blocks direct calls to the    │
+      │  Supabase URL that would bypass the worker.           │
       └──────────────────────┬────────────────────────────────┘
                              │
                              │ DB trigger fires async
-                             │ (on_dmv_registration)
+                             │ (on_dmv_registration, fires on
+                             │  certificate_id IS NOT NULL)
                              ▼
       ┌─────────────────────────────────────────────────────┐
       │    handle-dmv-registration (agentcommunity.org)     │
@@ -76,33 +81,27 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │          agentcommunity.org auth hub                │
       │                                                     │
       │  1. User signs in via OTP (6-digit code)            │
-      │  2. Detects provisional_dmv registrations           │
-      │  3. Upgrades: provisional_dmv → pending_profile     │
-      │  4. User now counts as verified member              │
-      │  5. Redirects to /members dashboard                 │
+      │  2. Normal PAGE auth flow runs — no special DMV     │
+      │     status handling, because DMV rows look like     │
+      │     any other pending_profile row from PAGE's view  │
+      │  3. Redirects to /members dashboard                 │
       └─────────────────────────────────────────────────────┘
 ```
 
 ## Status Lifecycle
 
-A registration moves through these statuses. Only DMV sets the initial status; everything after is the main site's responsibility.
+**TL;DR: DMV does NOT participate in the `registration_status` lifecycle.** PAGE's `registration_status` enum contains six values — `pending_profile`, `pending_signature`, `complete`, `failed`, `blocked`, `anonymized` — none of which are DMV-specific. The DMV edge function omits the `status` field from its INSERT entirely; the column's `DEFAULT 'pending_profile'::registration_status NOT NULL` (baseline.sql:3345) applies cleanly. PAGE's TypeScript types (`types/supabase.ts`), auth hub (`app/auth/page.tsx`), and member count queries all work unchanged for DMV rows.
 
-```
-DMV registration          Email verified at            Endorsement
-(any entry point)         agentcommunity.org           signed
-       │                         │                        │
-       ▼                         ▼                        ▼
- provisional_dmv   ──→    pending_profile    ──→      endorsed
- (not a member)          (verified member)        (full member)
-```
+**How PAGE distinguishes DMV rows from regular agentcommunity.org signups:** the `certificate_id` column. PAGE's DMV integration (shipped in `agentCommunity_PAGE/supabase/migrations/20260210999999_dmv_add_agent_enum.sql`, `20260211000000_dmv_schema_and_trigger_guard.sql`, `20260211000100_dmv_registration_trigger.sql`) uses `WHERE certificate_id IS NOT NULL` as the DMV marker everywhere it matters:
 
-| Status | Meaning | Counts as member? | Set by |
-|--------|---------|-------------------|--------|
-| `provisional_dmv` | Pre-registered, email not verified | No | DMV `register-agent` edge function |
-| `pending_profile` | Email verified via OTP, not endorsed | Yes | Main site auth hub on sign-in |
-| `endorsed` / `signed` | Endorsed by existing member | Yes | Main site endorsement flow |
+- The `handle_welcome_email_on_registration` trigger: `IF NEW.certificate_id IS NOT NULL THEN RETURN NEW;` — DMV rows get their own certificate email, not the generic welcome
+- The `handle_endorsement_request_on_registration` trigger: same skip for DMV rows
+- The `on_dmv_registration` trigger fires specifically `WHEN (NEW.certificate_id IS NOT NULL)` and calls `handle-dmv-registration` to wire up the auth user
+- All DMV-aware member count queries filter by `certificate_id IS NOT NULL` rather than by a status value
 
-**Why `provisional_dmv` exists:** Without it, anyone can inflate member counts by spamming registrations with fake emails. The status creates an email-verification gate: you pre-register at DMV, but you don't become a member until you prove you own the email by signing in at agentcommunity.org.
+**Historical note:** an earlier version of this doc (and the DMV edge function code through 2026-04-08) described a `provisional_dmv` status value that was supposed to live in the enum until email verification upgraded it to `pending_profile`. That design was written into the plan but **never shipped on the PAGE side** — PAGE's team chose the `certificate_id IS NOT NULL` marker approach instead. The stale `status: 'provisional_dmv'` line in the DMV edge function was a latent bug that produced `22P02 invalid input value for enum` on every INSERT once the function was deployed against the modern PAGE schema. Fixed in commit `8d73924` by removing the status field from the INSERT.
+
+If you need to exclude DMV rows from a query, use `WHERE certificate_id IS NULL`. If you need only DMV rows, use `WHERE certificate_id IS NOT NULL`. Never use status.
 
 ## The CLI-First Agent Flow
 
@@ -154,7 +153,7 @@ On success, the CLI/MCP returns:
 
 ### After registration
 
-The agent (or its operator) receives a certificate email. To become a verified member, the operator signs in at agentcommunity.org with the same email. This upgrades the registration from `provisional_dmv` to `pending_profile`.
+The agent (or its operator) receives a certificate email with a sign-in CTA. To claim the `.agent` domain, the operator signs in at agentcommunity.org with the same email. PAGE's normal auth flow takes over from there — no DMV-specific status transitions happen, because DMV rows live in the same status lifecycle as any other registration (they're just tagged by `certificate_id IS NOT NULL`).
 
 ## Rate Limiting Architecture
 
@@ -260,29 +259,28 @@ Multiple users CAN pre-register interest in the same `.agent` domain. `domain_re
 
 | Column | Type | Value | Notes |
 |--------|------|-------|-------|
-| `registration_type` | TEXT | INDIVIDUAL / ORGANIZATION / AGENT | Web UI uses first two, CLI/MCP uses AGENT |
-| `full_name` | TEXT | Operator name | Required for INDIVIDUAL + ORG, optional for AGENT |
+| `registration_type` | TEXT (enum) | INDIVIDUAL / ORGANIZATION / AGENT | Web UI uses first two, CLI/MCP uses AGENT. `AGENT` was added to the enum by PAGE migration `20260210999999_dmv_add_agent_enum.sql`. |
+| `full_name` | TEXT | Operator name | Required for INDIVIDUAL + ORG, optional for AGENT (CHECK constraint relaxed by PAGE migration `20260211000000_dmv_schema_and_trigger_guard.sql`) |
 | `organization_name` | TEXT | Org name | Required for ORGANIZATION only |
 | `domain_requested` | TEXT | `{name}.agent` | Not unique — pre-registration model |
 | `email` | TEXT | User's email | Max 254 chars |
-| `certificate_id` | TEXT | `WORD-XXX-XXXC` | Unique (partial index) |
+| `certificate_id` | TEXT | `WORD-XXX-XXXC` | Unique partial index (`certificate_id IS NOT NULL`). Also the DMV-vs-non-DMV marker PAGE keys off. |
 | `signup_source` | TEXT | ui / cli / mcp / api | Tracks which entry point |
-| `status` | TEXT | `provisional_dmv` | Always this value from DMV |
-| `user_id` | UUID | NULL | Set by trigger, never by DMV |
 | `metadata` | JSONB | `{ agent_description, client_ip }` | Description max 500 chars |
-| `created_at` | TIMESTAMPTZ | Auto | |
+
+**Columns DMV does NOT set** (and relies on the DB to fill in):
+
+| Column | Default / how it gets set | Notes |
+|--------|---------------------------|-------|
+| `status` | `pending_profile` (DB default, `baseline.sql:3345`) | NEVER set by DMV. Lives in PAGE's status lifecycle. |
+| `user_id` | Set asynchronously by `handle-dmv-registration` edge function after trigger fires | Nullable; DMV inserts with it unset, trigger fills it in |
+| `created_at` | `now()` | |
 
 ### What the trigger sets
 
 | Column | Value | Set by |
 |--------|-------|--------|
-| `user_id` | Auth user's UUID | `handle-dmv-registration` edge function |
-
-### What the auth hub upgrades
-
-| Column | Before | After |
-|--------|--------|-------|
-| `status` | `provisional_dmv` | `pending_profile` |
+| `user_id` | Auth user's UUID | `handle-dmv-registration` edge function, after `on_dmv_registration` trigger fires on `certificate_id IS NOT NULL` |
 
 ### Indexes needed
 
@@ -384,7 +382,8 @@ Everything below is shipped in this repo and ready to deploy:
 | DMV-local KV fingerprint cooldown | Done | `worker/rate-limit-kv.ts`, `REGISTER_COOLDOWN_KV` binding |
 | Upstash Redis REMOVED from edge fn | Done | `supabase/functions/register-agent/index.ts` (-90 lines) |
 | Lifetime cap (3/10 per email) | Done | `supabase/functions/register-agent/index.ts` |
-| `provisional_dmv` status on INSERT | Done | Same file |
+| `x-dmv-proxy: v1` gate on `register-agent` (direct-access block) | Done | `supabase/functions/register-agent/index.ts` — requires the worker-set header on every non-OPTIONS request |
+| DMV uses DB default for `status` (no `provisional_dmv`) | Done | `supabase/functions/register-agent/index.ts` — commit `8d73924` removed the stale status line |
 | CORS restricted to known origins | Done | Same file |
 | Input length validation (all fields) | Done | Same file |
 | Retry-After on 429 responses | Done | Worker (`/api/register`) and edge function (lifetime cap) |
@@ -404,48 +403,21 @@ Everything below is shipped in this repo and ready to deploy:
 | Dead Vercel artifacts removed (`api/`, `vercel.json`, `middleware.js`) | Done | Deleted post-cutover |
 | Fog leak fixed | Done | `js/TV.js` |
 
-## What Needs Migration (main site / database)
+## Cross-Repo Migrations (owned by PAGE)
 
-These changes must happen on agentcommunity.org or in the shared Supabase database before or alongside DMV deployment:
+All DB schema changes required for DMV to function were shipped by the PAGE team in `agentCommunity_PAGE/supabase/migrations/`:
 
-### Required before DMV deploy
+| Migration | What it does | Live? |
+|---|---|---|
+| `20260210999999_dmv_add_agent_enum.sql` | `ALTER TYPE registration_type ADD VALUE IF NOT EXISTS 'AGENT'` | Yes — DMV INSERTs with `registration_type: 'AGENT'` are accepted |
+| `20260211000000_dmv_schema_and_trigger_guard.sql` | Adds `certificate_id`, `signup_source`, `metadata` columns to `registrations`. Makes `user_id` nullable. Relaxes CHECK constraints for AGENT. Adds `certificate_id` columns + unique indexes. Guards welcome/endorsement email triggers with `IF NEW.certificate_id IS NOT NULL THEN RETURN;` | Yes |
+| `20260211000100_dmv_registration_trigger.sql` | Creates `on_dmv_registration` trigger + `handle_dmv_registration()` function that calls the `handle-dmv-registration` edge function via `pg_net` | Yes |
 
-```sql
--- 1. Add provisional_dmv status enum value
-ALTER TYPE registration_status ADD VALUE 'provisional_dmv';
+**No DMV-side SQL migrations are required.** Earlier versions of this doc listed three `ALTER TYPE` / `CREATE INDEX` statements as "required before DMV deploy" — those turned out to be either already shipped by PAGE (AGENT enum, certificate_id unique index) or unnecessary for the actual design (the `provisional_dmv` enum value was never added because PAGE uses the `certificate_id IS NOT NULL` marker instead).
 
--- 2. Add AGENT registration type (if not already present)
-ALTER TYPE registration_type ADD VALUE 'AGENT';
+### Not required — but would be nice to have
 
--- 3. Add index for lifetime cap query
-CREATE INDEX IF NOT EXISTS idx_registrations_email
-  ON registrations (email);
-```
-
-### Required on main site (can ship separately)
-
-**Auth hub upgrade flow:**
-
-When a user signs in at agentcommunity.org via OTP, check for and upgrade any `provisional_dmv` registrations:
-
-```sql
-UPDATE registrations
-SET status = 'pending_profile'
-WHERE email = :user_email
-  AND status = 'provisional_dmv';
-```
-
-This is the moment the user becomes a verified member. Should happen in the auth callback or post-sign-in hook.
-
-**Member count exclusion:**
-
-Any query that counts "members" must exclude `provisional_dmv`:
-
-```sql
-WHERE status != 'provisional_dmv'
-```
-
-Audit locations: admin stats API, directory/map data, homepage member count, any public-facing counts.
+**Member count hygiene on PAGE:** if PAGE's admin stats / homepage counts currently treat `certificate_id IS NOT NULL` rows as regular members (i.e., users whose email hasn't been verified yet), those counts may drift higher than expected once DMV starts seeing real traffic. PAGE's team should audit queries that count "members" and decide whether to exclude unclaimed DMV rows (e.g., filter on `certificate_id IS NULL OR user_id IS NOT NULL AND <other verified conditions>`). This is a PAGE-side hygiene task, not a blocker for DMV deploy.
 
 **Members dashboard:**
 
@@ -465,29 +437,29 @@ Update `handle-dmv-registration` edge function email to:
 
 ## Deploy Order
 
-1. Run SQL migrations on Supabase (`provisional_dmv` enum, `AGENT` enum, email index) — historical, already done
-2. `supabase functions deploy register-agent` (now without Upstash; validation + lifetime cap + cert ID + INSERT)
-3. `supabase functions deploy badge` (cache headers)
+Historical, captured after the 2026-04-08 shipping sprint:
+
+1. PAGE migrations already applied: `20260210999999_dmv_add_agent_enum.sql`, `20260211000000_dmv_schema_and_trigger_guard.sql`, `20260211000100_dmv_registration_trigger.sql` — shipped earlier by the PAGE team
+2. `supabase functions deploy register-agent --no-verify-jwt` — Upstash removed, `x-dmv-proxy` gate active, no more `status: provisional_dmv`. **MUST be deployed with `--no-verify-jwt`**: the worker does not forward an Authorization header, so Supabase's platform-level JWT verification has to be off for the function to be reachable.
+3. `supabase functions deploy badge` — already deployed historically
 4. **Provision worker secrets** in the Cloudflare dashboard for `dmv-agentcommunity`:
    - `TURNSTILE_SECRET_KEY` (encrypted secret) — `wrangler secret put` is currently blocked on this worker by a version-mismatch guard, see `docs/plans/2026-04-08-handoff-prompt.md` §69 for the operational workaround
-5. **Provision worker bindings** (one-time, already done — listed for reference):
-   - `REGISTER_COOLDOWN_KV` namespace via `pnpm wrangler kv namespace create REGISTER_COOLDOWN_KV` (+ `--preview`), then paste both ids into `wrangler.jsonc`
-6. `pnpm cf:deploy` (frontend + worker + container: perf + security headers + `/api/register` + Turnstile + shared CF rate limits + KV cooldown)
-7. **First-submission smoke test:** open `pnpm cf:tail` in another shell and submit a real browser registration. If Turnstile siteverify rejects with `invalid-input-secret`, the dashboard-pasted secret has a typo or trailing whitespace.
-8. Ship main site auth hub upgrade (provisional_dmv → pending_profile on sign-in)
-9. Ship main site member count exclusion
-10. Enable `NEXT_PUBLIC_SHOW_AGENT_CARDS=true` on main site
+5. **Provision worker bindings** (one-time, done 2026-04-08):
+   - `REGISTER_COOLDOWN_KV` namespace via `pnpm wrangler kv namespace create REGISTER_COOLDOWN_KV` (+ `--preview`), ids pasted into `wrangler.jsonc`
+6. `pnpm cf:deploy` (or git auto-deploy via Cloudflare git integration on main) — frontend + worker + container: security headers + `/api/register` + Turnstile + shared CF rate limits + KV cooldown
+7. **Publish `@agentcommunity/dmv-agent@0.2.0` to npm** so `bunx dmv-agent register` fetches the worker-proxied version. Done 2026-04-08.
+8. **First-submission smoke test:** open `pnpm cf:tail` in another shell and submit a real browser registration. If Turnstile siteverify rejects with `invalid-input-secret`, the dashboard-pasted secret has a typo or trailing whitespace.
 
-Steps 1-7 can ship together. Steps 8-10 can ship later — `provisional_dmv` registrations will simply wait until the auth hub upgrade is deployed.
+All of the above is **complete as of 2026-04-08**. PAGE-side follow-ups (member count hygiene, members dashboard flag) are not blockers — the DMV registration flow works end-to-end without them.
 
 ## Testing the Full Flow
 
 1. Register via CLI: `bunx dmv-agent register --name test-agent --email you@example.com --operator "Your Name"`
-2. Verify in DB: `status = 'provisional_dmv'`, `user_id` set by trigger
-3. Check member count → should NOT include the new registration
-4. Sign in at agentcommunity.org with the same email via OTP
-5. Verify in DB: `status = 'pending_profile'`
-6. Check member count → should NOW include the user
-7. Check members dashboard → HoloCard should render with real certificate data
-8. Test rate limiting: register 4 times rapidly → 4th should return 429
-9. Test lifetime cap: register 4 unique agents with same email → 4th should return 403
+2. Verify in DB: `certificate_id IS NOT NULL`, `status = 'pending_profile'` (the DB default — not set by DMV), `user_id` eventually populated by `handle-dmv-registration` trigger (async)
+3. Sign in at agentcommunity.org with the same email via OTP
+4. Verify in DB: `user_id` is set (if it wasn't already), normal PAGE auth flow applied
+5. Check members dashboard → HoloCard should render with real certificate data (requires `NEXT_PUBLIC_SHOW_AGENT_CARDS` on PAGE)
+6. Test rate limiting (shared CF limiters): register 6 times rapidly with the same email → 6th should return `429 rate_limited` from the worker
+7. Test lifetime cap (Supabase DB): register 4 unique agents with the same email → 4th should return `403` with `error: Certificate limit reached (3 max). Endorsed members can register up to 10.`
+8. Test direct-access gate: `curl -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent -H 'Content-Type: application/json' -d '{}'` → should return `403 direct_access_deprecated`
+9. Test worker forwarding: same curl but with `-H 'x-dmv-proxy: v1'` → should return `400 agent_name is required` (gate passes, validation fires)

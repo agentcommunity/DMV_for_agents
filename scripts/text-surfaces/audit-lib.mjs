@@ -154,10 +154,6 @@ const ACCEPTED_EXCEPTIONS = {
     rationale:
       'Web CRT flow relies on follow-up email sequence; avoid overloading CRT completion copy.',
   },
-  'status-language-drift': {
-    rationale:
-      'Card remains visually "VERIFIED" by design; DB pending status is internal until email verification.',
-  },
 };
 
 function readUtf8(relPath) {
@@ -342,22 +338,15 @@ function evaluateRules(surfacesById) {
     }
   }
 
-  if (
-    /provisional_dmv/.test(surfacesById.register_api?.combinedText || '') &&
-    /VERIFIED/.test(surfacesById.web_card_client?.combinedText || '')
-  ) {
-    const warning = {
-      id: 'status-language-drift',
-      description:
-        'Registration API persists pending status while card renderer displays VERIFIED language.',
-      surfaces: ['register_api', 'web_card_client', 'web_card_server'],
-    };
-    if (ACCEPTED_EXCEPTIONS[warning.id]) {
-      accepted.push({ ...warning, rationale: ACCEPTED_EXCEPTIONS[warning.id].rationale });
-    } else {
-      warnings.push(warning);
-    }
-  }
+  // Historical: an earlier check fired on the string 'provisional_dmv' in the
+  // register-agent source, paired with 'VERIFIED' in the card renderer, as a
+  // proxy for "DB pending status vs VERIFIED card copy" drift. That string is
+  // gone from the code (2026-04-08 — the DMV function no longer sets status;
+  // PAGE identifies DMV rows by certificate_id IS NOT NULL). The accepted-
+  // exception entry has been removed. The underlying semantic drift (card
+  // says VERIFIED before the operator signs in to claim the domain) is still
+  // documented as a product decision in docs/text-surface-audit.md but no
+  // longer has a cheap text-based detector anchored in source.
 
   return {
     errors,

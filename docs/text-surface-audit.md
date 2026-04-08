@@ -51,7 +51,7 @@ Accepted exceptions are codified in `/Users/user/dev/PROJECTS/AgentCommunity/Age
 Current accepted exceptions and rationale:
 
 1. `status-language-drift`
-   - Behavior: DB registration status starts as `provisional_dmv`, but card text shows `STATUS: VERIFIED`.
+   - Behavior: DB registration row starts at `status = 'pending_profile'` (PAGE's default on the shared registrations table), but the card text shows `STATUS: VERIFIED`. DMV does not set the status column — it relies on `certificate_id IS NOT NULL` as the DMV marker. The gap isn't `provisional → verified` (as earlier versions of this doc described); it's "card says VERIFIED before the operator has signed in to claim the domain."
    - Rationale: card is a static public artifact and should not reflect internal verification-state transitions.
 2. `web-crt-email-reminder-gap`
    - Behavior: web CRT completion screen does not add extra verification reminder copy.
