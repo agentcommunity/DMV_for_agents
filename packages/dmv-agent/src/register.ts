@@ -6,7 +6,8 @@ import type {
 } from './types.js';
 
 const REGISTER_ENDPOINT =
-  'https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent';
+  process.env.DMV_API_ENDPOINT?.trim()
+  || 'https://dmv.agentcommunity.org/api/register';
 
 /**
  * Register an agent identity at the DMV via the edge function proxy.
@@ -85,7 +86,7 @@ export async function registerAgent(
   }
 
   if (!res.ok) {
-    throw new Error((json.error as string) || `Registration failed (HTTP ${res.status})`);
+    throw new Error((json.message as string) || (json.error as string) || `Registration failed (HTTP ${res.status})`);
   }
 
   return {
