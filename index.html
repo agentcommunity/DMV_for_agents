@@ -23,6 +23,7 @@
   <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable site description">
   <meta name="agent:cli" content="bunx dmv-agent register">
   <meta name="agent:mcp" content='{"command":"bunx","args":["dmv-agent"]}'>
+  <meta name="dmv-turnstile-site-key" content="0x4AAAAAAC2BwC5T9LSdndaK">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="icon" type="image/x-icon" href="/images/favicon.ico?v=1" id="appFavicon">
   <link rel="stylesheet" href="/css/styles.css?v=29">
@@ -196,6 +197,8 @@
   <!-- Hidden input for capturing keystrokes when terminal is active -->
   <input id="hiddenInput" type="text" autocomplete="off" autocapitalize="off"
     autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="next" />
+  <div id="turnstile-container" aria-hidden="true"
+    style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;"></div>
 
   <script type="importmap">
   {
@@ -207,6 +210,7 @@
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
-  <script type="module" src="/js/app.js?v=31"></script>
+  <script defer id="turnstile-api-script" src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>
+  <script type="module" src="/js/app.js?v=32"></script>
 </body>
 </html>

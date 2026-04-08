@@ -16,7 +16,12 @@ The Department of Machine Verification is the identity registration system for t
  │  │               │     ├── HoloCard.js            │  Holographic card │
  │  │               │     └── AboutPoster.js         │                   │
  │  │               │                                │                   │
- │  │               └─► supabase.js ─── fetch() ─────┼──┐               │
+ │  │               │  Invisible Turnstile widget    │                   │
+ │  │               │  (action=dmv_register)         │                   │
+ │  │               │                                │                   │
+ │  │               └─► supabase.js ── fetch() ──────┼──┐               │
+ │  │                   POST /api/register            │  │               │
+ │  │                   (same-origin, no Supabase URL)│  │               │
  │  │                                                │  │               │
  │  │  Permalink: /c/CERT-ID/agent-name               │  │               │
  │  │  Overlay: "Get Yours" + "Share on X"           │  │               │
@@ -32,11 +37,11 @@ The Department of Machine Verification is the identity registration system for t
  │  │    (default)  → start MCP server               │  │               │
  │  │                                                │  │               │
  │  │  MCP Server (stdio):                           │  │               │
- │  │    register_agent    → POST to edge fn ────────┼──┤               │
+ │  │    register_agent    → POST /api/register ─────┼──┤               │
  │  │    verify_certificate → offline, no network    │  │               │
  │  │                                                │  │               │
  │  │  JS API:                                       │  │               │
- │  │    registerAgent()   → POST to edge fn ────────┼──┤               │
+ │  │    registerAgent()   → POST /api/register ─────┼──┤               │
  │  │    verifyCertificateId() → offline             │  │               │
  │  │                                                │  │               │
  │  │  Claude Code Skill:                            │  │               │
@@ -49,34 +54,71 @@ The Department of Machine Verification is the identity registration system for t
                                         fetch() POST/GET│
                                                         │
  ┌──────────────────────────────────────────────────────┼───────────────┐
- │                      SUPABASE CLOUD                  │               │
+ │              CLOUDFLARE — dmv.agentcommunity.org      │               │
  │                                                      │               │
  │  ┌───────────────────────────────────────────────┐  │               │
- │  │  Edge Functions (Deno)                         │◄─┘               │
+ │  │  Worker — worker/index.ts handleRegister       │◄─┘               │
  │  │                                                │                   │
- │  │  POST /register-agent                          │                   │
- │  │    → validate input + registration_type        │                   │
- │  │    → rate limit: Redis triple layer (Upstash)    │                   │
- │  │    → lifetime cap: 3/email or 10 if endorsed    │                   │
- │  │    → generate certificate ID (FNV-1a + Luhn)   │                   │
- │  │    → INSERT into registrations (status:         │                   │
- │  │      provisional_dmv, user_id: NULL)            │                   │
- │  │    → return cert ID + permalink + badge URLs   │                   │
- │  │    → DB trigger fires → agentcommunity.org     │                   │
- │  │      creates auth user + sends magic link +    │                   │
- │  │      certificate email (async via pg_net)      │                   │
- │  │                                                │                   │
- │  │  GET /lookup-agent?id=CERT-ID                  │                   │
- │  │    → single result (cert IDs are unique)       │                   │
- │  │  GET /lookup-agent?domain=name                 │                   │
- │  │    → array (multiple pre-registrations)        │                   │
- │  │                                                │                   │
- │  │  GET /badge?id=CERT-ID&style=flat|card         │                   │
- │  │    → SVG badge (cert ID only, domain lookup    │                   │
- │  │      deprecated — ambiguous with multi-prereg) │                   │
- │  │                                                │                   │
- │  │  🔑 Holds SUPABASE_SERVICE_ROLE_KEY            │                   │
- │  └──────────────────────┬────────────────────────┘                   │
+ │  │  POST /api/register                            │                   │
+ │  │    Browser path (signup_source: 'ui'):         │                   │
+ │  │    1. validate JSON shape                      │                   │
+ │  │    2. require cf-turnstile-response token      │                   │
+ │  │    3. Turnstile siteverify                     │                   │
+ │  │       → check success + hostname + action      │                   │
+ │  │    4. shared CF rate limiters                  │                   │
+ │  │       → RL_OTP_EMAIL    (5/60s, ns 4005)       │                   │
+ │  │       → RL_OTP_IP_EMAIL (4/60s, ns 4007)       │                   │
+ │  │       (both ns IDs SHARED with PAGE)           │                   │
+ │  │    5. forward to Supabase ─────────────────────┼──┐               │
+ │  │                                                │  │               │
+ │  │    CLI/MCP path (signup_source: 'cli'/'mcp'):  │  │               │
+ │  │    1. validate JSON shape                      │  │               │
+ │  │    2. require machine_fingerprint              │  │               │
+ │  │    3. shared CF rate limiters (same as above)  │  │               │
+ │  │    4. DMV-local KV fingerprint cooldown        │  │               │
+ │  │       → REGISTER_COOLDOWN_KV                   │  │               │
+ │  │       (NOT shared with PAGE)                   │  │               │
+ │  │    5. forward to Supabase ─────────────────────┼──┤               │
+ │  │                                                │  │               │
+ │  │  CAPTCHA always before counters — invalid       │  │               │
+ │  │  tokens cannot exhaust quota for real users.   │  │               │
+ │  │                                                │  │               │
+ │  │  🔑 Holds TURNSTILE_SECRET_KEY                 │  │               │
+ │  └────────────────────────────────────────────────┘  │               │
+ └────────────────────────────────────────────────────────┼───────────────┘
+                                                          │
+                                              fetch() POST│
+                                                          │
+ ┌────────────────────────────────────────────────────────┼───────────────┐
+ │                      SUPABASE CLOUD                    │               │
+ │                                                        │               │
+ │  ┌─────────────────────────────────────────────────┐  │               │
+ │  │  Edge Functions (Deno)                           │◄─┘               │
+ │  │                                                  │                   │
+ │  │  POST /register-agent (worker upstream)          │                   │
+ │  │    → validate input + registration_type          │                   │
+ │  │    → lifetime cap: 3/email or 10 if endorsed      │                   │
+ │  │    → generate certificate ID (FNV-1a + Luhn)     │                   │
+ │  │    → INSERT into registrations (status:           │                   │
+ │  │      provisional_dmv, user_id: NULL)              │                   │
+ │  │    → return cert ID + permalink + badge URLs     │                   │
+ │  │    → DB trigger fires → agentcommunity.org       │                   │
+ │  │      creates auth user + sends magic link +      │                   │
+ │  │      certificate email (async via pg_net)        │                   │
+ │  │    NOTE: Upstash rate limiting REMOVED — the      │                   │
+ │  │    worker owns anti-abuse now.                    │                   │
+ │  │                                                  │                   │
+ │  │  GET /lookup-agent?id=CERT-ID                    │                   │
+ │  │    → single result (cert IDs are unique)         │                   │
+ │  │  GET /lookup-agent?domain=name                   │                   │
+ │  │    → array (multiple pre-registrations)          │                   │
+ │  │                                                  │                   │
+ │  │  GET /badge?id=CERT-ID&style=flat|card           │                   │
+ │  │    → SVG badge (cert ID only, domain lookup     │                   │
+ │  │      deprecated — ambiguous with multi-prereg)   │                   │
+ │  │                                                  │                   │
+ │  │  🔑 Holds SUPABASE_SERVICE_ROLE_KEY              │                   │
+ │  └──────────────────────┬──────────────────────────┘                   │
  │                          │                                            │
  │  ┌──────────────────────▼────────────────────────┐                   │
  │  │  PostgreSQL — registrations table              │                   │
@@ -114,24 +156,28 @@ The Department of Machine Verification is the identity registration system for t
 | **JS API** | `import { registerAgent }` from the package | Agent frameworks | Agent |
 | **Claude Code skill** | `/dmv` slash command | Claude Code users | Agent |
 
-All five paths call the same edge function. Zero database credentials on the client.
+All five paths call the worker `/api/register` endpoint, which forwards validated requests to the same Supabase edge function. Zero database credentials on the client.
 
 The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `bunx dmv-agent register --name <agent> --email <email> --operator <name>`.
 
-### Rate limiting (seven layers)
+### Rate limiting
 
-**Layer 0 — Cloudflare Worker edge rate limit** (NEW 2026-04-07). 100 req/60s per `${ip}:${pathname}` on `/api/card` and `/api/og` via the Workers Rate Limiting API binding `API_RATE_LIMITER`. Runs BEFORE the in-Worker cache lookup so rejections don't eat CPU on L1/R2 reads. Rejected requests return `429` with `Retry-After: 60`. Configured in `wrangler.jsonc` under the top-level `ratelimits` array. Note: this layer guards the CARD-RENDER path, not the REGISTRATION path — the 6 layers below still apply to `register-agent` independently.
+Two distinct surfaces, owned by the Cloudflare Worker.
 
-| Layer | Scope | Limit | Backend |
-|-------|-------|-------|---------|
-| Client-side lockfile | Per machine (SHA-256 fingerprint) | 3 per 24h | `~/.dmv-agent/registrations.json` |
-| Redis: per IP+email | Per session | 3 / 10 min | Upstash (shared with main site) |
-| Redis: per email | Per email address | 5 / 10 min | Upstash |
-| Redis: per IP | Per IP address | 10 / 10 min | Upstash |
-| DB: lifetime cap | Per email, lifetime | 3 (unendorsed) / 10 (endorsed) | Postgres |
-| DB: unique constraint | Per cert ID | Deterministic dedup | Postgres |
+**Render path** (`/api/card`, `/api/og`): `API_RATE_LIMITER` binding — 100 req/60s per `${ip}:${pathname}`, namespace `1001` (DMV-local). Runs BEFORE the in-Worker cache lookup so rejections don't eat CPU on L1/R2 reads. Rejected requests return `429` with `Retry-After: 60`. Configured in `wrangler.jsonc` under the top-level `ratelimits` array.
 
-Redis rate limiting is fail-open — if Upstash is down, requests fall through to the DB lifetime cap. Client-side lockfile is advisory (shared by CLI and MCP). See [AUTH_DMV.md](AUTH_DMV.md) for the full rate limiting architecture.
+**Register path** (`/api/register`): five layers, ordered cheapest-to-most-expensive.
+
+| Layer | Scope | Limit | Backend | Notes |
+|-------|-------|-------|---------|-------|
+| Client lockfile | Per machine (SHA-256 fingerprint) | 3 per 24h | `~/.dmv-agent/registrations.json` | CLI/MCP only. Advisory — easily bypassed. |
+| Worker: Turnstile | Per browser request | Pass/fail | Cloudflare Turnstile siteverify | Browser path only. Validates `success` + `hostname` + `action: dmv_register`. CAPTCHA runs BEFORE shared counters. |
+| Worker: shared CF | Per email, per IP+email | 5 per 60s, 4 per 60s | CF Workers Rate Limiting API | Bindings `RL_OTP_EMAIL` (ns `4005`) and `RL_OTP_IP_EMAIL` (ns `4007`). Both `namespace_id` values are SHARED at the CF account level with `agentCommunity_PAGE`. |
+| Worker: KV cooldown | Per machine fingerprint | Threshold-then-hold | DMV-local `REGISTER_COOLDOWN_KV` | CLI/MCP only. Key prefix `dmv:register:fingerprint:<sha256>`. Not shared with PAGE. |
+| DB: lifetime cap | Per email, lifetime | 3 (unendorsed) / 10 (endorsed) | Postgres | Inside `register-agent` edge function. Backstop for slow-burn abuse. |
+| DB: unique constraint | Per cert ID | Deterministic dedup | Postgres | Catches re-registration of identical inputs. |
+
+Upstash Redis was removed from DMV in the 2026-04-08 hardening pass — every register-path counter now lives in Cloudflare. The worker is the single anti-abuse choke point; the edge function is strictly an upstream that validates and INSERTs. See [AUTH_DMV.md](AUTH_DMV.md) for the full design rationale and the cross-repo coupling contract with `agentCommunity_PAGE`.
 
 ## Repository structure
 
@@ -155,7 +201,7 @@ threejs_box_design_dmv/
 ├── audio/                        Background track(s) (user-provided, optional)
 │
 ├── supabase/functions/
-│   ├── register-agent/index.ts   POST — registration proxy (validate, rate limit, insert)
+│   ├── register-agent/index.ts   POST — Worker upstream (validate, lifetime cap, generate cert, insert). Anti-abuse lives in the worker.
 │   ├── lookup-agent/index.ts     GET — public read-only lookup by cert ID or domain
 │   └── badge/index.ts            GET — SVG badge generator (flat + card styles)
 │
@@ -165,7 +211,7 @@ threejs_box_design_dmv/
 │   │   ├── ui.ts                  CRT frame renderer, ANSI colors, box drawing (zero deps)
 │   │   ├── rate-limit.ts          Machine fingerprint, local lockfile, 3/24h limit
 │   │   ├── mcp-server.ts         MCP server (register_agent, verify_certificate)
-│   │   ├── register.ts           Core registration (validate → POST to edge fn + fingerprint)
+│   │   ├── register.ts           Core registration (validate → POST to dmv.agentcommunity.org/api/register worker proxy + machine_fingerprint)
 │   │   ├── certificate.ts        FNV-1a hash + Luhn mod-36 cert ID generation
 │   │   ├── validate.ts           Agent name, email validation
 │   │   ├── types.ts              TypeScript interfaces
@@ -226,11 +272,13 @@ Database:        RLS denies all anon access
 
 | Threat | Mitigation |
 |--------|-----------|
-| Spam registrations | Redis rate limit: 3/IP+email/10min, 5/email/10min, 10/IP/10min (Upstash, fail-open) + lifetime cap 3/email (10 if endorsed) |
+| Spam registrations (browser) | Cloudflare Turnstile (server-side hostname + `dmv_register` action check) + shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared with `agentCommunity_PAGE` at the CF account level) + DB lifetime cap 3/email (10 if endorsed). CAPTCHA always runs before counters. |
+| Spam registrations (CLI/MCP) | Machine fingerprint required + same shared CF rate limits + DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`) + DB lifetime cap. Headless clients can't solve Turnstile, so fingerprint substitutes. |
 | Name squatting | Pre-registration model — multiple users can claim the same domain. Magic link email verifies identity. |
-| Credential theft | No credentials in client code. Anon key removed. Only edge fn URL is public. |
+| Credential theft | No credentials in client code. Anon key removed. Only the worker `/api/register` URL is public; `TURNSTILE_SECRET_KEY` is encrypted on the worker, `SUPABASE_SERVICE_ROLE_KEY` only inside the edge function runtime. |
 | Data exfil | lookup-agent returns only public fields. No email, no IP, no operator name. |
-| DDoS on edge fn | Supabase built-in DDoS protection + rate limiting in function code |
+| Token reuse across properties | Turnstile tokens are scoped to the DMV hostname AND the `dmv_register` action. A token minted on PAGE or for a different DMV route is rejected by `verifyTurnstileToken`. |
+| DDoS on edge fn | The worker is the public choke point — Supabase only sees worker-forwarded traffic (plus a temporary direct-bypass for legacy CLI versions, see CLOUDFLARE.md "Known gaps"). Worker has built-in CF DDoS protection. |
 
 ## Badges
 
@@ -327,5 +375,6 @@ npm run text:check      # strict tests (CI-safe)
 | NPM package | TypeScript, MCP SDK | pnpm for dev, bunx for users |
 | Edge functions | Deno (Supabase Edge Functions) | Auto-deployed env vars |
 | Database | PostgreSQL (Supabase) | RLS, unique constraints |
-| Hosting (web) | Static files (Vercel/Netlify/any CDN) | No SSR needed |
-| Hosting (API) | Supabase Edge Functions | Free tier, no VPS needed |
+| Hosting (web) | Cloudflare Workers Static Assets + Container | dist/ served by `dmv-agentcommunity` worker |
+| Hosting (API anti-abuse) | Cloudflare Worker (`/api/register`) | Turnstile + shared CF rate limits + KV cooldown |
+| Hosting (API upstream) | Supabase Edge Functions | Validation + cert ID generation + DB writes |

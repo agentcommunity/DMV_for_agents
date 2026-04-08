@@ -131,16 +131,26 @@ Badges are cached for 5 minutes. Lookup is by certificate ID only.
 ### Pre-registration flow
 
 ```
-Client (your machine)              Server (Supabase Edge Function)
-─────────────────────              ────────────────────────────────
+Client (your machine)         Cloudflare Worker /api/register      Supabase Edge Function
+─────────────────────         ──────────────────────────────       ──────────────────────
 rate limit check (local)
 validate input locally
         │
-        ├── POST /register-agent ──▶  validate again
-        │   + machine_fingerprint      rate limit (email + IP + fingerprint)
-        │                              generate certificate ID
-        │                              insert to database
-        │                              ◀── return certificate
+        ├── POST /api/register ──▶  validate JSON shape
+        │   + signup_source          require machine_fingerprint
+        │   + machine_fingerprint    shared CF rate limits
+        │                            └─ RL_OTP_EMAIL (5/60s)
+        │                            └─ RL_OTP_IP_EMAIL (4/60s)
+        │                            DMV-local KV fingerprint cooldown
+        │                            (REGISTER_COOLDOWN_KV)
+        │                                       │
+        │                                       ▼
+        │                            forward ─────▶  validate again
+        │                                            lifetime cap (DB)
+        │                                            generate cert ID
+        │                                            INSERT registration
+        │                            ◀───── return certificate
+        │   ◀──── return certificate
         │
 record attempt locally
 display result
@@ -148,12 +158,14 @@ display result
         └── verification email sent by server trigger ──▶ operator
 ```
 
-1. **Client-side rate limiting** — max 3 pre-registrations per machine per 24h. Machine fingerprint (SHA-256 of hostname + username + platform) tracked in `~/.dmv-agent/registrations.json`.
+1. **Client-side rate limiting** — max 3 pre-registrations per machine per 24h. Machine fingerprint (SHA-256 of hostname + username + platform) tracked in `~/.dmv-agent/registrations.json`. Advisory check.
 2. **Client-side validation** — fast feedback. Agent name: 3-63 lowercase alphanumeric + hyphens. Email: basic format.
-3. **Server-side validation** — same checks repeated at the security boundary.
-4. **Server-side rate limiting** — max 3 per email per hour, 10 per IP per hour. Machine fingerprint also sent for server-side enforcement. Cannot be bypassed.
-5. **Certificate ID** — content-addressed via FNV-1a hash. Format: `WORD-XXX-XXXC` with Luhn mod-36 check digit. Deterministic: same inputs = same ID.
-6. **Email verification** — a verification link is sent to the operator's email. Pre-registration completes only after verification. Until then, the domain interest is recorded but not active.
+3. **Worker validation** — same checks repeated at the public security boundary on the Cloudflare Worker.
+4. **Worker shared CF rate limits** — `RL_OTP_EMAIL` (5/60s) and `RL_OTP_IP_EMAIL` (4/60s). The `namespace_id` values are shared at the Cloudflare account level with `agentCommunity_PAGE`, so an attacker burning quota on one property has less of it available on the other.
+5. **Worker DMV-local KV cooldown** — CLI/MCP only. The worker hashes the supplied `machine_fingerprint` and increments a counter in `REGISTER_COOLDOWN_KV` (`dmv:register:fingerprint:<sha256>`). Threshold-then-hold pattern.
+6. **Edge function** — Supabase still runs validation, the DB lifetime cap (3 unendorsed / 10 endorsed per email), and the unique-cert-ID constraint as defense in depth.
+7. **Certificate ID** — content-addressed via FNV-1a hash. Format: `WORD-XXX-XXXC` with Luhn mod-36 check digit. Deterministic: same inputs = same ID.
+8. **Email verification** — a verification link is sent to the operator's email. Pre-registration completes only after verification. Until then, the domain interest is recorded but not active.
 
 ### Certificate ID format
 
@@ -195,22 +207,26 @@ verifyCertificateId('MESA-DD6-660J'); // true
 **No database credentials in client code.** The published package contains zero secrets.
 
 ```
-┌─────────────────┐         ┌──────────────────────────┐         ┌───────────┐
-│  Your agent /    │──stdio─▶│  dmv-agent (local)        │──https─▶│  Supabase │
-│  Claude Code     │         │  no secrets, just fetch() │         │  Edge Fn  │
-└─────────────────┘         └──────────────────────────┘         │  (has key)│
-                                                                  └───────────┘
+┌─────────────────┐         ┌──────────────────────────┐         ┌─────────────────┐         ┌───────────┐
+│  Your agent /    │──stdio─▶│  dmv-agent (local)        │──https─▶│ CF Worker        │──https─▶│  Supabase │
+│  Claude Code     │         │  no secrets, just fetch() │         │ /api/register    │         │  Edge Fn  │
+│                  │         │  signup_source: cli/mcp   │         │ + machine_fp     │         │  (has key)│
+│                  │         │  machine_fingerprint      │         │ shared CF limits │         └───────────┘
+│                  │         │                          │         │ + KV cooldown    │
+└─────────────────┘         └──────────────────────────┘         └─────────────────┘
 ```
 
-- **Edge function proxy** — all writes go through Supabase Edge Functions that hold the service role key.
-- **Triple-layer rate limiting** — client-side (machine fingerprint, 3/24h) + server-side (email 3/hr, IP 10/hr, fingerprint).
+- **Worker-owned anti-abuse** — the Cloudflare Worker `/api/register` is the public choke point. CLI/MCP requests must include `machine_fingerprint`; the worker enforces shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared at the CF account level with `agentCommunity_PAGE`) plus a DMV-local KV fingerprint cooldown (`REGISTER_COOLDOWN_KV`) before forwarding to Supabase.
+- **Edge function backstop** — Supabase still validates, enforces the DB lifetime cap (3 unendorsed / 10 endorsed per email), and enforces the unique-cert-ID constraint.
 - **Pre-registration model** — domain is NOT unique. Multiple parties can pre-register interest in the same name. Certificate ID IS unique (same user + agent + type = same cert).
 - **Email verification** — pre-registration is pending until the operator clicks the verification link.
 - **Content-addressed IDs** — deterministic hashes, not sequential. Cannot be enumerated or predicted.
 
 ## API reference
 
-### POST /register-agent
+### POST /api/register
+
+The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP clients in this package POST to `https://dmv.agentcommunity.org/api/register` directly. The legacy direct path to `/register-agent` on Supabase still works for older client versions but is scheduled to close.
 
 ```json
 {

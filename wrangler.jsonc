@@ -106,16 +106,21 @@
 		}
 	],
 	// ──────────────────────────────────────────────────────────────────────────
-	//  KV: short-TTL edge cache for /badge/* responses
+	//  KV: badge cache + local registration cooldown state
 	// ──────────────────────────────────────────────────────────────────────────
-	// Badge SVGs are deterministic per cert ID and cheap to regenerate on cache
-	// miss. 10-minute TTL is invisible to users (badges aren't real-time) and
-	// cuts Supabase edge function invocations by ~10x during the Brave window.
+	// BADGE_CACHE_KV: short-TTL edge cache for /badge/* responses.
+	// REGISTER_COOLDOWN_KV: DMV-local coarse cooldown state for machine
+	// fingerprint registration limits. Kept LOCAL to DMV — not shared with PAGE.
 	"kv_namespaces": [
 		{
 			"binding": "BADGE_CACHE_KV",
 			"id": "af14d3897b7b4964a75d7f0bfeb84600",
 			"preview_id": "52e93ba4257e4d2bbf671bdbaa5705be"
+		},
+		{
+			"binding": "REGISTER_COOLDOWN_KV",
+			"id": "ec0cdc55c2f94267af84f0218c961a00",
+			"preview_id": "dc0c4a98b4764d448f35872de11984be"
 		}
 	],
 	// ──────────────────────────────────────────────────────────────────────────
@@ -131,11 +136,14 @@
 		}
 	],
 	// ──────────────────────────────────────────────────────────────────────────
-	//  Workers Rate Limiting API: guard /api/card and /api/og from enumeration
+	//  Workers Rate Limiting API: render-path protection + shared registration
+	//  counters aligned with agentcommunity_PAGE
 	// ──────────────────────────────────────────────────────────────────────────
-	// 100 req/60s per IP is generous for real traffic but cuts naive enumeration
-	// attacks before they hit L1. `namespace_id` is any arbitrary integer unique
-	// to this worker — not the name of the KV namespace.
+	// API_RATE_LIMITER guards /api/card and /api/og from enumeration.
+	// RL_OTP_EMAIL + RL_OTP_IP_EMAIL share the exact Cloudflare namespace IDs
+	// used by PAGE because those counters represent the same abuse surface on
+	// both properties. DMV intentionally does NOT bind RL_AUTH or RL_OTP_IP from
+	// PAGE — those stay property-local.
 	//
 	// NOTE: this is the stable top-level `ratelimits` array, not the old
 	// `unsafe.bindings` form. Requires wrangler ≥ 4.36.0.
@@ -147,6 +155,22 @@
 			"namespace_id": "1001",
 			"simple": {
 				"limit": 100,
+				"period": 60
+			}
+		},
+		{
+			"name": "RL_OTP_EMAIL",
+			"namespace_id": "4005",
+			"simple": {
+				"limit": 5,
+				"period": 60
+			}
+		},
+		{
+			"name": "RL_OTP_IP_EMAIL",
+			"namespace_id": "4007",
+			"simple": {
+				"limit": 4,
 				"period": 60
 			}
 		}

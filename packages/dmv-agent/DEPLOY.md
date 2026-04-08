@@ -67,7 +67,7 @@ Three edge functions live in `supabase/functions/`:
 
 | Function | Method | Purpose |
 |----------|--------|---------|
-| `register-agent` | POST | Registration proxy (validates, rate limits, inserts) |
+| `register-agent` | POST | Worker upstream — validates, lifetime cap, generates cert, INSERTs. Anti-abuse lives in the worker. |
 | `lookup-agent` | GET | Public read-only lookup by cert ID or domain |
 | `badge` | GET | SVG badge generator (flat for READMEs, card for websites) |
 
@@ -82,7 +82,22 @@ This automatically injects `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as env
 
 ### Verify it's running
 
+The canonical path is the Cloudflare Worker, not the Supabase URL directly:
+
 ```bash
+# Worker (canonical) — requires machine_fingerprint for non-browser traffic
+curl -X POST https://dmv.agentcommunity.org/api/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent_name": "test-deploy",
+    "email": "test@example.com",
+    "operator_name": "Test",
+    "registration_type": "AGENT",
+    "signup_source": "cli",
+    "machine_fingerprint": "test_fingerprint_64chars_long_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  }'
+
+# Legacy direct (still works for backwards compat, scheduled to close):
 curl -X POST \
   https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
   -H 'Content-Type: application/json' \
@@ -95,16 +110,26 @@ Expected: `201` with `certificate_id`, `agent_name`, `domain`, `registration_typ
 
 ```bash
 # Missing fields → 400
-curl -X POST .../register-agent -H 'Content-Type: application/json' -d '{}'
+curl -X POST .../api/register -H 'Content-Type: application/json' -d '{}'
 
 # Invalid agent name → 400
-curl -X POST .../register-agent -H 'Content-Type: application/json' \
+curl -X POST .../api/register -H 'Content-Type: application/json' \
   -d '{"agent_name": "AB", "email": "x@y.com"}'
+
+# CLI/MCP missing machine_fingerprint → 400 machine_fingerprint_required
+curl -X POST .../api/register -H 'Content-Type: application/json' \
+  -d '{"agent_name": "x", "email": "x@y.com", "signup_source": "cli"}'
+
+# Browser missing Turnstile token → 400 turnstile_required
+curl -X POST .../api/register -H 'Content-Type: application/json' \
+  -d '{"agent_name": "x", "email": "x@y.com", "signup_source": "ui"}'
 
 # Duplicate certificate_id → 409 (same user + same agent name + same type)
 # Returns: "Agent already registered" + certificate_id + permalink_url
 
-# Rate limit → 429 (after 3 registrations with same email within an hour)
+# Rate limit → 429 with Retry-After: 60
+# Triggers: 6+ registrations to the same email within 60s, OR
+#           5+ registrations to the same (IP, email) combo within 60s
 ```
 
 ---
@@ -217,19 +242,24 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 
 ### Things to watch
 
-- **Supabase dashboard → Edge Functions → register-agent** — invocation count, error rate, latency
+- **Cloudflare dashboard → Workers → dmv-agentcommunity → Logs** — `/api/register` invocation count, error rate, Turnstile siteverify failures
+- **Cloudflare dashboard → Workers → dmv-agentcommunity → Analytics Engine → `dmv_worker_events`** — query `register_attempt` events by status (`2xx`, `4xx`, `5xx`, `rate_limited`, `fingerprint_cooldown`, `turnstile_required`, `turnstile_failed`, `validation`, `invalid_json`)
+- **Supabase dashboard → Edge Functions → register-agent** — invocation count, error rate, latency (now strictly worker-forwarded plus the temporary direct bypass)
 - **Supabase dashboard → Table Editor → registrations** — row count, any anomalies
-- **Rate limiting** — check if 3/email/hr and 10/IP/hr are the right thresholds (adjust in edge function if needed)
+- **Rate limiting** — shared CF limits are 5/email/60s and 4/(IP+email)/60s. Adjust in `wrangler.jsonc` `ratelimits` array, but remember the namespace IDs are shared with `agentCommunity_PAGE` — coordinate with that repo before changing values.
 - **Duplicate certs** — 409 responses mean same user tried to re-register the same agent (expected, they get their cert ID back)
 
 ### Common issues
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `Network error: could not reach DMV registration service` | Edge function not deployed or Supabase down | `supabase functions deploy register-agent` |
+| `Network error: could not reach DMV registration service` | Worker not deployed, Cloudflare DNS issue, or Supabase down | `pnpm cf:deploy` from repo root, then check `pnpm cf:tail` |
+| `turnstile_failed` (400) on browser | Wrong `TURNSTILE_SECRET_KEY` on the worker, or stale token | Check Cloudflare dashboard → Workers → dmv-agentcommunity → Variables and Secrets → confirm `TURNSTILE_SECRET_KEY` is encrypted Secret type |
+| `machine_fingerprint_required` (400) on CLI | CLI on old version not sending fingerprint | Bump CLI dependency to latest `@agentcommunity/dmv-agent` |
 | `Registration failed (HTTP 500)` | Service role key not set or DB schema mismatch | Check Supabase dashboard → Edge Functions → Logs |
 | `Agent already registered` (409) | Same user re-registering same agent | Expected — returns cert ID + permalink for recovery |
-| `Rate limited` (429) | Too many registrations from same email/IP | Wait an hour, or adjust thresholds |
+| `Rate limited` (429) | Too many registrations from same email or (IP, email) within 60s | Wait 60s. Check shared CF rate limit counters in Cloudflare dashboard. |
+| `fingerprint_cooldown` (429) | CLI/MCP machine fingerprint exceeded local KV cooldown | Wait `retry_after_seconds`. Counter is in DMV-local `REGISTER_COOLDOWN_KV`. |
 | CLI hangs on `bunx` | Package not published or npm registry cache | Try `npx @agentcommunity/dmv-agent` or `bunx --force` |
 
 ---
@@ -252,48 +282,51 @@ These are noted for future work, not needed for go-live:
 ## Architecture Reference
 
 ```
-User's machine                          Supabase cloud (shared agentcommunity project)
-──────────────                          ──────────────────────────────────────────────
+User's machine             Cloudflare Worker                  Supabase cloud
+──────────────             ──────────────────────             ──────────────
 
- ┌───────────────────┐                  ┌──────────────────────┐
- │ Claude Code        │   POST          │ register-agent (DMV)  │
- │  /dmv skill        │──────────────▶│ validate, rate limit  │
- │  MCP tool          │                │ generate cert, INSERT │
- └───────────────────┘                  └──────────┬───────────┘
-                                                    │
- ┌───────────────────┐   POST                      │
- │ Web UI             │──────────────────────────┘  │
- │ js/supabase.js     │                              │
- └───────────────────┘                              │
-                                                    ▼
-                                      ┌────────────────────────┐
-                                      │ Supabase DB             │
-                                      │ registrations table     │
-                                      └──────────┬─────────────┘
-                                                   │ AFTER INSERT trigger
-                                                   │ (certificate_id IS NOT NULL)
-                                                   ▼
-                                      ┌────────────────────────┐
-                                      │ handle-dmv-registration │
-                                      │ (agentcommunity.org)    │
-                                      │ → create/find auth user │
-                                      │ → magic link (new user) │
-                                      │ → upsert user_domains   │
-                                      │ → certificate email      │
-                                      └────────────────────────┘
+ ┌───────────────────┐    ┌─────────────────────┐           ┌──────────────────────┐
+ │ Claude Code        │   │ /api/register        │           │ register-agent (DMV)  │
+ │  /dmv skill        │──▶│ validate JSON        │──forward─▶│ validate (again)      │
+ │  MCP tool          │   │ require fingerprint │           │ lifetime cap (DB)     │
+ └───────────────────┘    │ shared CF limits     │           │ generate cert, INSERT │
+                          │ DMV-local KV         │           └──────────┬───────────┘
+ ┌───────────────────┐    │ cooldown             │                       │
+ │ Web UI             │──▶│                      │                       │
+ │ js/supabase.js     │   │ (browser path:       │                       │
+ └───────────────────┘    │  Turnstile siteverify│                       │
+                          │  before counters)    │                       │
+                          │                      │                       ▼
+                          │ 🔑 TURNSTILE_SECRET  │           ┌────────────────────────┐
+                          └──────────────────────┘           │ Supabase DB             │
+                                                              │ registrations table     │
+                                                              └──────────┬─────────────┘
+                                                                          │ AFTER INSERT trigger
+                                                                          │ (certificate_id IS NOT NULL)
+                                                                          ▼
+                                                              ┌────────────────────────┐
+                                                              │ handle-dmv-registration │
+                                                              │ (agentcommunity.org)    │
+                                                              │ → create/find auth user │
+                                                              │ → magic link (new user) │
+                                                              │ → upsert user_domains   │
+                                                              │ → certificate email      │
+                                                              └────────────────────────┘
 
- ┌───────────────────┐   GET           ┌──────────────────────┐
- │ GitHub README      │──────────────▶│ badge (DMV)            │
- │ <img src=badge>    │                │ SVG by cert ID only    │
- └───────────────────┘                └──────────┬───────────┘
-                                                    │ reads
- ┌───────────────────┐   GET                       │
- │ Any HTTP client    │──────────────▶┌────────────▼───────────┐
- │ curl, agents, etc  │               │ lookup-agent (DMV)      │
- └───────────────────┘               │ single (by cert ID) or  │
-                                      │ array (by domain)       │
-                                      └───────────────────────┘
+ ┌───────────────────┐    ┌─────────────────────┐           ┌──────────────────────┐
+ │ GitHub README      │──▶│ /badge/* worker      │──proxy──▶│ badge (DMV)            │
+ │ <img src=badge>    │   │ (KV cache + header   │           │ SVG by cert ID only    │
+ └───────────────────┘    │  hygiene)            │           └──────────┬───────────┘
+                          └─────────────────────┘                        │ reads
+ ┌───────────────────┐                                                   │
+ │ Any HTTP client    │──────────────────────▶┌────────────▼───────────┐
+ │ curl, agents, etc  │                        │ lookup-agent (DMV)      │
+ └───────────────────┘                        │ single (by cert ID) or  │
+                                                │ array (by domain)       │
+                                                └───────────────────────┘
 ```
 
-**Zero secrets in client code. All database access goes through edge functions.**
-**DMV INSERTs, agentcommunity.org reacts (trigger chain). Clean boundary.**
+**Zero secrets in client code. The Cloudflare Worker holds the Turnstile secret;**
+**Supabase holds the service role key. The worker is the public anti-abuse choke**
+**point for `/api/register`; the edge function is strictly an upstream that**
+**validates, applies the lifetime cap, and INSERTs.**

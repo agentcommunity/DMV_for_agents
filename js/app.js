@@ -1,9 +1,9 @@
-import { TV } from './TV.js?v=24';
+import { TV } from './TV.js?v=25';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
 import { WallNumber } from './WallNumber.js?v=1';
-import { insertRegistration } from './supabase.js?v=16';
+import { insertRegistration } from './supabase.js?v=17';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;
@@ -54,6 +54,8 @@ const terminalStatusBar = document.getElementById('terminalStatusBar');
 const terminalStatusText = document.getElementById('terminalStatusText');
 const crtAnnouncements = document.getElementById('crtAnnouncements');
 const cliCommandMeta = document.querySelector('meta[name="agent:cli"]');
+const turnstileContainer = document.getElementById('turnstile-container');
+const turnstileSiteKeyMeta = document.querySelector('meta[name="dmv-turnstile-site-key"]');
 
 const CANONICAL_ORIGIN = (() => {
   const raw = document.querySelector('meta[property="og:url"]')?.getAttribute('content') || '';
@@ -67,6 +69,141 @@ const CANONICAL_ORIGIN = (() => {
 const CLI_REGISTER_COMMAND = cliCommandMeta?.getAttribute('content')?.trim()
   || cliSnippet?.textContent.trim()
   || 'bunx dmv-agent register';
+const DMV_TURNSTILE_ACTION = 'dmv_register';
+const TURNSTILE_SCRIPT_ID = 'turnstile-api-script';
+
+let turnstileWidgetId = null;
+let turnstileApiPromise = null;
+let turnstilePendingResolve = null;
+let turnstilePendingReject = null;
+let turnstilePendingTimeout = null;
+
+function getTurnstileSiteKey() {
+  return turnstileSiteKeyMeta?.getAttribute('content')?.trim() || '';
+}
+
+function clearTurnstilePending() {
+  if (turnstilePendingTimeout) {
+    clearTimeout(turnstilePendingTimeout);
+    turnstilePendingTimeout = null;
+  }
+  turnstilePendingResolve = null;
+  turnstilePendingReject = null;
+}
+
+function rejectTurnstilePending(message) {
+  if (!turnstilePendingReject) return;
+  const reject = turnstilePendingReject;
+  clearTurnstilePending();
+  reject(new Error(message));
+}
+
+function waitForTurnstileApi() {
+  if (window.turnstile) {
+    return Promise.resolve(window.turnstile);
+  }
+  if (turnstileApiPromise) {
+    return turnstileApiPromise;
+  }
+
+  turnstileApiPromise = new Promise((resolve, reject) => {
+    const script = document.getElementById(TURNSTILE_SCRIPT_ID);
+    if (!script) {
+      reject(new Error('Verification is unavailable. Please retry.'));
+      return;
+    }
+
+    const handleLoad = () => {
+      script.dataset.loaded = 'true';
+      if (window.turnstile) {
+        cleanup();
+        resolve(window.turnstile);
+      }
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error('Verification failed to load. Please retry.'));
+    };
+    const cleanup = () => {
+      script.removeEventListener('load', handleLoad);
+      script.removeEventListener('error', handleError);
+    };
+
+    if (script.dataset.loaded === 'true' && window.turnstile) {
+      cleanup();
+      resolve(window.turnstile);
+      return;
+    }
+
+    script.addEventListener('load', handleLoad);
+    script.addEventListener('error', handleError);
+  });
+
+  return turnstileApiPromise;
+}
+
+async function ensureTurnstileWidget() {
+  if (turnstileWidgetId !== null) return turnstileWidgetId;
+
+  const siteKey = getTurnstileSiteKey();
+  if (!siteKey) {
+    throw new Error('Verification is unavailable. Please retry.');
+  }
+  if (!turnstileContainer) {
+    throw new Error('Verification is unavailable. Please retry.');
+  }
+
+  await waitForTurnstileApi();
+  turnstileWidgetId = window.turnstile.render(turnstileContainer, {
+    sitekey: siteKey,
+    action: DMV_TURNSTILE_ACTION,
+    execution: 'execute',
+    callback: (token) => {
+      if (!turnstilePendingResolve) return;
+      const resolve = turnstilePendingResolve;
+      clearTurnstilePending();
+      resolve(token);
+    },
+    'expired-callback': () => {
+      rejectTurnstilePending('Verification expired. Please retry.');
+    },
+    'error-callback': () => {
+      rejectTurnstilePending('Verification failed. Please retry.');
+    },
+  });
+
+  return turnstileWidgetId;
+}
+
+async function executeTurnstile() {
+  const widgetId = await ensureTurnstileWidget();
+
+  return new Promise((resolve, reject) => {
+    turnstilePendingResolve = resolve;
+    turnstilePendingReject = reject;
+    turnstilePendingTimeout = setTimeout(() => {
+      rejectTurnstilePending('Verification timed out. Please retry.');
+    }, 15000);
+
+    try {
+      window.turnstile.reset(widgetId);
+      window.turnstile.execute(widgetId);
+    } catch (err) {
+      rejectTurnstilePending('Verification failed. Please retry.');
+    }
+  });
+}
+
+function resetTurnstile() {
+  clearTurnstilePending();
+  if (turnstileWidgetId !== null && window.turnstile) {
+    try {
+      window.turnstile.reset(turnstileWidgetId);
+    } catch (err) {
+      // Ignore widget reset failures — the next execute() will recreate state as needed.
+    }
+  }
+}
 
 const tv = new TV(container, label);
 // In permalink mode skip the 2.2MB GLB model — user just wants the card.
@@ -746,28 +883,30 @@ if (demoMode) {
 }
 
 // Persist completion; no floating card/info panel
+tv.crt.onSubmit = async (data) => {
+  try {
+    const token = await executeTurnstile();
+    const { data: persisted, error } = await insertRegistration(data, 'ui', token);
+    if (error) {
+      throw new Error(error.message || 'Registration failed. Please try again.');
+    }
+    if (!persisted?.certificate_id) {
+      throw new Error('Registration failed. Please try again.');
+    }
+    return {
+      certificateId: persisted.certificate_id,
+      agentName: persisted.agent_name || data.agentName,
+    };
+  } finally {
+    resetTurnstile();
+  }
+};
+
 tv.crt.onComplete = async (data) => {
-  let current = { ...data };
+  const current = { ...data };
   latestCardData = current;
   setShareHash(current.certificateId, current.agentName);
   holoCard.show(current);
-
-  try {
-    const { data: persisted } = await insertRegistration(current, 'ui');
-    if (persisted?.certificate_id) {
-      current = {
-        ...current,
-        certificateId: persisted.certificate_id,
-        agentName: persisted.agent_name || current.agentName,
-      };
-      latestCardData = current;
-      tv.crt.setCertificateId(current.certificateId);
-      setShareHash(current.certificateId, current.agentName);
-      holoCard.show(current, true);
-    }
-  } catch (err) {
-    console.warn('Registration persistence failed:', err);
-  }
 };
 
 tv.crt.onViewCert = () => {

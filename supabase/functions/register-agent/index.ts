@@ -3,8 +3,6 @@
 // Client packages never see database credentials.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { Redis } from 'https://esm.sh/@upstash/redis@1.35.1'
-import { Ratelimit } from 'https://esm.sh/@upstash/ratelimit@2.0.6'
 
 // --- Certificate ID generation (duplicated from package — ~50 lines, no deps) ---
 
@@ -124,84 +122,6 @@ function getCorsHeaders(req: Request) {
   }
 }
 
-// --- Rate limiting (Redis-backed via Upstash) ---
-
-let _limiters: ReturnType<typeof createRateLimiters> | null = null
-
-function createRateLimiters() {
-  const redis = new Redis({
-    url: Deno.env.get('UPSTASH_REDIS_REST_URL')!,
-    token: Deno.env.get('UPSTASH_REDIS_REST_TOKEN')!,
-  })
-
-  return {
-    perEmail: new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(5, '10 m'),
-      prefix: 'dmv:email',
-    }),
-    perIp: new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(10, '10 m'),
-      prefix: 'dmv:ip',
-    }),
-    perIpEmail: new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(3, '10 m'),
-      prefix: 'dmv:ip-email',
-    }),
-  }
-}
-
-function getLimiters() {
-  if (!_limiters) _limiters = createRateLimiters()
-  return _limiters
-}
-
-async function hashString(str: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
-  return [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2, '0')).join('')
-}
-
-async function checkRateLimit(
-  email: string,
-  ip: string,
-): Promise<{ error: string | null; retryAfter?: number }> {
-  try {
-    const limiters = getLimiters()
-    const emailHash = await hashString(email)
-    const ipHash = await hashString(ip)
-
-    // Tightest limit first: per IP+email combo
-    const ipEmailResult = await limiters.perIpEmail.limit(`${ipHash}:${emailHash}`)
-    if (!ipEmailResult.success) {
-      const retryAfter = Math.ceil((ipEmailResult.reset - Date.now()) / 1000)
-      return { error: 'Rate limited: too many registrations from this session', retryAfter }
-    }
-
-    // Per-email limit
-    const emailResult = await limiters.perEmail.limit(emailHash)
-    if (!emailResult.success) {
-      const retryAfter = Math.ceil((emailResult.reset - Date.now()) / 1000)
-      return { error: 'Rate limited: too many registrations for this email', retryAfter }
-    }
-
-    // Per-IP limit (most lenient — shared IPs need headroom)
-    const ipResult = await limiters.perIp.limit(ipHash)
-    if (!ipResult.success) {
-      const retryAfter = Math.ceil((ipResult.reset - Date.now()) / 1000)
-      return { error: 'Rate limited: too many registrations from this address', retryAfter }
-    }
-
-    return { error: null }
-  } catch (err) {
-    // Fail-open: if Redis is down, allow the request through.
-    // The DB lifetime cap still provides a backstop against abuse.
-    console.error('Redis rate limit check failed, allowing request:', err)
-    return { error: null }
-  }
-}
-
 // --- Handler ---
 
 Deno.serve(async (req) => {
@@ -243,19 +163,9 @@ Deno.serve(async (req) => {
   const registrationType = (body.registration_type as string) || 'AGENT'
   const organizationName = (body.organization_name as string) || null
 
-  // Client IP for rate limiting (before DB connection)
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     || req.headers.get('cf-connecting-ip')
     || 'unknown'
-
-  // Rate limit (Redis — no DB connection needed)
-  const rateLimit = await checkRateLimit(email, ip)
-  if (rateLimit.error) {
-    return new Response(
-      JSON.stringify({ error: rateLimit.error }),
-      { status: 429, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json', 'Retry-After': String(rateLimit.retryAfter || 600) } },
-    )
-  }
 
   // Supabase client with service role key (server-side only — created after rate limit check)
   const supabase = createClient(

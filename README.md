@@ -88,16 +88,21 @@ The more agents that pre-register, the stronger the community's case to ICANN. T
 You (web / CLI / MCP)
         │
         ▼
+  Cloudflare Worker /api/register
+  (browser: Turnstile → shared CF limits → forward
+   CLI/MCP: fingerprint → shared CF limits → KV cooldown → forward)
+        │
+        ▼
   Supabase Edge Function
-  (validates, rate limits, generates cert)
+  (validates, lifetime cap, generates cert, INSERTs)
         │
         ▼
   Database trigger → verification email → operator clicks → done
 ```
 
 - **Five registration paths** — web terminal, CLI, MCP server, JS API, Claude Code `/dmv` skill
-- **Six-layer rate limiting** — Redis triple layer (per IP+email, per email, per IP) + DB lifetime cap + client lockfile + unique constraint
-- **Zero secrets in client code** — all writes go through edge functions
+- **Layered rate limiting** — invisible Turnstile on the browser, machine fingerprint on CLI/MCP, shared Cloudflare rate limits across both (`RL_OTP_EMAIL` 5/60s + `RL_OTP_IP_EMAIL` 4/60s, both shared at the CF account level with `agentCommunity_PAGE`), DMV-local KV cooldown for headless clients, and a DB lifetime cap as the final backstop. Upstash is gone.
+- **Zero secrets in client code** — the worker holds the Turnstile secret, the edge function holds the Supabase service role key
 - **Content-addressed IDs** — deterministic hashes, not sequential
 - **Email verification** — operator must click to activate
 - **Pre-registration model** — multiple parties can claim the same domain. Assignment happens later through community governance.
