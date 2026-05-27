@@ -801,22 +801,22 @@ export class CRTTerminal {
     this._addTapTarget('review_scroll_down', 0, this.h * 0.65, this.w, this.h * 0.35);
 
     if (this.isMobile) {
-      // Show overscroll-to-dismiss hint when near the top
-      if (this.manualScrollY !== null && this.manualScrollY <= this.lineHeight * 2) {
-        const progress = Math.min(1, this._readingOverscroll / 12);
-        // Fade background at top for readability
-        const fadeGrad = ctx.createLinearGradient(0, 0, 0, this.padding + 10);
-        fadeGrad.addColorStop(0, this.bgColor);
-        fadeGrad.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = fadeGrad;
-        ctx.fillRect(0, 0, this.w, this.padding + 10);
+      // Always show the dismiss hint while reading \u2014 the overscroll gesture is otherwise undiscoverable.
+      const nearTop = this.manualScrollY !== null && this.manualScrollY <= this.lineHeight * 2;
+      const progress = Math.min(1, this._readingOverscroll / 12);
+      // Fade background at top for readability
+      const fadeGrad = ctx.createLinearGradient(0, 0, 0, this.padding + 10);
+      fadeGrad.addColorStop(0, this.bgColor);
+      fadeGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = fadeGrad;
+      ctx.fillRect(0, 0, this.w, this.padding + 10);
 
-        ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
-        ctx.globalAlpha = 0.35 + 0.65 * progress;
-        ctx.fillStyle = this.dimColor;
-        ctx.fillText('\u2191 scroll up to return', this.padding, this.padding - 6);
-        ctx.globalAlpha = 1;
-      }
+      ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
+      // Tap-X is always available; the gesture is a secondary hint when scrolled to the top.
+      ctx.globalAlpha = nearTop ? (0.35 + 0.65 * progress) : 0.55;
+      ctx.fillStyle = this.dimColor;
+      ctx.fillText('\u2191 scroll up or tap [\u00d7] to return', this.padding, this.padding - 6);
+      ctx.globalAlpha = 1;
     } else {
       const hintX = this.padding;
       const hintY = this.padding - 6;

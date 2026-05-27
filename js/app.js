@@ -1,4 +1,4 @@
-import { TV } from './TV.js?v=25';
+import { TV } from './TV.js?v=26';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
@@ -50,8 +50,8 @@ const cardSaveBtn = document.getElementById('cardSaveBtn');
 const cardShareTicker = document.getElementById('cardShareTicker');
 const appFavicon = document.getElementById('appFavicon');
 const cliSnippet = document.getElementById('cliSnippet');
-const terminalStatusBar = document.getElementById('terminalStatusBar');
-const terminalStatusText = document.getElementById('terminalStatusText');
+const sceneExit = document.getElementById('sceneExit');
+const sceneExitLabel = document.getElementById('sceneExitLabel');
 const crtAnnouncements = document.getElementById('crtAnnouncements');
 const cliCommandMeta = document.querySelector('meta[name="agent:cli"]');
 const turnstileContainer = document.getElementById('turnstile-container');
@@ -217,8 +217,7 @@ tv.setCardMesh(holoCard.getMesh());
 // DOM card click → toggle zoom (card captures clicks when visible via CSS pointer-events)
 holoCard.onClick(() => {
   if (tv.isCardZoomed) {
-    holoCard.setVisible(false);
-    tv.zoomOutFromCard();
+    dismissCard();
   } else if (holoCard.getMesh().visible) {
     tv.zoomToCard();
   }
@@ -284,15 +283,50 @@ function scrollToTop() {
   document.getElementById('scroller').scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function syncTerminalStatusBar() {
-  if (!terminalStatusBar) return;
-  const isSceneFocused = tv.isCardZoomed || tv.isAboutZoomed;
+// Slow auto-zoom into the CRT so the boot sequence can be enjoyed.
+// Triggered by tapping the monitor on landing.
+function programmaticZoomToCRT() {
+  const scroller = document.getElementById('scroller');
+  if (!scroller) return;
+  const target = scroller.scrollHeight * 0.85;
+  if (scroller.scrollTop >= target * 0.95) return;
+  gsap.killTweensOf(scroller, 'scrollTop');
+  gsap.to(scroller, { scrollTop: target, duration: 3.0, ease: 'power2.inOut' });
+}
+
+function dismissCard() {
+  if (!tv.isCardZoomed) return;
+  if (permalink) {
+    window.location.href = '/';
+    return;
+  }
+  holoCard.setVisible(false);
+  tv.zoomOutFromCard();
+}
+
+function exitCurrentZoomState() {
+  if (agentViewOpen) { closeAgentView(); return; }
+  if (tv.isAboutZoomed) { closeAbout(); return; }
+  if (tv.isCardZoomed) { dismissCard(); return; }
+  if (tv.crt.bootPhase === 5 && tv.crt.reviewReading) {
+    tv.crt.handleReviewInput('Escape');
+    return;
+  }
+  if (isMobileViewport() && isCRTInteractive()) { scrollToTop(); return; }
+}
+
+function syncSceneExit() {
+  if (!sceneExit) return;
   const isReading = tv.crt.bootPhase === 5 && tv.crt.reviewReading;
-  const mobileZoomed = isMobileViewport() && isCRTInteractive() && !isSceneFocused;
-  const shouldShow = isReading || mobileZoomed;
-  terminalStatusBar.hidden = !shouldShow;
-  if (terminalStatusText) {
-    terminalStatusText.textContent = isReading ? '\u2190 BACK' : '\u2191 ZOOM OUT';
+  const isSceneZoom = tv.isCardZoomed || tv.isAboutZoomed;
+  const isMobileCrt = isMobileViewport() && isCRTInteractive() && !isSceneZoom;
+  const visible = agentViewOpen || isSceneZoom || isReading || isMobileCrt;
+  sceneExit.hidden = !visible;
+  if (sceneExitLabel) {
+    let label = 'CLOSE';
+    if (permalink && tv.isCardZoomed) label = 'HOME';
+    else if (isMobileCrt && !isReading) label = 'TOP';
+    sceneExitLabel.textContent = label;
   }
 }
 
@@ -587,17 +621,6 @@ cardSaveBtn?.addEventListener('click', (e) => {
   downloadCard();
 });
 
-terminalStatusBar?.addEventListener('click', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  const isReading = tv.crt.bootPhase === 5 && tv.crt.reviewReading;
-  if (isReading) {
-    tv.crt.handleReviewInput('Escape');
-  } else {
-    scrollToTop();
-  }
-});
-
 let prevCardZoomed = false;
 let prevCrtPhase = -1;
 let prevCrtError = null;
@@ -648,8 +671,14 @@ tv.onRender((dt) => {
   }
 
   syncCardShareBar();
-  syncTerminalStatusBar();
+  syncSceneExit();
   syncMobileUICompact();
+});
+
+sceneExit?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  exitCurrentZoomState();
 });
 
 function setAboutLinkActive(active) {
@@ -759,7 +788,8 @@ function closeAgentView() {
   container.style.display = '';
   const footer = document.querySelector('.start-screen__footer');
   const centerCta = document.getElementById('centerCta');
-  if (footer) footer.style.display = '';
+  // In permalink mode the footer is intentionally hidden — don't restore it.
+  if (footer && !permalink) footer.style.display = '';
   if (centerCta) centerCta.style.display = '';
   agentViewOpen = false;
   setAgentLinkActive(false);
@@ -1119,15 +1149,35 @@ window.addEventListener('touchend', () => {
   pinchStartDist = null;
 });
 
-// Safari gesture events (iOS/macOS pinch): prevent native zoom
-window.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
-window.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
-window.addEventListener('gestureend', (e) => e.preventDefault(), { passive: false });
+// Safari gesture events (iOS/macOS pinch): suppress native zoom only when
+// the canvas owns the pinch (landing scroll / about-poster scroll / reading).
+// On the bare landing page we leave native pinch alone so accessibility zoom works.
+function shouldSuppressNativeGesture() {
+  return tv.isCardZoomed
+      || tv.isAboutZoomed
+      || aboutPoster.visible
+      || (tv.crt.bootPhase === 5 && tv.crt.reviewReading)
+      || isCRTInteractive();
+}
+window.addEventListener('gesturestart', (e) => { if (shouldSuppressNativeGesture()) e.preventDefault(); }, { passive: false });
+window.addEventListener('gesturechange', (e) => { if (shouldSuppressNativeGesture()) e.preventDefault(); }, { passive: false });
+window.addEventListener('gestureend', (e) => { if (shouldSuppressNativeGesture()) e.preventDefault(); }, { passive: false });
 
 window.addEventListener('click', (e) => {
   maybeEnableGyro();
   if (e.target.closest('.card-share-bar')) return;
   if (e.target.closest('.permalink-overlay')) return;
+  if (e.target.closest('.scene-exit')) return;
+
+  // Landing: any tap on the canvas slow-zooms into the CRT so users can
+  // enjoy the boot sequence without having to figure out scroll. Skips
+  // header/footer/CTA UI which have their own handlers.
+  if (lastScrollProgress < 0.4
+      && !tv.isCardZoomed && !tv.isAboutZoomed && !agentViewOpen && !permalink
+      && !e.target.closest('.start-header, .start-screen__footer, .center-cta, button, a')) {
+    programmaticZoomToCRT();
+    return;
+  }
 
   if (tv.isAboutZoomed) {
     const aboutHit = tv.getMeshIntersectionAt(aboutPoster.mesh, e.clientX, e.clientY);
@@ -1152,7 +1202,7 @@ window.addEventListener('click', (e) => {
   const intersects = tv.getIntersectsAt(e.clientX, e.clientY);
   if (intersects.includes('card')) {
     if (tv.isCardZoomed) {
-      tv.zoomOutFromCard();
+      dismissCard();
     } else {
       tv.zoomToCard();
     }
@@ -1250,8 +1300,7 @@ window.addEventListener('keydown', (e) => {
 
   if (e.key === 'Escape' && tv.isCardZoomed) {
     e.preventDefault();
-    holoCard.setVisible(false);
-    tv.zoomOutFromCard();
+    dismissCard();
     return;
   }
 
@@ -1272,4 +1321,6 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('resize', () => {
   tv.resize();
   syncMobileUICompact();
+  // Re-show the desktop mode label after a resize back across the mobile breakpoint.
+  if (label && window.innerWidth >= 768) label.classList.remove('hidden');
 });

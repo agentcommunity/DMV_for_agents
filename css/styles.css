@@ -120,9 +120,9 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
   outline-color: rgba(255, 255, 255, 0.7);
   outline-offset: 2px;
 }
-.terminal-status-bar:focus-visible {
-  outline-color: var(--tsb-color);
-  outline-offset: -2px;
+.scene-exit:focus-visible {
+  outline-color: var(--se-color);
+  outline-offset: 2px;
 }
 .toggle:focus-visible {
   outline-offset: 4px;
@@ -156,7 +156,8 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 .start-screen-wrapper { position: relative; height: 300vh; }
 .start-screen {
   position: sticky; top: 0;
-  width: 100%; height: 100vh;
+  width: 100%; height: 100vh; /* fallback for older browsers */
+  height: 100dvh;
   overflow: hidden;
   color: var(--ui-text-primary);
   transition: background-color var(--transition), color var(--transition);
@@ -683,42 +684,85 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   }
 }
 
-/* === Terminal status bar (mobile CRT escape hatch) === */
-.terminal-status-bar {
-  --tsb-color: rgba(51, 255, 136, 0.85);
-  --tsb-glow: rgba(51, 255, 136, 0.4);
-  --tsb-border: rgba(51, 255, 136, 0.18);
-  --tsb-bg: rgba(10, 13, 10, 0.92);
+/* === Scene exit (universal corner X) === */
+.scene-exit {
+  --se-color: rgba(51, 255, 136, 0.92);
+  --se-glow: rgba(51, 255, 136, 0.45);
+  --se-border: rgba(51, 255, 136, 0.32);
+  --se-bg: rgba(10, 13, 10, 0.86);
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 205;
-  display: flex;
+  top: calc(1.6rem + env(safe-area-inset-top));
+  right: calc(1.6rem + env(safe-area-inset-right));
+  z-index: 220;
+  display: inline-flex;
   align-items: center;
-  padding: 0.8rem var(--container-padding);
-  padding-bottom: calc(0.8rem + env(safe-area-inset-bottom));
-  background: var(--tsb-bg);
-  border-top: 1px solid var(--tsb-border);
+  gap: 0.7rem;
+  padding: 0.6rem 1.2rem 0.6rem 0.9rem;
+  border: 1px solid var(--se-border);
+  border-radius: 999px;
+  background: var(--se-bg);
+  color: var(--se-color);
   font-family: "Courier New", monospace;
-  font-size: 1.2rem;
-  letter-spacing: 0.1em;
+  font-size: 1.15rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--tsb-color);
-  cursor: pointer;
-  pointer-events: auto;
-  text-shadow: 0 0 6px var(--tsb-glow);
+  text-shadow: 0 0 6px var(--se-glow);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: opacity 160ms ease, transform 160ms ease;
 }
-:root.ui-dark .terminal-status-bar {
-  --tsb-color: rgba(255, 170, 51, 0.85);
-  --tsb-glow: rgba(255, 170, 51, 0.4);
-  --tsb-border: rgba(255, 170, 51, 0.18);
-  --tsb-bg: rgba(13, 9, 8, 0.92);
+.scene-exit__icon {
+  font-size: 1.9rem;
+  line-height: 1;
+  margin-top: -0.15rem;
 }
-.terminal-status-bar:active {
+@media (hover: hover) {
+  .scene-exit:hover { transform: translateY(-1px); }
+}
+.scene-exit:active { opacity: 0.75; transform: translateY(0); }
+:root.ui-dark .scene-exit {
+  --se-color: rgba(255, 170, 51, 0.92);
+  --se-glow: rgba(255, 170, 51, 0.45);
+  --se-border: rgba(255, 170, 51, 0.32);
+  --se-bg: rgba(13, 9, 8, 0.86);
+}
+
+/* === Scroll hint (landing only) === */
+.scroll-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(2.2rem + env(safe-area-inset-bottom));
+  z-index: 99;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.05rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ui-text-muted);
   opacity: 0.7;
+  pointer-events: none;
+  transition: opacity 400ms ease;
+  animation: scrollHintBob 2.4s ease-in-out infinite;
+}
+.scroll-hint__arrow {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+body.scrolled .scroll-hint,
+body.scene-focused .scroll-hint {
+  opacity: 0;
+}
+@keyframes scrollHintBob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50%      { transform: translate(-50%, 4px); }
+}
+@media (max-width: 767px) {
+  .scroll-hint { bottom: calc(7rem + env(safe-area-inset-bottom)); font-size: 0.95rem; }
 }
 
 /* Force-hide elements with [hidden] even when inline styles override */

@@ -26,7 +26,7 @@
   <meta name="dmv-turnstile-site-key" content="0x4AAAAAAC2BwC5T9LSdndaK">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="icon" type="image/x-icon" href="/images/favicon.ico?v=1" id="appFavicon">
-  <link rel="stylesheet" href="/css/styles.css?v=29">
+  <link rel="stylesheet" href="/css/styles.css?v=30">
 </head>
 <body>
   <div id="scroller">
@@ -186,9 +186,16 @@
     <p class="card-share-bar__ticker" id="cardShareTicker" hidden aria-live="polite"></p>
   </div>
 
-  <!-- Terminal status bar — mobile escape hatch (CRT-themed) -->
-  <div id="terminalStatusBar" class="terminal-status-bar" hidden>
-    <span id="terminalStatusText">&uarr; ZOOM OUT</span>
+  <!-- Universal exit — corner pill, visible in every zoomed/focused state -->
+  <button id="sceneExit" class="scene-exit" type="button" hidden aria-label="Exit current view">
+    <span class="scene-exit__icon" aria-hidden="true">&times;</span>
+    <span class="scene-exit__label" id="sceneExitLabel">CLOSE</span>
+  </button>
+
+  <!-- Landing-only hint: tap or scroll to enter the CRT -->
+  <div id="scrollHint" class="scroll-hint" aria-hidden="true">
+    <span class="scroll-hint__text">SCROLL OR TAP SCREEN</span>
+    <span class="scroll-hint__arrow">&darr;</span>
   </div>
 
   <!-- Announcements for screen readers (CRT state changes, validation errors) -->
@@ -211,6 +218,6 @@
   <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
   <script defer id="turnstile-api-script" src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>
-  <script type="module" src="/js/app.js?v=34"></script>
+  <script type="module" src="/js/app.js?v=35"></script>
 </body>
 </html>
