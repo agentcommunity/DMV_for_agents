@@ -76,7 +76,7 @@ const NESTED_FILES = [
 ];
 
 // Things explicitly NOT shipped (documented for clarity, no enforcement):
-//   - card-lab.html, card-lab-v2.html  → dev tools
+//   - card-lab-v2.html                  → dev tool (visual reference for HoloCard)
 //   - *.md                              → docs
 //   - api/, container/, worker/         → server code
 //   - test-harness/, scripts/           → dev tooling

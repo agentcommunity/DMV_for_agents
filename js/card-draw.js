@@ -279,7 +279,7 @@ export function drawGradientDivider(ctx, x, y, w, color1, color2) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  PALETTES — aligned with card-lab.html (source of truth)
+//  PALETTES — visual reference: card-lab-v2.html
 // ═══════════════════════════════════════════════════════════════
 export const PALETTES = [
   { name:'Terminal',  bg:'#060d08', bg2:'#040810', pri:'#33ff88', sec:'#66ffaa', dim:'#1a5a3a', acc:'#00eeff', acc2:'#ff44cc', glow:'#33ff88', bgL:'#112211' },
