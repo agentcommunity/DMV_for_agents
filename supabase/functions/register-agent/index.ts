@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
   const certificateId = generateCertificateId(certFields, registrationType.toLowerCase())
   const domain = agentName + '.agent'
 
-  // Permalink + badge URLs (badges routed through our domain via Vercel rewrite)
+  // Permalink + badge URLs (badges proxied through the DMV Worker; see worker/index.ts)
   const DMV_BASE = 'https://dmv.agentcommunity.org'
   const permalinkUrl = `${DMV_BASE}/c/${encodeURIComponent(certificateId)}/${encodeURIComponent(agentName)}`
   const badgeUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}`
