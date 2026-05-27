@@ -24,7 +24,7 @@ Pre-registration system for `.agent` domain identities. Two interfaces, one back
 
 All flows are **pre-registration** (not registration). Pre-registration records interest in a `.agent` domain. It does not guarantee assignment.
 
-**Web data flow:** Scroll drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → invisible Turnstile widget executes → POST to same-origin `/api/register` worker → worker verifies Turnstile (hostname + `dmv_register` action) → worker checks shared CF rate limits → worker forwards to Supabase → review state holds until response, then processing bar plays → `CRTTerminal.onComplete(formData)` fires with the authoritative cert ID → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom.
+**Web data flow:** Scroll (or tap-the-monitor on landing — 3s GSAP `scrollTop` tween) drives camera zoom → CRT boots at 60% progress → type selector (org/individual) → conditional form fields with validation → review/submit (TnC + Charter links, submit button) → invisible Turnstile widget executes → POST to same-origin `/api/register` worker → worker verifies Turnstile (hostname + `dmv_register` action) → worker checks shared CF rate limits → worker forwards to Supabase → review state holds until response, then processing bar plays → `CRTTerminal.onComplete(formData)` fires with the authoritative cert ID → `HoloCard.show(formData)` draws holographic card with rarity-based shader effects → card bobs + tilts toward mouse/gyro → card is clickable to zoom. **Full navigation/exit contract: [NAVIGATION.md](NAVIGATION.md).**
 
 **CLI data flow:** Boot screen (about/terms/charter menu) → step-by-step form (agent name → operator [required] → email → description) → confirmation summary → Y/n gate → POST to `/api/register` worker (with `signup_source: 'cli'` and `machine_fingerprint`) → worker checks shared CF rate limits → worker checks DMV-local KV fingerprint cooldown → worker forwards to Supabase → success screen: view card link (permalink to holographic card), share nudge (invite command + card URL), save card (direct PNG download URL), badge markdown snippet, email verification note.
 
@@ -87,12 +87,22 @@ HoloCard shader is tone-mapped, so it dims in night mode but holo effects still 
 Path format: `/c/CERT-ID/agent-name`.
 
 In permalink mode:
-- Card shown instantly, camera jumps to it
+- TV GLB is **not** loaded (`tv.init({ skipModel: true })`); model lazy-loads on first unzoom
+- Card shown instantly, camera jumps to it (`tv.jumpToCard()`)
 - Header "About" swapped to green "Get Yours" CTA
 - Bottom overlay: "Get Yours" + "Share on X" + "Save Card" buttons with backdrop blur
-- Click anywhere or Escape to zoom out to full scene view
+- `#sceneExit` corner pill labeled "HOME" — navigates to `/`
+- Escape or clicking the DOM card also navigates to `/` (via `dismissCard()`)
+- Clicking empty world unzooms in-place and triggers lazy-load
 - Footer hidden to avoid overlap with overlay
-- Scroll still wired — visitors can explore after unzooming
+
+See [NAVIGATION.md](NAVIGATION.md) for the full state machine.
+
+## Navigation & Movement
+
+The scene has one driving axis (scroll progress) and four "deep" UI states (Card zoom, About zoom, Agent View, CRT reading mode). The corner `#sceneExit` pill is the single universal exit for every deep state — it shows a context-aware label (`CLOSE` / `BACK` / `TOP` / `HOME`) and dispatches via `exitCurrentZoomState()`. Card unzoom is always `dismissCard()` (consolidates 3 previously-divergent paths and handles permalink-mode routing). Landing has both scroll and tap-the-monitor as entry affordances (the latter runs a 3.0s GSAP `scrollTop` tween so the CRT boot sequence plays out cinematically).
+
+**Full reference (every state, input, exit path, helper function, design rationale): [NAVIGATION.md](NAVIGATION.md).** Edit it when you touch any input handler, zoom state, or visibility logic.
 
 ## QR Code Encoder
 
@@ -129,7 +139,9 @@ Both social preview endpoints hit the **same** Cloudflare Container running `@na
 - **Adding CRT form fields:** Edit the field sets in `CRTTerminal.selectAccountType()`.
 - **New color schemes:** Add to `CRTTerminal.palettes`, call `setColorScheme('name')`.
 - **Scroll-triggered events:** Add thresholds in `TV.animateCameraPosition(progress)` or use `tv.on('animationEnd', cb)`.
-- **Zoom transitions:** When transitioning between zoomed states (card → about), unzoom first with a delay, then zoom to new target.
+- **Zoom transitions:** When transitioning between zoomed states (card → about), unzoom first with a delay, then zoom to new target. The card→about handoff is 860ms (`openAbout()` in app.js).
+- **Universal exit:** Don't add new close buttons per state — route through `exitCurrentZoomState()` so `#sceneExit` knows about your new state. Add to `syncSceneExit()` visibility logic and the dispatcher both. See [NAVIGATION.md](NAVIGATION.md).
+- **Card unzoom:** Always go through `dismissCard()` — never call `tv.zoomOutFromCard()` directly. `dismissCard()` handles permalink-mode routing and DOM card hiding.
 - **Wall sign tuning:** Flicker timing lives in `WallSign.flickerOn()` (GSAP timeline keyframes). Ambient flicker interval is in `_startAmbientFlicker()` (4-7s range, opacity dip to 0.92). Startup delay is the `setTimeout` in app.js (~1.2s). Sign position is `mesh.position.set(0, 3.0, -0.5)`.
 - **Demo mode (`?demo`):** Cycles cards with Space bar. Sets `latestCardData` so share/copy/save buttons work. No CRT form needed.
 

@@ -265,12 +265,24 @@ When changing card rendering:
 
 ```
 User arrives at /c/CERT-ID/agent-name
-  → Card shown instantly (jumpToCard)
-  → Camera zoomed to card, DOM card positioned via projection
-  → "Get Yours" overlay at bottom
-  → Click card → smooth zoom out
-  → Escape key also unzooms
+  → tv.init({ skipModel: true }) — 2.2MB GLB NOT loaded
+  → holoCard.show(permalink, true) + tv.jumpToCard() (instant, no animation)
+  → #permalinkOverlay (Get Yours / Share / Save) at bottom
+  → #sceneExit pill at top-right labeled "HOME"
+  → Header "About" link rewritten as green "Get Yours" CTA
+  → Footer + "For Agents" link hidden
+
+Exit paths (all go to /):
+  → Escape           → dismissCard() → window.location.href = '/'
+  → #sceneExit "HOME"→ exitCurrentZoomState() → dismissCard() → '/'
+  → "Get Yours" CTA  → reload('/')
+
+Exit paths that unzoom in-place (lazy-load GLB):
+  → Click empty world (raycaster card miss) → tv.zoomOutFromCard()
+  → Click the DOM card → dismissCard() — which navigates to '/' (intentional)
 ```
+
+See [NAVIGATION.md](NAVIGATION.md) for the full state machine and rationale.
 
 ## Future Enhancements
 

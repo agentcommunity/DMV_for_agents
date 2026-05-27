@@ -190,7 +190,7 @@ threejs_box_design_dmv/
 ├── index.html                    Web UI entry point (importmap, GSAP, Inter wordmark font, CSS)
 ├── css/styles.css                All styles (theme tokens, layout, center `.agent` mark, responsive)
 ├── js/
-│   ├── app.js                    Main: events, scroll, permalink, zoom, sound, clock, theme/favicon sync
+│   ├── app.js                    Main: events, scroll, permalink, zoom, sound, clock, theme/favicon sync. See NAVIGATION.md.
 │   ├── TV.js                     Three.js scene: GLTF model, camera, zoom, night mode
 │   ├── CRTTerminal.js            Canvas2D CRT: 8-phase boot, form, validation, effects
 │   ├── HoloCard.js               Holographic card: ShaderMaterial, rarity, identicon, QR

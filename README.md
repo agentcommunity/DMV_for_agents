@@ -195,7 +195,7 @@ node dist/cli.js register
 supabase functions deploy register-agent lookup-agent badge
 ```
 
-Docs: [ARCHITECTURE.md](ARCHITECTURE.md) | [CARD.md](CARD.md) | [CLI & API](packages/dmv-agent/README.md) | [Deploy](packages/dmv-agent/DEPLOY.md) | [Text Surface Audit](docs/text-surface-audit.md)
+Docs: [ARCHITECTURE.md](ARCHITECTURE.md) | [NAVIGATION.md](NAVIGATION.md) | [CARD.md](CARD.md) | [CLI & API](packages/dmv-agent/README.md) | [Deploy](packages/dmv-agent/DEPLOY.md) | [Text Surface Audit](docs/text-surface-audit.md)
 
 ---
 

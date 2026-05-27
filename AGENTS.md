@@ -39,9 +39,12 @@ Top-level await module. No exports.
 - **Sound toggle**: `Audio('audio/pat102 - electro dance.mp3')`, loop=true, click toggles play/pause.
 - **Clock**: Updates `#clockEl` every 10s, format `HH : MM am/pm`.
 - **Scroll**: GSAP ScrollTrigger drives `tv.animateCameraPosition(progress)`, capped at 0.95.
-- **Click handler**: Priority order: dismiss about zoom → card zoom toggle → night mode → focus hidden input.
-- **Keydown handler**: Priority order: dismiss about zoom → escape card zoom → passthrough to CRT.
-- **Resize**: `tv.resize()`.
+- **Click handler**: Priority: skip share/permalink/scene-exit chrome → landing tap-to-zoom (`programmaticZoomToCRT()`, scroll < 0.4) → dismiss about poster → CRT pointer tap (coarse pointer) → raycaster (card toggle / night-mode button) → focus hidden input.
+- **Keydown handler**: Priority: Agent View Escape → About zoom Escape + arrow scroll → Card zoom Escape (`dismissCard()` → `/` in permalink mode) → CRT key passthrough.
+- **Universal exit**: `#sceneExit` corner pill calls `exitCurrentZoomState()`. Visibility + label managed by `syncSceneExit()` per frame.
+- **Resize**: `tv.resize()` + restore `.modeLabel` ≥ 768px.
+
+**Full navigation contract:** see [NAVIGATION.md](NAVIGATION.md).
 
 ---
 
