@@ -1,8 +1,10 @@
-# CRT Mobile UX — Handoff Notes
+# CRT Mobile UX — Handoff Notes (HISTORICAL)
+
+> **⚠ SUPERSEDED.** Current navigation/exit contract lives in [NAVIGATION.md](../NAVIGATION.md). This document is preserved for the **CRT tap-zone analysis** (why taps near the canvas edges fail — UV-mapping math) and the design history of the now-deleted `#scrollBackPill`. Don't act on its recommendations; refer to NAVIGATION.md for the present-day state machine.
 
 **Branch:** `claude/card-dna-system-MTj7j`
 **Date:** 2026-02-16
-**Status:** Reading mode close is broken on mobile. Boot init lines done. Touch scroll done.
+**Status (at time of writing):** Reading mode close was broken on mobile. Boot init lines done. Touch scroll done. Resolved in subsequent sessions — see commit history and NAVIGATION.md §"Universal exit affordance".
 
 ---
 

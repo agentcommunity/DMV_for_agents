@@ -822,7 +822,7 @@ export class CRTTerminal {
       const hintY = this.padding - 6;
       ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
       ctx.fillStyle = this.dimColor;
-      ctx.fillText('[Q / Esc] Close   [\u2191/\u2193] Scroll', hintX, hintY);
+      ctx.fillText('[Q / Esc / \u00d7] Close   [\u2191/\u2193] Scroll', hintX, hintY);
     }
   }
 

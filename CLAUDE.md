@@ -178,4 +178,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 - Header: "DMV for agents"
 - Terminal subtitle: "Machine Identity & Pre-Registration Terminal v1.0" (web) / same in CLI
 - All copy says "pre-registration" — never just "registration"
-- Sound toggle wired to `audio/music.mp3` (user-provided, not in repo)
+- Sound toggle wired to `audio/pat102 - electro dance.mp3` (the only file in `audio/`)

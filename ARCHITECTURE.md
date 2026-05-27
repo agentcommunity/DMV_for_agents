@@ -195,7 +195,6 @@ threejs_box_design_dmv/
 │   ├── CRTTerminal.js            Canvas2D CRT: 8-phase boot, form, validation, effects
 │   ├── HoloCard.js               Holographic card: ShaderMaterial, rarity, identicon, QR
 │   ├── AboutPoster.js            About panel: PPSupply fonts, show/hide, zoom, theme-aware text colors
-│   ├── CardPoster.js             [Legacy] Original flat card — replaced by HoloCard
 │   └── supabase.js               Registration client: fetch() to edge function
 │
 ├── images/                       Favicons: favicon.ico + favicon_dark.ico
