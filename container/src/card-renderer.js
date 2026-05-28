@@ -4,7 +4,7 @@
 // no database needed.
 //
 // IMPORTANT: This must stay aligned with js/card-draw.js (browser version).
-// Both use CARD_VERSION=2, landscape 880x630, identical CardDNA hashing.
+// Both use CARD_VERSION=3, landscape 880x630, identical CardDNA hashing.
 // The QR encoder in this directory is drift-checked against js/qr-encode.js
 // on every build (see scripts/build-cf.mjs).
 
@@ -27,7 +27,7 @@ try {
 // ═══════════════════════════════════════════════════════════════
 //  CONFIG — must match card-draw.js
 // ═══════════════════════════════════════════════════════════════
-const CARD_VERSION = 2;
+const CARD_VERSION = 3;
 const CW = 880, CH = 630;
 const PAD = 20;
 
@@ -568,7 +568,7 @@ function renderCard(canvas, name, dna, options) {
   const headerY = topY + 18;
   const hdDivY = headerY + 12;
   const nameY = hdDivY + 72;
-  const certLabelY = nameY + 72;
+  const certLabelY = nameY + 96;
   const certValY = certLabelY + 30;
   const barcodeY = certValY + 14;
   const divY = barcodeY + 30;
@@ -613,7 +613,7 @@ function renderCard(canvas, name, dna, options) {
   drawIdenticon(ctx, iconX, iconY, iconSize, dna.identiconSeed, pal.pri, pal.acc);
 
   // QR — scannable permalink URL
-  const qrSize = 86;
+  const qrSize = 120;
   const qrX = INSET + 6;
   const qrY = footDivY - qrSize - 14;
   const qrUrl = `${baseUrl}/c/${encodeURIComponent(certId)}/${encodeURIComponent(name)}`;
@@ -700,7 +700,7 @@ function renderCard(canvas, name, dna, options) {
   };
 
   drawField('TYPE', accountType, RIGHT_X, row1Y);
-  drawField('STATUS', '\u25CF  VERIFIED', RIGHT_X + colW, row1Y);
+  drawField('STATUS', '\u25CF  PRE-REG', RIGHT_X + colW, row1Y);
   drawField('PROTOCOL', 'AID/1.0', RIGHT_X + colW * 2, row1Y);
 
   ctx.fillStyle = pal.pri;
@@ -725,6 +725,12 @@ function renderCard(canvas, name, dna, options) {
     ctx.textAlign = 'center'; ctx.fillText(rarity.name, sealX, sealY + 4);
   }
 
+  // Non-binding disclaimer — short + legible so the holo overlay doesn't bury it.
+  ctx.font = `13px ${FONT}`;
+  ctx.fillStyle = withAlpha('#ffffff', 0.65);
+  ctx.textAlign = 'left';
+  ctx.fillText('Non-Binding Pre-Registration', RIGHT_X, footDivY - 13);
+
   // Footer divider
   drawGradientDivider(ctx, INSET, footDivY, CW - INSET * 2, pal.pri, pal.acc);
 
@@ -738,7 +744,7 @@ function renderCard(canvas, name, dna, options) {
   // Microtext
   ctx.font = '6px monospace'; ctx.fillStyle = pal.dim; ctx.globalAlpha = 0.08;
   ctx.textAlign = 'left';
-  const micro = `VERIFIED AGENT IDENTITY \u00B7 ${name.toUpperCase()}.AGENT \u00B7 CERTIFICATE ${certId} \u00B7 `;
+  const micro = `NON-BINDING PRE-REGISTRATION \u00B7 ${name.toUpperCase()}.AGENT \u00B7 CERTIFICATE ${certId} \u00B7 `;
   const mtw = ctx.measureText(micro).width;
   let mx = INSET;
   while (mx < CW - INSET) { ctx.fillText(micro, mx, footY + 12); mx += mtw; }

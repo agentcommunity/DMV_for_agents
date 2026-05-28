@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CardDNA, renderCard, setQREncoder, PALETTES, RARITIES, HOLOS, hexToRgb, withAlpha, CW, CH } from './card-draw.js?v=23';
+import { CardDNA, renderCard, setQREncoder, PALETTES, RARITIES, HOLOS, hexToRgb, withAlpha, CW, CH } from './card-draw.js?v=24';
 import { generateQRMatrix } from './qr-encode.js?v=1';
 
 // Wire QR encoder into card-draw before first render

@@ -445,10 +445,15 @@ import {
   CW, CH,
   fnv1a, hexToRgb, withAlpha, seededRand, generateCertId, roundRect,
   drawCorners, drawIdenticon, drawBarcode, drawGradientDivider,
-  renderCard,
+  renderCard, setQREncoder,
   PALETTES, BORDERS, PATTERNS, HOLOS, RARITIES, AGENT_NAMES,
   CardDNA,
 } from './js/card-draw.js';
+import { generateQRMatrix } from './js/qr-encode.js';
+
+// card-draw.js has no direct QR import — the encoder is injected so the
+// module stays side-effect-free. Without this, renderCard throws at drawQR.
+setQREncoder(generateQRMatrix);
 
 // ═══════════════════════════════════════════════════════════════
 //  STATE

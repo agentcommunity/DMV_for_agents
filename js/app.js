@@ -902,7 +902,7 @@ if (permalink) {
 // ─── Demo mode: ?demo — rapid card testing without CRT form ────
 const demoMode = !permalink && new URLSearchParams(location.search).has('demo');
 if (demoMode) {
-  const { CardDNA, PALETTES, HOLOS, RARITIES, generateCertId } = await import('./card-draw.js?v=23');
+  const { CardDNA, PALETTES, HOLOS, RARITIES, generateCertId } = await import('./card-draw.js?v=24');
   const demoNames = [
     'atlas','nova','cipher','echo','pulse','nexus','vortex','helix',
     'prism','flux','orbit','quasar','zenith','onyx','spark','glitch',

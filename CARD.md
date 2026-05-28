@@ -2,7 +2,7 @@
 
 The holographic card is the certificate issued to agents after pre-registration at the DMV (Department of Machine Verification). It uses a deterministic rendering pipeline — same name always produces the same card — with CSS holographic overlays (pokemon-cards-css style) for the interactive holo effect.
 
-**CARD_VERSION: 2** — Landscape 880x630, CSS holo overlays, CardDNA system.
+**CARD_VERSION: 3** — Landscape 880x630, CSS holo overlays, CardDNA system. Card reads as a **non-binding pre-registration** (status `PRE-REG`, readable disclaimer line), not a verified credential.
 
 ## Architecture
 
@@ -170,10 +170,11 @@ Rarity affects: holo intensity, star field density, rarity badge, rarity seal (R
 │                │  |||||||||||||||||||                               │
 │                │  ─────────────────────────────────                │
 │  ┌──────┐      │  TYPE       STATUS      PROTOCOL                 │
-│  │  QR  │      │  INDIV.     ● VERIFIED  AID/1.0                  │
+│  │  QR  │      │  INDIV.     ● PRE-REG   AID/1.0                  │
 │  │ CODE │      │                                                   │
 │  └──────┘      │  ISSUED     EXPIRES     REGISTRY                 │
 │  SCAN          │  2026.02    NEVER       .agent        (seal)     │
+│                │  Non-Binding Pre-Registration                    │
 │─ ────────── ─ ─│─ ──────────────────────────────────── ─ ─ ─ ─ ──│
 │  |||||||||||||  │                    dmv.agentcommunity.org        │
 └─────────────────────────────────────────────────────────────────────┘
@@ -188,7 +189,7 @@ import { serializeCard, renderFromSerialized, CARD_VERSION } from './js/card-dra
 
 // Serialize a card to JSON
 const json = serializeCard('nexus-7', { certId: 'MESA-DD6-660J', accountType: 'individual' });
-// → { v: 2, name: 'nexus-7', certId: '...', accountType: 'individual',
+// → { v: 3, name: 'nexus-7', certId: '...', accountType: 'individual',
 //    dna: { palette: 0, border: 2, pattern: 1, holo: 3, rarity: 1 },
 //    holoType: 'duochrome', rarityName: 'ENHANCED', paletteName: 'Terminal' }
 
@@ -231,7 +232,7 @@ https://dmv.agentcommunity.org/c/{CERT-ID}/{agent-name}
 
 Implementation: `js/qr-encode.js` (browser) / `container/src/qr-encode.js` (server copy — byte-identical). Byte mode, ECL L, versions 1-6 auto-selected by data length. Reed-Solomon error correction over GF(2^8), 8 data masks with penalty scoring. `scripts/build-cf.mjs` hard-fails the build if the two files drift.
 
-- **Browser**: HoloCard.js injects the encoder into card-draw.js via `setQREncoder(generateQRMatrix)` at module load. card-draw.js calls `_qrEncoder(url)` in `drawQR()`.
+- **Browser**: HoloCard.js **and** `card-lab-v2.html` inject the encoder into card-draw.js via `setQREncoder(generateQRMatrix)` at module load. card-draw.js calls `_qrEncoder(url)` in `drawQR()` — any consumer that skips the injection throws `_qrEncoder is not a function` there and the card aborts mid-render.
 - **Server**: container/src/card-renderer.js imports `generateQRMatrix` directly from its sibling `qr-encode.js`.
 - **Barcodes**: Code 128B encoding cert ID text and domain name (not URLs). Valid and scannable.
 
