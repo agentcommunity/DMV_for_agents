@@ -1,4 +1,4 @@
-import { TV } from './TV.js?v=27';
+import { TV } from './TV.js?v=28';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
@@ -284,14 +284,33 @@ function scrollToTop() {
 }
 
 // Slow auto-zoom into the CRT so the boot sequence can be enjoyed.
-// Triggered by tapping the monitor on landing.
+// Triggered by tapping the monitor on landing. Hand-rolled RAF tween
+// because gsap.to(scrollTop) needs the ScrollToPlugin (not loaded) and
+// silently no-ops without it.
+let _zoomToCRTRaf = null;
 function programmaticZoomToCRT() {
   const scroller = document.getElementById('scroller');
   if (!scroller) return;
-  const target = scroller.scrollHeight * 0.85;
-  if (scroller.scrollTop >= target * 0.95) return;
-  gsap.killTweensOf(scroller, 'scrollTop');
-  gsap.to(scroller, { scrollTop: target, duration: 3.0, ease: 'power2.inOut' });
+  const start = scroller.scrollTop;
+  const end = scroller.scrollHeight * 0.85;
+  if (start >= end * 0.95) return;
+  if (_zoomToCRTRaf !== null) cancelAnimationFrame(_zoomToCRTRaf);
+  const t0 = performance.now();
+  const duration = 3000;
+  const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+  // Track the value we actually wrote (read back, so scroll clamping doesn't
+  // cause a false bail). If next frame's scrollTop diverged from it, the user
+  // scrolled — abort so we don't fight their input for the rest of the tween.
+  let lastWritten = start;
+  const step = (now) => {
+    if (Math.abs(scroller.scrollTop - lastWritten) > 4) { _zoomToCRTRaf = null; return; }
+    const p = Math.min(1, (now - t0) / duration);
+    scroller.scrollTop = start + (end - start) * ease(p);
+    lastWritten = scroller.scrollTop;
+    if (p < 1) _zoomToCRTRaf = requestAnimationFrame(step);
+    else _zoomToCRTRaf = null;
+  };
+  _zoomToCRTRaf = requestAnimationFrame(step);
 }
 
 function dismissCard() {
@@ -305,6 +324,12 @@ function dismissCard() {
 }
 
 function exitCurrentZoomState() {
+  // When the soft keyboard is open the pill is labelled DONE — it should
+  // only dismiss the keyboard, not unwind the whole scene.
+  if (document.body.classList.contains('kb-open') && hiddenInput) {
+    hiddenInput.blur();
+    return;
+  }
   if (agentViewOpen) { closeAgentView(); return; }
   if (tv.isAboutZoomed) { closeAbout(); return; }
   if (tv.isCardZoomed) { dismissCard(); return; }
@@ -320,11 +345,13 @@ function syncSceneExit() {
   const isReading = tv.crt.bootPhase === 5 && tv.crt.reviewReading;
   const isSceneZoom = tv.isCardZoomed || tv.isAboutZoomed;
   const isMobileCrt = isMobileViewport() && isCRTInteractive() && !isSceneZoom;
-  const visible = agentViewOpen || isSceneZoom || isReading || isMobileCrt;
+  const isKbOpen = document.body.classList.contains('kb-open');
+  const visible = agentViewOpen || isSceneZoom || isReading || isMobileCrt || isKbOpen;
   sceneExit.hidden = !visible;
   if (sceneExitLabel) {
     let label = 'CLOSE';
-    if (permalink && tv.isCardZoomed) label = 'HOME';
+    if (isKbOpen) label = 'DONE';
+    else if (permalink && tv.isCardZoomed) label = 'HOME';
     else if (isMobileCrt && !isReading) label = 'TOP';
     sceneExitLabel.textContent = label;
   }
@@ -1169,16 +1196,6 @@ window.addEventListener('click', (e) => {
   if (e.target.closest('.permalink-overlay')) return;
   if (e.target.closest('.scene-exit')) return;
 
-  // Landing: any tap on the canvas slow-zooms into the CRT so users can
-  // enjoy the boot sequence without having to figure out scroll. Skips
-  // header/footer/CTA UI which have their own handlers.
-  if (lastScrollProgress < 0.4
-      && !tv.isCardZoomed && !tv.isAboutZoomed && !agentViewOpen && !permalink
-      && !e.target.closest('.start-header, .start-screen__footer, .center-cta, button, a')) {
-    programmaticZoomToCRT();
-    return;
-  }
-
   if (tv.isAboutZoomed) {
     const aboutHit = tv.getMeshIntersectionAt(aboutPoster.mesh, e.clientX, e.clientY);
     if (aboutHit?.uv && aboutPoster.openLinkAtUV(aboutHit.uv)) {
@@ -1199,6 +1216,11 @@ window.addEventListener('click', (e) => {
     }
   }
 
+  // Raycaster owns the 3D affordances. Each mesh maps to exactly one intent
+  // so dead-canvas taps do nothing instead of triggering accidental zooms.
+  //   - card   → toggle card zoom
+  //   - button → lamp-pull, toggles night mode
+  //   - screen → CRT glass, slow-zooms into the boot sequence
   const intersects = tv.getIntersectsAt(e.clientX, e.clientY);
   if (intersects.includes('card')) {
     if (tv.isCardZoomed) {
@@ -1213,6 +1235,16 @@ window.addEventListener('click', (e) => {
     tv.toggleNightModeTV();
     applyOuterUITheme(tv.isNightMode);
     return;
+  }
+  if (intersects.includes('screen')) {
+    if (lastScrollProgress < 0.4
+        && !tv.isCardZoomed && !tv.isAboutZoomed && !agentViewOpen && !permalink) {
+      programmaticZoomToCRT();
+      return;
+    }
+    // Past the landing band: fall through. On a fine pointer this focuses the
+    // terminal input below; on coarse pointers nothing happens here — CRT taps
+    // are handled by the inputActive/handlePointerTap branch above once active.
   }
 
   if (tv.crt.inputActive && !isCoarsePointer()) focusTerminalInput();
@@ -1324,3 +1356,17 @@ window.addEventListener('resize', () => {
   // Re-show the desktop mode label after a resize back across the mobile breakpoint.
   if (label && window.innerWidth >= 768) label.classList.remove('hidden');
 });
+
+// Soft-keyboard tracking: visualViewport shrinks when the OS keyboard opens.
+// We translate the CRT up so the active field sits above the keyboard, and
+// flip the corner pill to a DONE affordance for an obvious dismiss path.
+if (window.visualViewport) {
+  const KB_OPEN_THRESHOLD = 140; // ignore <140px shrinks (URL bar collapse)
+  const handleViewportResize = () => {
+    const delta = Math.max(0, window.innerHeight - window.visualViewport.height);
+    const isKbOpen = isMobileViewport() && delta > KB_OPEN_THRESHOLD;
+    document.documentElement.style.setProperty('--kb-offset', `${delta}px`);
+    document.body.classList.toggle('kb-open', isKbOpen);
+  };
+  window.visualViewport.addEventListener('resize', handleViewportResize);
+}

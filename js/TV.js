@@ -196,9 +196,11 @@ export class TV {
     this.trigger.position.set(-1.41, -1.71, 1.66);
     this.fakeTrigger.position.set(-1.41, -1.71, 1.66);
 
+    // On mobile keep the lamp-pull hit box slightly larger than the visible
+    // mesh for fat-finger tolerance, but NOT 3× and NOT recentered on the TV
+    // — that turned the whole TV body into a night-mode toggle.
     if (window.innerWidth < 768) {
-      this.trigger.position.set(0, 0, 2);
-      this.trigger.scale.set(3, 3, 3);
+      this.trigger.scale.set(1.4, 1.4, 1.4);
     }
 
     return new Promise((resolve, reject) => {
@@ -522,6 +524,9 @@ export class TV {
     if (!this.camera || !this.trigger) return;
     this.raycaster.setFromCamera(this._NDC, this.camera);
     const targets = [this.trigger];
+    // The CRT glass is the explicit zoom target — click it to slow-zoom in.
+    // (Avoids the "tap anywhere on the TV" ambiguity.)
+    if (this.screen) targets.push(this.screen);
     // Include card mesh if visible
     if (this.cardMesh && this.cardMesh.visible) {
       targets.push(this.cardMesh);
@@ -538,6 +543,8 @@ export class TV {
         results.push('card');
       } else if (hit.object === this.trigger) {
         results.push('button');
+      } else if (hit.object === this.screen) {
+        results.push('screen');
       }
     }
     return results.length > 0 ? results : ['none'];

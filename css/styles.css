@@ -237,7 +237,16 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 
 .header-brand__links {
   display: flex;
-  gap: 1.6rem;
+  align-items: center;
+  gap: 1.2rem;
+}
+.header-brand__sep {
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--ui-text-faint);
+  opacity: 0.7;
+  user-select: none;
 }
 
 /* === Toggle (clean track + thumb) === */
@@ -650,6 +659,25 @@ body.scrolled .center-cta__cli { pointer-events: none; }
     font-size: 0.92rem;
   }
 
+  /* When the scene-exit pill is active in mobile-compact mode, the sound
+     toggle would sit underneath it in the top-right corner. They serve
+     opposite contexts (landing vs. focused) — hide sound while focused. */
+  body.mobile-ui-compact .start-header__right { opacity: 0; pointer-events: none; }
+
+  /* Soft keyboard open: lift the CRT into the visible viewport so the
+     active input sits above the keyboard. We snap `top` instead of
+     transitioning — Chromium silently drops both transform and `top`
+     transitions on this wrapper when its WebGL canvas child is repainting
+     every frame, but the snap itself works. The keyboard's own slide-in
+     animation masks the lack of CSS easing. The 0.48 factor centers the
+     CRT roughly midway in the remaining visible band. */
+  body.kb-open .start-screen__canvas-wrapper {
+    top: calc(var(--kb-offset, 0px) * -0.48);
+  }
+  body.kb-open .start-header,
+  body.kb-open .start-screen__footer,
+  body.kb-open .center-cta { opacity: 0; pointer-events: none; }
+
   .card-share-bar {
     bottom: 8.8rem;
   }
@@ -729,40 +757,35 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   --se-bg: rgba(13, 9, 8, 0.86);
 }
 
-/* === Scroll hint (landing only) === */
-.scroll-hint {
-  position: fixed;
-  left: 50%;
-  bottom: calc(2.2rem + env(safe-area-inset-bottom));
-  z-index: 99;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.3rem;
-  font-family: var(--floating-ui-font-mono);
-  font-size: 1.05rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ui-text-muted);
-  opacity: 0.7;
-  pointer-events: none;
-  transition: opacity 400ms ease;
-  animation: scrollHintBob 2.4s ease-in-out infinite;
-}
-.scroll-hint__arrow {
-  font-size: 1.5rem;
-  line-height: 1;
-}
-body.scrolled .scroll-hint,
-body.scene-focused .scroll-hint {
-  opacity: 0;
+/* === Scroll hint (mobile landing only — desktop has the footer arrow) === */
+.scroll-hint { display: none; }
+@media (max-width: 767px) {
+  .scroll-hint {
+    position: fixed;
+    left: 50%;
+    bottom: calc(7rem + env(safe-area-inset-bottom));
+    z-index: 99;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--floating-ui-font-mono);
+    font-size: 0.95rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ui-text-muted);
+    opacity: 0.7;
+    pointer-events: none;
+    transition: opacity 400ms ease;
+    animation: scrollHintBob 2.4s ease-in-out infinite;
+  }
+  .scroll-hint__arrow { font-size: 1.5rem; line-height: 1; }
+  body.scrolled .scroll-hint,
+  body.scene-focused .scroll-hint { opacity: 0; }
 }
 @keyframes scrollHintBob {
   0%, 100% { transform: translate(-50%, 0); }
   50%      { transform: translate(-50%, 4px); }
-}
-@media (max-width: 767px) {
-  .scroll-hint { bottom: calc(7rem + env(safe-area-inset-bottom)); font-size: 0.95rem; }
 }
 
 /* Force-hide elements with [hidden] even when inline styles override */
