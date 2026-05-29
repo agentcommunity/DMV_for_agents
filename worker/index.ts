@@ -21,6 +21,7 @@
 import { Container, getContainer } from '@cloudflare/containers';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import { incrementKvCooldown } from './rate-limit-kv';
+import { validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
 
 // Cloudflare Containers ship as Durable Objects under the hood.
 // `defaultPort` is the port the container's HTTP server listens on.
@@ -310,54 +311,27 @@ function parseRegisterBody(body: unknown): { value: CanonicalRegisterBody | null
 
   const raw = body as Record<string, unknown>;
   const agentName = typeof raw.agent_name === 'string' ? raw.agent_name.trim() : '';
-  if (!agentName) return { value: null, error: 'agent_name is required' };
-  if (agentName.length < 3) return { value: null, error: 'agent_name must be at least 3 characters' };
-  if (agentName.length > 63) return { value: null, error: 'agent_name must be at most 63 characters' };
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(agentName)) {
-    return { value: null, error: 'agent_name must be lowercase alphanumeric (hyphens allowed in middle)' };
-  }
-
   const email = typeof raw.email === 'string' ? raw.email.trim().toLowerCase() : '';
-  if (!email) return { value: null, error: 'email is required' };
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return { value: null, error: 'Invalid email format' };
-  }
-  if (email.length > 254) return { value: null, error: 'email must be 254 characters or fewer' };
-
   const operatorName = typeof raw.operator_name === 'string' ? raw.operator_name.trim() : '';
-  if (operatorName.length > 100) {
-    return { value: null, error: 'operator_name must be 100 characters or fewer' };
-  }
-
   const organizationName = typeof raw.organization_name === 'string' ? raw.organization_name.trim() : '';
-  if (organizationName.length > 100) {
-    return { value: null, error: 'organization_name must be 100 characters or fewer' };
-  }
-
   const description = typeof raw.description === 'string' ? raw.description.trim() : '';
-  if (description.length > 500) {
-    return { value: null, error: 'description must be 500 characters or fewer' };
-  }
-
   const signupSourceRaw = typeof raw.signup_source === 'string' ? raw.signup_source.trim() : 'api';
-  if (!['ui', 'cli', 'mcp', 'api'].includes(signupSourceRaw)) {
-    return { value: null, error: 'signup_source must be ui, cli, mcp, or api' };
-  }
-  const signup_source = signupSourceRaw as SignupSource;
-
   const registrationTypeRaw = typeof raw.registration_type === 'string' ? raw.registration_type.trim() : 'AGENT';
-  if (!['AGENT', 'INDIVIDUAL', 'ORGANIZATION'].includes(registrationTypeRaw)) {
-    return { value: null, error: 'registration_type must be AGENT, INDIVIDUAL, or ORGANIZATION' };
-  }
+
+  // Validate with the shared rules (single source of truth, same as register-agent).
+  const validationError = validateRegistrationFields({
+    agent_name: agentName,
+    email,
+    operator_name: operatorName,
+    organization_name: organizationName,
+    description,
+    signup_source: signupSourceRaw,
+    registration_type: registrationTypeRaw,
+  });
+  if (validationError) return { value: null, error: validationError };
+
+  const signup_source = signupSourceRaw as SignupSource;
   const registration_type = registrationTypeRaw as RegistrationType;
-
-  if ((registration_type === 'INDIVIDUAL' || registration_type === 'ORGANIZATION') && !operatorName) {
-    return { value: null, error: 'operator_name (full_name) is required for INDIVIDUAL and ORGANIZATION registrations' };
-  }
-
-  if (registration_type === 'ORGANIZATION' && !organizationName) {
-    return { value: null, error: 'organization_name is required for ORGANIZATION registrations' };
-  }
 
   const canonical: CanonicalRegisterBody = {
     agent_name: agentName,

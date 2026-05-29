@@ -3,6 +3,7 @@
 // Client packages never see database credentials.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { validateRegistrationFields } from '../_shared/registration-validation.ts'
 
 // --- Certificate ID generation (duplicated from package — ~50 lines, no deps) ---
 
@@ -47,61 +48,19 @@ function generateCertificateId(fields: string[], accountType: string): string {
   return `${word}-${hex.slice(0, 3)}-${hex.slice(3)}${check}`
 }
 
-// --- Validation ---
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const AGENT_NAME_REGEX = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+// --- Validation (shared rules live in ../_shared/registration-validation.ts) ---
 
 function validateRequest(body: Record<string, unknown>): string | null {
-  const name = body.agent_name as string
-  if (!name) return 'agent_name is required'
-  if (name.length < 3) return 'agent_name must be at least 3 characters'
-  if (name.length > 63) return 'agent_name must be at most 63 characters'
-  if (!AGENT_NAME_REGEX.test(name)) {
-    return 'agent_name must be lowercase alphanumeric (hyphens allowed in middle)'
-  }
-
-  const email = body.email as string
-  if (!email) return 'email is required'
-  if (!EMAIL_REGEX.test(email)) return 'Invalid email format'
-  if (email.length > 254) return 'email must be 254 characters or fewer'
-
-  const operatorName = body.operator_name as string
-  if (operatorName && operatorName.length > 100) {
-    return 'operator_name must be 100 characters or fewer'
-  }
-
-  const orgName = body.organization_name as string
-  if (orgName && orgName.length > 100) {
-    return 'organization_name must be 100 characters or fewer'
-  }
-
-  const description = body.description as string
-  if (description && description.length > 500) {
-    return 'description must be 500 characters or fewer'
-  }
-
-  const source = body.signup_source as string
-  if (source && !['ui', 'cli', 'mcp', 'api'].includes(source)) {
-    return 'signup_source must be ui, cli, mcp, or api'
-  }
-
-  const regType = body.registration_type as string
-  if (regType && !['AGENT', 'INDIVIDUAL', 'ORGANIZATION'].includes(regType)) {
-    return 'registration_type must be AGENT, INDIVIDUAL, or ORGANIZATION'
-  }
-
-  // full_name required for INDIVIDUAL and ORGANIZATION
-  if ((regType === 'INDIVIDUAL' || regType === 'ORGANIZATION') && !body.operator_name) {
-    return 'operator_name (full_name) is required for INDIVIDUAL and ORGANIZATION registrations'
-  }
-
-  // organization_name required for ORGANIZATION
-  if (regType === 'ORGANIZATION' && !body.organization_name) {
-    return 'organization_name is required for ORGANIZATION registrations'
-  }
-
-  return null
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+  return validateRegistrationFields({
+    agent_name: str(body.agent_name),
+    email: str(body.email),
+    operator_name: str(body.operator_name),
+    organization_name: str(body.organization_name),
+    description: str(body.description),
+    signup_source: str(body.signup_source),
+    registration_type: str(body.registration_type),
+  })
 }
 
 // --- CORS ---

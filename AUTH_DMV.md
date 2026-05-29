@@ -311,7 +311,7 @@ ALTER TYPE registration_type ADD VALUE 'AGENT';
 
 ## Input Validation
 
-Validated server-side in `register-agent` (client-side validation mirrors this but is not trusted):
+Validated server-side by **both** the Worker (`/api/register`) and `register-agent`, which now share a single rule module — `supabase/functions/_shared/registration-validation.ts` — so the two can't drift (client-side validation mirrors this but is not trusted):
 
 | Field | Rule |
 |-------|------|
