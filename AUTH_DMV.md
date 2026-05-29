@@ -80,7 +80,7 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       ┌─────────────────────────────────────────────────────┐
       │          agentcommunity.org auth hub                │
       │                                                     │
-      │  1. User signs in via OTP (6-digit code)            │
+      │  1. New user: magic link / existing: OTP code       │
       │  2. Normal PAGE auth flow runs — no special DMV     │
       │     status handling, because DMV rows look like     │
       │     any other pending_profile row from PAGE's view  │
@@ -153,7 +153,7 @@ On success, the CLI/MCP returns:
 
 ### After registration
 
-The agent (or its operator) receives a **certificate email** (cert card + permalink + share buttons + badge embeds — **no sign-in link**). For **brand-new** auth users, `handle-dmv-registration` also sends a **separate** magic-link email (non-PKCE `generateLink`/`/otp`, so it works server-side and cross-device); that link is their only sign-in path. Existing PAGE users get the certificate email only and sign in via the normal flow with the same email. PAGE's normal auth flow takes over from there — no DMV-specific status transitions happen, because DMV rows live in the same status lifecycle as any other registration (they're just tagged by `certificate_id IS NOT NULL`).
+The agent (or its operator) receives a **certificate email** (holographic card + share-first CTAs + badge embed — **no sign-in link**). For **brand-new** auth users, `handle-dmv-registration` also sends a **separate verify email** — a clickable, non-PKCE magic link (`admin.generateLink` → `agentcommunity.org/api/auth/magiclink/verify?token_hash=…`, reusing PAGE's existing route): a real link on **our** domain, never a 6-digit code and never a raw `<project>.supabase.co` URL. That link is the new user's only sign-in path. Existing PAGE users get the certificate email only and sign in via the normal flow with the same email. PAGE's normal auth flow takes over from there — no DMV-specific status transitions happen, because DMV rows live in the same status lifecycle as any other registration (they're just tagged by `certificate_id IS NOT NULL`).
 
 ## Rate Limiting Architecture
 
@@ -381,7 +381,7 @@ Everything below is shipped in this repo and ready to deploy:
 | Shared CF rate limits with PAGE | Done | `wrangler.jsonc` `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` (ns 4005/4007) |
 | DMV-local KV fingerprint cooldown | Done | `worker/rate-limit-kv.ts`, `REGISTER_COOLDOWN_KV` binding |
 | Upstash Redis REMOVED from edge fn | Done | `supabase/functions/register-agent/index.ts` (-90 lines) |
-| Lifetime cap (3/10 per email) | Done | `supabase/functions/register-agent/index.ts` |
+| Lifetime cap (5/12 per email) | Done | `supabase/functions/register-agent/index.ts` |
 | `x-dmv-proxy: v1` gate on `register-agent` (direct-access block) | Done | `supabase/functions/register-agent/index.ts` — requires the worker-set header on every non-OPTIONS request |
 | DMV uses DB default for `status` (no `provisional_dmv`) | Done | `supabase/functions/register-agent/index.ts` — commit `8d73924` removed the stale status line |
 | CORS restricted to known origins | Done | Same file |
@@ -428,14 +428,17 @@ The agent cards section (`AgentCardsSection`) already supports real certificate 
 
 **Certificate email (as-built — PAGE side):**
 
-`handle-dmv-registration` sends **two** separate emails, not one. This is the actual shipped behavior — an earlier version of this doc described a single "remove magic link, add sign-in CTA" email that was never built (and was based on the mistaken premise that a server-sent magic link can't work — non-PKCE `generateLink`/`/otp` links work fine server-side):
+`handle-dmv-registration` sends **two** separate emails to a new registrant (both rebuilt 2026-05-29):
 
-- **Certificate email** — sent to everyone. Cert card, permalink, share buttons (X/LinkedIn/WhatsApp), badge embeds. Contains **no sign-in link**. Queued onto PAGE's shared **email gateway** (`email_queue` row, `template: 'dmv_certificate'`) and triggered immediately; the gateway owns dedup (keyed on `template`+`user_id`), tracking, unsubscribe injection, suppression, and the `FEATURE_DMV_REGISTRATION_ENABLED` flag. Renderer `generateDmvCertificateEmailHtml`, FROM `updates@member.agentcommunity.org` (`usePersonalSender`). (Migrated off the direct `sendEmail` path 2026-05-28 — `handle-dmv-registration` no longer calls Resend directly.)
-- **Magic-link email** — sent to **brand-new auth users only**, via a separate `POST /auth/v1/otp` call (non-PKCE, works cross-device). `email_redirect_to` is `/auth?from=dmv`. This is the only sign-in path for a new user. Send failures are now logged at `error` level and surfaced as `magicLinkSent: false` in the function response (was a swallowed `console.warn`).
+- **Certificate email** — sent to everyone. Self-contained slate-palette design (matches `otp-verification.ts`): the holographic card (PNG via `/api/card` — **not** the `/badge` SVG, which Gmail/Outlook drop), the cert ID, a **share-first** layout (**Share on X** = primary button, **LinkedIn** = secondary, a copy-ready permalink box, "View certificate" = quiet link; WhatsApp + "Email a colleague" buttons **removed**), and a Markdown badge embed. **No sign-in link.** Renderer `generateDmvCertificateEmailHtml`, FROM `updates@member.agentcommunity.org` (`usePersonalSender`). All interpolated values are HTML-escaped.
+  - **Delivery:** `handle-dmv-registration` INSERTs an `email_queue` row (`template: 'dmv_certificate'`) then calls the Postgres RPC **`process_email_queue_immediate(p_queue_id)`** — the same path every other trigger email uses, which fires `net.http_post` to the `email-gateway` **from inside Postgres** (decoupled from the worker; sub-second). The gateway owns dedup (keyed on `template`+`user_id`), tracking, unsubscribe injection, and suppression. A 5-min `drain-pending-emails` pg_cron job is the backstop. *(Do NOT use an awaited cross-function `fetch()` to the gateway here: `handle-dmv-registration` runs under the `on_dmv_registration` pg_net trigger's ~5s timeout, so an awaited 6-10s round-trip gets torn down and leaves the row `pending` forever — this was a real bug, fixed 2026-05-29 commit `82ba251`.)*
+  - **Requires `FEATURE_DMV_REGISTRATION_ENABLED=true`** as a Supabase project secret. The gateway's `isTemplateEnabled` treats the unset flag as OFF and **silently skips** the `dmv_certificate` send (`status=skipped`, reason `feature_flag_disabled`) — set it via `supabase secrets set` and redeploy `email-gateway`.
+- **Verify email** (new users only) — a **clickable magic link, NOT a 6-digit code** (DMV registrants arrive via CLI / the card terminal and have no browser code box). `handle-dmv-registration` mints a non-PKCE link with `admin.generateLink({ type: 'magiclink' })`, then builds a URL pointed at **our own domain** — `https://agentcommunity.org/api/auth/magiclink/verify?token_hash=<hashed_token>&type=magiclink` — reusing PAGE's existing magic-link route. It does **not** use `generateLink`'s raw `<project>.supabase.co/auth/v1/verify` `action_link` (that reads as phishing + hurts deliverability), and it does **not** use GoTrue's `/auth/v1/otp` (which sends PAGE's shared 6-digit-code template). Sent via the dedicated `dmv-verify` template through a **direct Resend send** (NOT the queue — so this critical sign-in path can't get stuck `pending`). `magicLinkSent` is surfaced in the response; failures log at `error` level.
 
 Genuine remaining gaps (not deploy blockers):
-- **Existing PAGE users who register via DMV get no sign-in link in any email** — they receive the certificate email only and must already know to sign in at agentcommunity.org. A sign-in CTA in the cert email for the existing-user case would close this.
-- `?from=dmv` has no special handler in PAGE's `app/auth/page.tsx`; the user lands on the default post-auth destination (`/members`). Harmless, but the documented `→ /members?from=dmv` routing is aspirational.
+- **Existing PAGE users who register via DMV get no sign-in link in any email** — they receive the certificate email only and sign in normally at agentcommunity.org. A sign-in CTA in the cert email for the existing-user case would close this.
+- `?from=dmv` has no special handler in PAGE's `app/auth/page.tsx`; new users land on the default post-auth destination (`/members`) after the magic link verifies.
+- **Automatic card pre-warm** is not wired: `/api/card` cold-renders (~3s) on first request, so a freshly-registered cert's card can lag the first time the email is opened. A fire-and-forget `/api/card` warm at registration would fix it. Low priority.
 
 ## Deploy Order
 
@@ -457,8 +460,8 @@ All of the above is **complete as of 2026-04-08**. PAGE-side follow-ups (member 
 ## Testing the Full Flow
 
 1. Register via CLI: `bunx dmv-agent register --name test-agent --email you@example.com --operator "Your Name"`
-2. Verify in DB: `certificate_id IS NOT NULL`, `status = 'pending_profile'` (the DB default — not set by DMV), `user_id` eventually populated by `handle-dmv-registration` trigger (async)
-3. Sign in at agentcommunity.org with the same email via OTP
+2. Verify in DB: `certificate_id IS NOT NULL`, `status = 'pending_profile'` (the DB default — not set by DMV), `user_id` populated by `handle-dmv-registration`. In `email_queue`, the `dmv_certificate` row should reach `status = 'sent'` within seconds (auto-sent via `process_email_queue_immediate` — it must NOT be left `pending`; if it is, check `FEATURE_DMV_REGISTRATION_ENABLED`).
+3. Check email: the **certificate email** arrives (holographic card + share CTAs, no sign-in link). **New users** also get a **verify email** — click its **magic link** (`agentcommunity.org/api/auth/magiclink/verify?token_hash=…`, a real link on our domain, not a 6-digit code) to sign in. **Existing users** sign in normally with the same email.
 4. Verify in DB: `user_id` is set (if it wasn't already), normal PAGE auth flow applied
 5. Check members dashboard → HoloCard should render with real certificate data (requires `NEXT_PUBLIC_SHOW_AGENT_CARDS` on PAGE)
 6. Test rate limiting (shared CF limiters): register 6 times rapidly with the same email → 6th should return `429 rate_limited` from the worker

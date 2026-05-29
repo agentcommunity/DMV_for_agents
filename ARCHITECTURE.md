@@ -97,7 +97,7 @@ The Department of Machine Verification is the identity registration system for t
  │  │                                                  │                   │
  │  │  POST /register-agent (worker upstream)          │                   │
  │  │    → validate input + registration_type          │                   │
- │  │    → lifetime cap: 3/email or 10 if endorsed      │                   │
+ │  │    → lifetime cap: 5/email or 12 if endorsed      │                   │
  │  │    → generate certificate ID (FNV-1a + Luhn)     │                   │
  │  │    → INSERT into registrations (certificate_id    │                   │
  │  │      set, status omitted → DB default              │                   │
@@ -274,7 +274,7 @@ Database:        RLS denies all anon access
 
 | Threat | Mitigation |
 |--------|-----------|
-| Spam registrations (browser) | Cloudflare Turnstile (server-side hostname + `dmv_register` action check) + shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared with `agentCommunity_PAGE` at the CF account level) + DB lifetime cap 3/email (10 if endorsed). CAPTCHA always runs before counters. |
+| Spam registrations (browser) | Cloudflare Turnstile (server-side hostname + `dmv_register` action check) + shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared with `agentCommunity_PAGE` at the CF account level) + DB lifetime cap 5/email (12 if endorsed). CAPTCHA always runs before counters. |
 | Spam registrations (CLI/MCP) | Machine fingerprint required + same shared CF rate limits + DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`) + DB lifetime cap. Headless clients can't solve Turnstile, so fingerprint substitutes. |
 | Name squatting | Pre-registration model — multiple users can claim the same domain. Magic link email verifies identity. |
 | Credential theft | No credentials in client code. Anon key removed. Only the worker `/api/register` URL is public; `TURNSTILE_SECRET_KEY` is encrypted on the worker, `SUPABASE_SERVICE_ROLE_KEY` only inside the edge function runtime. |
