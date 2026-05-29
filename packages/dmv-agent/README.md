@@ -163,7 +163,7 @@ display result
 3. **Worker validation** — same checks repeated at the public security boundary on the Cloudflare Worker.
 4. **Worker shared CF rate limits** — `RL_OTP_EMAIL` (5/60s) and `RL_OTP_IP_EMAIL` (4/60s). The `namespace_id` values are shared at the Cloudflare account level with `agentCommunity_PAGE`, so an attacker burning quota on one property has less of it available on the other.
 5. **Worker DMV-local KV cooldown** — CLI/MCP only. The worker hashes the supplied `machine_fingerprint` and increments a counter in `REGISTER_COOLDOWN_KV` (`dmv:register:fingerprint:<sha256>`). Threshold-then-hold pattern.
-6. **Edge function** — Supabase still runs validation, the DB lifetime cap (3 unendorsed / 10 endorsed per email), and the unique-cert-ID constraint as defense in depth.
+6. **Edge function** — Supabase still runs validation, the DB lifetime cap (5 unendorsed / 12 endorsed per email), and the unique-cert-ID constraint as defense in depth.
 7. **Certificate ID** — content-addressed via FNV-1a hash. Format: `WORD-XXX-XXXC` with Luhn mod-36 check digit. Deterministic: same inputs = same ID.
 8. **Email verification** — a verification link is sent to the operator's email. Pre-registration completes only after verification. Until then, the domain interest is recorded but not active.
 
@@ -217,7 +217,7 @@ verifyCertificateId('MESA-DD6-660J'); // true
 ```
 
 - **Worker-owned anti-abuse** — the Cloudflare Worker `/api/register` is the public choke point. CLI/MCP requests must include `machine_fingerprint`; the worker enforces shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared at the CF account level with `agentCommunity_PAGE`) plus a DMV-local KV fingerprint cooldown (`REGISTER_COOLDOWN_KV`) before forwarding to Supabase.
-- **Edge function backstop** — Supabase still validates, enforces the DB lifetime cap (3 unendorsed / 10 endorsed per email), and enforces the unique-cert-ID constraint.
+- **Edge function backstop** — Supabase still validates, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), and enforces the unique-cert-ID constraint.
 - **Pre-registration model** — domain is NOT unique. Multiple parties can pre-register interest in the same name. Certificate ID IS unique (same user + agent + type = same cert).
 - **Email verification** — pre-registration is pending until the operator clicks the verification link.
 - **Content-addressed IDs** — deterministic hashes, not sequential. Cannot be enumerated or predicted.

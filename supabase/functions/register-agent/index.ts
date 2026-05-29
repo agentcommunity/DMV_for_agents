@@ -202,15 +202,16 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  // Lifetime cap: 3 unendorsed / 10 endorsed per email
+  // Lifetime cap: 5 unendorsed / 12 endorsed per email.
+  // Counts only DMV agent cards (certificate_id IS NOT NULL), not PAGE signups.
   const { count: totalCerts } = await supabase
     .from('registrations')
     .select('*', { count: 'exact', head: true })
     .eq('email', email)
     .not('certificate_id', 'is', null)
 
-  const CAP_UNENDORSED = 3
-  const CAP_ENDORSED = 10
+  const CAP_UNENDORSED = 5
+  const CAP_ENDORSED = 12
   const currentCount = totalCerts ?? 0
 
   if (currentCount >= CAP_UNENDORSED) {
@@ -226,7 +227,7 @@ Deno.serve(async (req) => {
     if (currentCount >= cap) {
       return new Response(
         JSON.stringify({
-          error: `Certificate limit reached (${cap} max).${!endorsed?.length ? ' Endorsed members can register up to 10.' : ''}`,
+          error: `You've maxed out your quota on this email — up to ${cap} agent identities.${!endorsed?.length ? ` Members who've signed the endorsement letter can pre-register up to ${CAP_ENDORSED}.` : ''}`,
           current: currentCount,
           limit: cap,
           endorsed: !!endorsed?.length,

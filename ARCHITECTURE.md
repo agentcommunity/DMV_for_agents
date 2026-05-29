@@ -177,7 +177,7 @@ Two distinct surfaces, owned by the Cloudflare Worker.
 | Worker: Turnstile | Per browser request | Pass/fail | Cloudflare Turnstile siteverify | Browser path only. Validates `success` + `hostname` + `action: dmv_register`. CAPTCHA runs BEFORE shared counters. |
 | Worker: shared CF | Per email, per IP+email | 5 per 60s, 4 per 60s | CF Workers Rate Limiting API | Bindings `RL_OTP_EMAIL` (ns `4005`) and `RL_OTP_IP_EMAIL` (ns `4007`). Both `namespace_id` values are SHARED at the CF account level with `agentCommunity_PAGE`. |
 | Worker: KV cooldown | Per machine fingerprint | Threshold-then-hold | DMV-local `REGISTER_COOLDOWN_KV` | CLI/MCP only. Key prefix `dmv:register:fingerprint:<sha256>`. Not shared with PAGE. |
-| DB: lifetime cap | Per email, lifetime | 3 (unendorsed) / 10 (endorsed) | Postgres | Inside `register-agent` edge function. Backstop for slow-burn abuse. |
+| DB: lifetime cap | Per email, lifetime | 5 (unendorsed) / 12 (endorsed) | Postgres | Inside `register-agent` edge function. Backstop for slow-burn abuse. |
 | DB: unique constraint | Per cert ID | Deterministic dedup | Postgres | Catches re-registration of identical inputs. |
 
 Upstash Redis was removed from DMV in the 2026-04-08 hardening pass — every register-path counter now lives in Cloudflare. The worker is the single anti-abuse choke point; the edge function is strictly an upstream that validates and INSERTs. See [AUTH_DMV.md](AUTH_DMV.md) for the full design rationale and the cross-repo coupling contract with `agentCommunity_PAGE`.

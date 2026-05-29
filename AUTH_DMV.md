@@ -46,7 +46,7 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │  1. Verify x-dmv-proxy: v1 header from the worker     │
       │  2. Validate all fields + length limits               │
       │  3. Lifetime cap (DB)                                 │
-      │     └─ 3 per email (unendorsed) / 10 (endorsed)      │
+      │     └─ 5 per email (unendorsed) / 12 (endorsed)      │
       │  4. Generate certificate_id (FNV-1a + Luhn)           │
       │  5. INSERT with certificate_id set (status defaults   │
       │     to pending_profile via baseline.sql:3345)         │
@@ -204,7 +204,7 @@ Request arrives at Worker /api/register
                ▼
 ┌─────────────────────────────────┐
 │  Layer 5: DB lifetime cap       │  Postgres query in
-│  3 (unendorsed) / 10 (endorsed)│  register-agent edge fn.
+│  5 (unendorsed) / 12 (endorsed)│  register-agent edge fn.
 └──────────────┬──────────────────┘
                │ pass
                ▼
@@ -462,6 +462,6 @@ All of the above is **complete as of 2026-04-08**. PAGE-side follow-ups (member 
 4. Verify in DB: `user_id` is set (if it wasn't already), normal PAGE auth flow applied
 5. Check members dashboard → HoloCard should render with real certificate data (requires `NEXT_PUBLIC_SHOW_AGENT_CARDS` on PAGE)
 6. Test rate limiting (shared CF limiters): register 6 times rapidly with the same email → 6th should return `429 rate_limited` from the worker
-7. Test lifetime cap (Supabase DB): register 4 unique agents with the same email → 4th should return `403` with `error: Certificate limit reached (3 max). Endorsed members can register up to 10.`
+7. Test lifetime cap (Supabase DB): register 6 unique agents with the same email → 6th should return `403` with `error: You've maxed out your quota on this email — up to 5 agent identities. Members who've signed the endorsement letter can pre-register up to 12.`
 8. Test direct-access gate: `curl -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent -H 'Content-Type: application/json' -d '{}'` → should return `403 direct_access_deprecated`
 9. Test worker forwarding: same curl but with `-H 'x-dmv-proxy: v1'` → should return `400 agent_name is required` (gate passes, validation fires)
