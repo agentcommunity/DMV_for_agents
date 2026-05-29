@@ -70,8 +70,8 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │  1. Find or create auth user by email               │
       │  2. Link registration: user_id = auth_user.id       │
       │  3. Upsert domain into user_domains table           │
-      │  4. Send certificate email with sign-in CTA         │
-      │     (NO magic link — PKCE can't work server-side)   │
+      │  4. Send certificate email (cert card, no link)     │
+      │  5. New users: send separate magic-link email       │
       └─────────────────────────────────────────────────────┘
                              │
                    user decides to claim
@@ -153,7 +153,7 @@ On success, the CLI/MCP returns:
 
 ### After registration
 
-The agent (or its operator) receives a certificate email with a sign-in CTA. To claim the `.agent` domain, the operator signs in at agentcommunity.org with the same email. PAGE's normal auth flow takes over from there — no DMV-specific status transitions happen, because DMV rows live in the same status lifecycle as any other registration (they're just tagged by `certificate_id IS NOT NULL`).
+The agent (or its operator) receives a **certificate email** (cert card + permalink + share buttons + badge embeds — **no sign-in link**). For **brand-new** auth users, `handle-dmv-registration` also sends a **separate** magic-link email (non-PKCE `generateLink`/`/otp`, so it works server-side and cross-device); that link is their only sign-in path. Existing PAGE users get the certificate email only and sign in via the normal flow with the same email. PAGE's normal auth flow takes over from there — no DMV-specific status transitions happen, because DMV rows live in the same status lifecycle as any other registration (they're just tagged by `certificate_id IS NOT NULL`).
 
 ## Rate Limiting Architecture
 
@@ -393,7 +393,7 @@ Everything below is shipped in this repo and ready to deploy:
 | API L1+R2 cache + long-lived immutable PNGs | Done | `worker/index.ts` (cache hierarchy) |
 | Badge cache 1h/24h | Done | `supabase/functions/badge/index.ts` |
 | CLI fetch timeout (30s) + retry on 5xx | Done | `packages/dmv-agent/src/register.ts` |
-| Web fetch timeout (15s) | Done | `js/supabase.js` |
+| Web fetch timeout (15s) | Done | `js/register.js` (`:36`) |
 | MCP rate limiting + operator required | Done | `packages/dmv-agent/src/mcp-server.ts` |
 | Lockfile crash protection | Done | `packages/dmv-agent/src/rate-limit.ts` |
 | SKILL.md operator docs fixed | Done | `packages/dmv-agent/skills/dmv/SKILL.md` |
@@ -426,14 +426,16 @@ The agent cards section (`AgentCardsSection`) already supports real certificate 
 - Render HoloCards for domains with cert IDs, placeholder for those without
 - Card images come from DMV `/api/card?id=CERT-ID&name=agent-name`
 
-**Certificate email:**
+**Certificate email (as-built — PAGE side):**
 
-Update `handle-dmv-registration` edge function email to:
-- Remove magic link (PKCE can't work server-initiated)
-- CTA: "Sign in at agentcommunity.org to claim your certificate and join the community"
-- Link to `https://agentcommunity.org/auth/sign-in`
-- Mention endorsement: "Endorsed members can register up to 10 agent identities"
-- Keep badge embed snippets and certificate details
+`handle-dmv-registration` sends **two** separate emails, not one. This is the actual shipped behavior — an earlier version of this doc described a single "remove magic link, add sign-in CTA" email that was never built (and was based on the mistaken premise that a server-sent magic link can't work — non-PKCE `generateLink`/`/otp` links work fine server-side):
+
+- **Certificate email** — sent to everyone. Cert card, permalink, share buttons (X/LinkedIn/WhatsApp), badge embeds. Contains **no sign-in link**. Queued onto PAGE's shared **email gateway** (`email_queue` row, `template: 'dmv_certificate'`) and triggered immediately; the gateway owns dedup (keyed on `template`+`user_id`), tracking, unsubscribe injection, suppression, and the `FEATURE_DMV_REGISTRATION_ENABLED` flag. Renderer `generateDmvCertificateEmailHtml`, FROM `updates@member.agentcommunity.org` (`usePersonalSender`). (Migrated off the direct `sendEmail` path 2026-05-28 — `handle-dmv-registration` no longer calls Resend directly.)
+- **Magic-link email** — sent to **brand-new auth users only**, via a separate `POST /auth/v1/otp` call (non-PKCE, works cross-device). `email_redirect_to` is `/auth?from=dmv`. This is the only sign-in path for a new user. Send failures are now logged at `error` level and surfaced as `magicLinkSent: false` in the function response (was a swallowed `console.warn`).
+
+Genuine remaining gaps (not deploy blockers):
+- **Existing PAGE users who register via DMV get no sign-in link in any email** — they receive the certificate email only and must already know to sign in at agentcommunity.org. A sign-in CTA in the cert email for the existing-user case would close this.
+- `?from=dmv` has no special handler in PAGE's `app/auth/page.tsx`; the user lands on the default post-auth destination (`/members`). Harmless, but the documented `→ /members?from=dmv` routing is aspirational.
 
 ## Deploy Order
 

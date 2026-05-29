@@ -40,7 +40,7 @@
 	//
 	// `run_worker_first` lists paths where the Worker runs BEFORE static assets.
 	// We use this for /api/* (card + og), /c/* (crawler middleware via HTMLRewriter),
-	// /badge/* (Supabase proxy), and /healthz. Everything else falls through to
+	// /badge + /badge/* (Supabase proxy), and /healthz. Everything else falls through to
 	// static assets directly with no Worker invocation cost.
 	"assets": {
 		"directory": "./dist",
@@ -49,6 +49,7 @@
 		"run_worker_first": [
 			"/api/*",
 			"/c/*",
+			"/badge",
 			"/badge/*",
 			"/healthz"
 		]
