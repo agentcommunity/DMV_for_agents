@@ -43,7 +43,7 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │         register-agent edge function                  │◄─┘
       │              (Supabase / Deno)                        │
       │                                                       │
-      │  1. Verify x-dmv-proxy: v1 header from the worker     │
+      │  1. Verify x-dmv-proxy secret header from the worker  │
       │  2. Validate all fields + length limits               │
       │  3. Lifetime cap (DB)                                 │
       │     └─ 5 per email (unendorsed) / 12 (endorsed)      │
@@ -57,7 +57,13 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │  anti-abuse now; this function is strictly an         │
       │  upstream that validates and INSERTs. The gate on     │
       │  the x-dmv-proxy header blocks direct calls to the    │
-      │  Supabase URL that would bypass the worker.           │
+      │  Supabase URL that would bypass the worker. The       │
+      │  header value is the shared DMV_PROXY_SECRET (set on   │
+      │  both platforms), replacing the old public `v1`        │
+      │  constant. During the rollout grace window the gate    │
+      │  accepts BOTH `v1` and the secret; Phase C removes the │
+      │  `v1` branch once the worker is confirmed sending the  │
+      │  secret.                                              │
       └──────────────────────┬────────────────────────────────┘
                              │
                              │ DB trigger fires async

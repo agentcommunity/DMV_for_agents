@@ -84,6 +84,11 @@ interface Env {
   // limits on CLI/MCP flows. Intentionally not shared with PAGE.
   REGISTER_COOLDOWN_KV: KVNamespace;
   TURNSTILE_SECRET_KEY: string;
+  // Shared secret sent to the register-agent edge function as the `x-dmv-proxy`
+  // header value (replaces the legacy public `v1` constant). Optional: until the
+  // Cloudflare secret is set this is undefined and we fall back to `v1`, which
+  // register-agent still accepts during the grace window. See AUTH_DMV.md.
+  DMV_PROXY_SECRET?: string;
 }
 
 // Structured telemetry for cache tiers, badge proxy, and prewarm runs.
@@ -1062,7 +1067,9 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   upstreamHeaders.set('x-forwarded-for', clientIp);
   upstreamHeaders.set('x-forwarded-host', new URL(request.url).host);
   upstreamHeaders.set('x-forwarded-proto', new URL(request.url).protocol.replace(':', ''));
-  upstreamHeaders.set('x-dmv-proxy', 'v1');
+  // Send the shared secret; fall back to legacy `v1` until the Cloudflare secret
+  // is set (register-agent accepts both during the grace window). See AUTH_DMV.md.
+  upstreamHeaders.set('x-dmv-proxy', env.DMV_PROXY_SECRET ?? 'v1');
 
   const upstreamBody = {
     agent_name: parsedBody.agent_name,

@@ -84,18 +84,38 @@ function getCorsHeaders(req: Request) {
 // --- Handler ---
 
 // Proxy header gate — only the DMV worker at dmv.agentcommunity.org/api/register
-// is allowed to call this function. The worker sets `x-dmv-proxy: v1` on every
-// forwarded request (see worker/index.ts handleRegister). Any direct POST to
-// this Supabase URL without that header is rejected with 403.
+// is allowed to call this function (it is deployed with --no-verify-jwt, so this
+// header is its ONLY defense against direct internet callers who would bypass the
+// worker's Turnstile + rate limits + KV cooldown). The worker sets the shared
+// secret `DMV_PROXY_SECRET` as the `x-dmv-proxy` header on every forwarded request
+// (see worker/index.ts handleRegister). Any direct POST to this Supabase URL
+// without a matching header value is rejected with 403.
 //
-// This closes the direct-Supabase bypass that existed during the 2026-04-08
-// migration window for legacy CLI versions. Adoption of the worker-proxied
-// @agentcommunity/dmv-agent CLI is complete, so there are no known legitimate
-// direct callers anymore. OPTIONS preflights are exempt (browsers don't send
-// custom headers on preflight, and we still want CORS to work for any future
-// debugging).
+// TEMPORARY GRACE WINDOW (zero-downtime secret rollout): we accept the request if
+// the header equals EITHER the legacy public constant `'v1'` OR the value of the
+// `DMV_PROXY_SECRET` env var (constant-time compared). This lets us deploy this
+// accept-both function FIRST while the worker still sends `'v1'`, then set the
+// shared secret on both platforms, with no window where real registrations 403.
+// The `'v1'` constant is public (committed in source) so it is NOT a real defense
+// on its own — replaying it is trivial. Once the worker is confirmed sending the
+// secret (Cloudflare secret set), the legacy branch must be removed so the public
+// constant can no longer be replayed. See AUTH_DMV.md and the PHASE C marker below.
+//
+// OPTIONS preflights are exempt (browsers don't send custom headers on preflight,
+// and we still want CORS to work for any future debugging).
 const DMV_PROXY_HEADER = 'x-dmv-proxy'
 const DMV_PROXY_VERSION = 'v1'
+
+// Constant-time string comparison (defense-in-depth against timing oracles on the
+// secret branch). Hand-rolled: no early return on first differing char; safely
+// returns false on null/undefined or length mismatch instead of throwing.
+function timingSafeStrEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -103,7 +123,12 @@ Deno.serve(async (req) => {
   }
 
   const proxyHeader = req.headers.get(DMV_PROXY_HEADER)
-  if (proxyHeader !== DMV_PROXY_VERSION) {
+  const proxySecret = Deno.env.get('DMV_PROXY_SECRET')
+  // PHASE C: remove the legacy v1 branch once worker confirmed sending the secret
+  const legacyOk = proxyHeader === DMV_PROXY_VERSION
+  // `!!proxySecret` guard: an unset DMV_PROXY_SECRET can NEVER accept a request.
+  const secretOk = !!proxySecret && timingSafeStrEqual(proxyHeader, proxySecret)
+  if (!legacyOk && !secretOk) {
     return new Response(
       JSON.stringify({
         error: 'direct_access_deprecated',
