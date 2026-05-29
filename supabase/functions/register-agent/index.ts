@@ -227,7 +227,7 @@ Deno.serve(async (req) => {
     if (currentCount >= cap) {
       return new Response(
         JSON.stringify({
-          error: `You've maxed out your quota on this email — up to ${cap} agent identities.${!endorsed?.length ? ` Members who've signed the endorsement letter can pre-register up to ${CAP_ENDORSED}.` : ''}`,
+          error: `You've maxed out your quota on this email: up to ${cap} agent identities.${!endorsed?.length ? ` Members who've signed the endorsement letter can pre-register up to ${CAP_ENDORSED}.` : ''}`,
           current: currentCount,
           limit: cap,
           endorsed: !!endorsed?.length,
