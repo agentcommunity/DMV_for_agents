@@ -143,8 +143,14 @@ Deno.serve(async (req) => {
     )
   }
 
-  const agentName = body.agent_name as string
-  const email = body.email as string
+  const agentName = (body.agent_name as string).trim()
+  // Normalize email at the data layer (trim + lowercase) — mirrors the Worker's
+  // canonicalization. The Worker is the normal ingress, but the only thing
+  // guarding the direct-to-Supabase path is the x-dmv-proxy header; without this,
+  // a direct call could case-vary the email (Foo@ vs foo@) into separate cap
+  // buckets and bypass the lifetime cap, and land mixed-case rows that fragment
+  // PAGE's `WHERE email=` joins + the on_dmv_registration user-matching.
+  const email = (body.email as string).trim().toLowerCase()
   const operatorName = (body.operator_name as string) || null
   const description = (body.description as string) || null
   const signupSource = (body.signup_source as string) || 'api'
@@ -163,11 +169,20 @@ Deno.serve(async (req) => {
 
   // Lifetime cap: 5 unendorsed / 12 endorsed per email.
   // Counts only DMV agent cards (certificate_id IS NOT NULL), not PAGE signups.
-  const { count: totalCerts } = await supabase
+  const { count: totalCerts, error: countError } = await supabase
     .from('registrations')
     .select('*', { count: 'exact', head: true })
     .eq('email', email)
     .not('certificate_id', 'is', null)
+
+  // Fail CLOSED: a discarded count error would default to 0 and skip the cap
+  // entirely. Reject rather than let an unbounded registration through.
+  if (countError) {
+    return new Response(
+      JSON.stringify({ error: 'Could not verify your registration limit — please try again.' }),
+      { status: 503, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+    )
+  }
 
   const CAP_UNENDORSED = 5
   const CAP_ENDORSED = 12
