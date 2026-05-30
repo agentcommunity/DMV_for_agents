@@ -1,0 +1,48 @@
+name: DMV register-agent gate monitor
+
+# Synthetic uptime check for the x-dmv-proxy secret gate — the ONLY thing
+# protecting register-agent (deployed --no-verify-jwt) from direct internet
+# callers who would bypass the Worker's Turnstile + rate limits + KV cooldown.
+# There is no unit test for the gate, so this catches a regression (a refactor
+# that reopens the bypass, or the legacy `v1` constant creeping back) cheaply.
+# A failed run sends GitHub's native workflow-failure notification to the repo.
+#
+# The checks are intentionally NEGATIVE only (must be rejected). We can't curl
+# the happy path — it needs the secret (never in CI) and would create real rows.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *' # every 30 min (GitHub may delay scheduled runs)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: No x-dmv-proxy header must be rejected (403)
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+            -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
+            -H 'Content-Type: application/json' -d '{}')
+          echo "no-header -> HTTP $code (expect 403)"
+          if [ "$code" != "403" ]; then
+            echo "::error title=DMV gate OPEN::direct register-agent with NO x-dmv-proxy returned $code (expected 403). The direct-Supabase bypass may be reopened."
+            exit 1
+          fi
+
+      - name: Retired public 'v1' constant must be rejected (403)
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+            -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
+            -H 'Content-Type: application/json' -H 'x-dmv-proxy: v1' -d '{}')
+          echo "x-dmv-proxy:v1 -> HTTP $code (expect 403)"
+          if [ "$code" != "403" ]; then
+            echo "::error title=DMV gate regressed::register-agent accepted the retired x-dmv-proxy:v1 constant (HTTP $code, expected 403). A public-constant bypass is replayable again."
+            exit 1
+          fi
+
+      - name: Gate healthy
+        run: echo "✅ register-agent gate is closed — both no-header and legacy v1 correctly return 403."
