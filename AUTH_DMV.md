@@ -2,6 +2,8 @@
 
 Complete reference for how DMV pre-registration works, how it connects to agentcommunity.org auth, what's implemented, what needs migration, and how the CLI-first agent flow is designed.
 
+> **Strategic stance on WorkOS `auth.md` / ID-JAG:** we **defer** adopting `auth.md` until a major AI platform (Claude/Codex) becomes an *issuer*, and instead pursue **provable `.agent` identity** (AID-native — resolve agent-published keys, don't custody them). Full rationale, revisit triggers, and the registry-vs-trust-broker fork: [`docs/plans/2026-05-30-authmd-id-jag-decision.md`](docs/plans/2026-05-30-authmd-id-jag-decision.md).
+
 ## System Overview
 
 The DMV (Department of Machine Verification) is the identity pre-registration system for the .agent community. It lets agents and their operators claim `.agent` domain names through 5 entry points, all hitting the same backend. The CLI is the primary agent-facing path — no browser needed, no UI dependency.
