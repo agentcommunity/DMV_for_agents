@@ -84,10 +84,12 @@ interface Env {
   // limits on CLI/MCP flows. Intentionally not shared with PAGE.
   REGISTER_COOLDOWN_KV: KVNamespace;
   TURNSTILE_SECRET_KEY: string;
-  // Shared secret sent to the register-agent edge function as the `x-dmv-proxy`
-  // header value (replaces the legacy public `v1` constant). Optional: until the
-  // Cloudflare secret is set this is undefined and we fall back to `v1`, which
-  // register-agent still accepts during the grace window. See AUTH_DMV.md.
+  // Shared secret sent to register-agent as the `x-dmv-proxy` header value;
+  // register-agent accepts ONLY this secret (the legacy public `v1` constant was
+  // retired 2026-05-29 — there is NO fallback). If unset, handleRegister fails
+  // loud with a 503 before forwarding (see the guard near the top of the fn).
+  // Typed optional only because the binding may be absent in local/preview envs.
+  // See AUTH_DMV.md.
   DMV_PROXY_SECRET?: string;
 }
 
@@ -981,6 +983,31 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   const ipHash = await sha256Hex(clientIp);
   const ipEmailHash = await sha256Hex(`${ipHash}:${emailHash}`);
 
+  // Authenticate to register-agent with the shared secret. There is NO fallback:
+  // register-agent accepts ONLY DMV_PROXY_SECRET (the legacy `v1` constant was
+  // retired 2026-05-29), so a missing secret would make every forward 403 at its
+  // gate. Check it FIRST — before Turnstile, the rate limiters, and the KV
+  // cooldown — so a misconfiguration fails loud (log + 503) WITHOUT consuming a
+  // user's rate-limit quota or bumping their cooldown (which would otherwise lock
+  // retrying users out for the full window despite zero successful
+  // registrations). See AUTH_DMV.md.
+  const proxySecret = env.DMV_PROXY_SECRET;
+  if (!proxySecret) {
+    console.error(
+      '[register] DMV_PROXY_SECRET is not configured on the worker — refusing to ' +
+        'forward to register-agent (it would be rejected at the x-dmv-proxy gate). ' +
+        'Set the Cloudflare Worker secret DMV_PROXY_SECRET.',
+    );
+    emitRegisterAnalytics(env, 'proxy_secret_missing', emailHash, Date.now() - startedAt);
+    return jsonResponse(
+      {
+        error: 'registration_unavailable',
+        message: 'Registration is temporarily unavailable. Please try again shortly.',
+      },
+      503,
+    );
+  }
+
   if (parsedBody.signup_source === 'ui') {
     const token = parsedBody['cf-turnstile-response'];
     if (!token) {
@@ -1067,28 +1094,11 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   upstreamHeaders.set('x-forwarded-for', clientIp);
   upstreamHeaders.set('x-forwarded-host', new URL(request.url).host);
   upstreamHeaders.set('x-forwarded-proto', new URL(request.url).protocol.replace(':', ''));
-  // Authenticate to register-agent with the shared secret. There is NO fallback:
-  // register-agent accepts ONLY DMV_PROXY_SECRET (the legacy `v1` constant was
-  // retired 2026-05-29), so a missing secret would make every forward 403 at its
-  // gate. Fail loud — log + return 503 — instead of silently forwarding a doomed
-  // request (which would otherwise read as a generic upstream failure). See
-  // AUTH_DMV.md.
-  if (!env.DMV_PROXY_SECRET) {
-    console.error(
-      '[register] DMV_PROXY_SECRET is not configured on the worker — refusing to ' +
-        'forward to register-agent (it would be rejected at the x-dmv-proxy gate). ' +
-        'Set the Cloudflare Worker secret DMV_PROXY_SECRET.',
-    );
-    emitRegisterAnalytics(env, 'proxy_secret_missing', emailHash, Date.now() - startedAt);
-    return jsonResponse(
-      {
-        error: 'registration_unavailable',
-        message: 'Registration is temporarily unavailable. Please try again shortly.',
-      },
-      503,
-    );
-  }
-  upstreamHeaders.set('x-dmv-proxy', env.DMV_PROXY_SECRET);
+  // Shared secret (already validated near the top of handleRegister — proxySecret
+  // is guaranteed present here, so this never sends an empty/`v1` value).
+  // register-agent accepts ONLY this value; the legacy public `v1` constant was
+  // retired 2026-05-29. See AUTH_DMV.md.
+  upstreamHeaders.set('x-dmv-proxy', proxySecret);
 
   const upstreamBody = {
     agent_name: parsedBody.agent_name,
