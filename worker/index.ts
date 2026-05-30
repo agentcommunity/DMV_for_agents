@@ -1067,9 +1067,28 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   upstreamHeaders.set('x-forwarded-for', clientIp);
   upstreamHeaders.set('x-forwarded-host', new URL(request.url).host);
   upstreamHeaders.set('x-forwarded-proto', new URL(request.url).protocol.replace(':', ''));
-  // Send the shared secret; fall back to legacy `v1` until the Cloudflare secret
-  // is set (register-agent accepts both during the grace window). See AUTH_DMV.md.
-  upstreamHeaders.set('x-dmv-proxy', env.DMV_PROXY_SECRET ?? 'v1');
+  // Authenticate to register-agent with the shared secret. There is NO fallback:
+  // register-agent accepts ONLY DMV_PROXY_SECRET (the legacy `v1` constant was
+  // retired 2026-05-29), so a missing secret would make every forward 403 at its
+  // gate. Fail loud — log + return 503 — instead of silently forwarding a doomed
+  // request (which would otherwise read as a generic upstream failure). See
+  // AUTH_DMV.md.
+  if (!env.DMV_PROXY_SECRET) {
+    console.error(
+      '[register] DMV_PROXY_SECRET is not configured on the worker — refusing to ' +
+        'forward to register-agent (it would be rejected at the x-dmv-proxy gate). ' +
+        'Set the Cloudflare Worker secret DMV_PROXY_SECRET.',
+    );
+    emitRegisterAnalytics(env, 'proxy_secret_missing', emailHash, Date.now() - startedAt);
+    return jsonResponse(
+      {
+        error: 'registration_unavailable',
+        message: 'Registration is temporarily unavailable. Please try again shortly.',
+      },
+      503,
+    );
+  }
+  upstreamHeaders.set('x-dmv-proxy', env.DMV_PROXY_SECRET);
 
   const upstreamBody = {
     agent_name: parsedBody.agent_name,
