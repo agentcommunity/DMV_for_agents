@@ -226,7 +226,7 @@ verifyCertificateId('MESA-DD6-660J'); // true
 
 ### POST /api/register
 
-The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP clients in this package POST to `https://dmv.agentcommunity.org/api/register` directly. The legacy direct path to `/register-agent` on Supabase still works for older client versions but is scheduled to close.
+The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP clients in this package POST to `https://dmv.agentcommunity.org/api/register` directly. The legacy direct path to `/register-agent` on Supabase was **closed 2026-05-29** — it now returns 403 `direct_access_deprecated`. Always go through `https://dmv.agentcommunity.org/api/register`; update to the latest `dmv-agent` if you see that error.
 
 ```json
 {

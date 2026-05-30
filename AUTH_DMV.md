@@ -163,7 +163,7 @@ The agent (or its operator) receives a **certificate email** (holographic card +
 
 ## Rate Limiting Architecture
 
-The Cloudflare Worker is the single anti-abuse choke point. The Supabase edge function trusts that anything reaching it has already cleared the worker's gates (with one exception: a temporary direct-Supabase bypass for legacy CLI versions, scheduled to close once adoption of the new CLI is high enough).
+The Cloudflare Worker is the single anti-abuse choke point. The Supabase edge function trusts that anything reaching it has already cleared the worker's gates, and enforces that trust with the `x-dmv-proxy` shared-secret gate: it accepts only requests carrying the `DMV_PROXY_SECRET` value the worker sets (constant-time compared, fail-closed if unset). The earlier temporary direct-Supabase bypass for legacy CLI versions was **closed 2026-05-29** — the public `v1` constant is retired and any direct-to-Supabase call now returns 403 `direct_access_deprecated`.
 
 Five effective layers on the register path, ordered cheapest-to-most-expensive:
 
