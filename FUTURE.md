@@ -18,7 +18,7 @@ Browser, CLI, and MCP registration all converge on the worker `/api/register` en
 
 Design walked back from the original Option E plan (which over-coupled DMV to PAGE) per `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md`. The handoff prompt is the source of truth for all coupling decisions.
 
-**Still open:** closing the direct-Supabase bypass for legacy CLI versions. `register-agent` currently still accepts direct calls; gating it on an `x-dmv-proxy: v1` header set by the worker is tracked under "Known gaps" in `CLOUDFLARE.md`. Schedule depends on adoption of the new `@agentcommunity/dmv-agent` CLI version.
+**Direct-Supabase bypass — closed 2026-05-29.** `register-agent` no longer accepts direct calls: the worker sets `x-dmv-proxy: <DMV_PROXY_SECRET>` (a shared secret) and the function accepts only that secret (constant-time compared, fail-closed if unset). The retired public `v1` constant and any direct-to-Supabase call now return 403 `direct_access_deprecated`. See "Known gaps" in `CLOUDFLARE.md`.
 
 ---
 

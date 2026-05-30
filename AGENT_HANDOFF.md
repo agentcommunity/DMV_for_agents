@@ -9,7 +9,8 @@ DMV worker         https://dmv.agentcommunity.org         /api/register live end
                                                            Turnstile + shared CF rate limits + KV cooldown
                                                            all verified with real browser signup 2026-04-09
 
-DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy: v1 header gate active
+DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate active (DMV_PROXY_SECRET shared secret;
+                                                           public v1 constant retired 2026-05-29, now 403)
                                                            Upstash removed
                                                            status NOT set on INSERT (DB default applies)
                                                            MUST be deployed with --no-verify-jwt
@@ -24,7 +25,7 @@ PAGE main          shared Supabase project                 hardened independentl
 
 ## The hardening arc, in one paragraph
 
-Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentCommunity_PAGE`) → forward to Supabase `register-agent` edge function with `x-dmv-proxy: v1` header. CLI/MCP path: validate JSON → require `machine_fingerprint` → same shared limiters → DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`, key `dmv:register:fingerprint:<sha256>`) → forward. CAPTCHA always runs before shared counters so invalid tokens can't burn quota. Supabase edge function verifies the `x-dmv-proxy` header (rejecting direct-to-Supabase calls with 403 `direct_access_deprecated`), validates input again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set — **crucially, not setting `status`**, because the PAGE schema uses `certificate_id IS NOT NULL` as the DMV-row marker (see the quirks section below).
+Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentCommunity_PAGE`) → forward to Supabase `register-agent` edge function with the `x-dmv-proxy` header set to the `DMV_PROXY_SECRET` shared secret (the public `v1` constant was retired 2026-05-29). CLI/MCP path: validate JSON → require `machine_fingerprint` → same shared limiters → DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`, key `dmv:register:fingerprint:<sha256>`) → forward. CAPTCHA always runs before shared counters so invalid tokens can't burn quota. Supabase edge function verifies the `x-dmv-proxy` header (rejecting direct-to-Supabase calls with 403 `direct_access_deprecated`), validates input again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set — **crucially, not setting `status`**, because the PAGE schema uses `certificate_id IS NOT NULL` as the DMV-row marker (see the quirks section below).
 
 ## Quirks — things that bit us, don't re-learn the hard way
 
@@ -34,7 +35,7 @@ Browser / CLI / MCP / JS API registration all converge on `/api/register` on the
 supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
-The DMV worker does **not** forward an `Authorization` header (the `REGISTER_FORWARD_REQUEST_HEADERS` allow-list in `worker/index.ts:934` only carries content-type, accept, accept-encoding, accept-language, user-agent, plus worker-set x-forwarded-* headers and `x-dmv-proxy: v1`). If you deploy without `--no-verify-jwt`, Supabase's platform-level JWT verification layer fires first and the worker can't reach the function → every real registration gets `401 Missing authorization header`. The `x-dmv-proxy` gate inside the function is the actual anti-bypass defense; Supabase's JWT layer would just break the worker forwarding without adding real security.
+The DMV worker does **not** forward an `Authorization` header (the `REGISTER_FORWARD_REQUEST_HEADERS` allow-list in `worker/index.ts:934` only carries content-type, accept, accept-encoding, accept-language, user-agent, plus worker-set x-forwarded-* headers and `x-dmv-proxy` set to the `DMV_PROXY_SECRET` shared secret). If you deploy without `--no-verify-jwt`, Supabase's platform-level JWT verification layer fires first and the worker can't reach the function → every real registration gets `401 Missing authorization header`. The `x-dmv-proxy` gate inside the function is the actual anti-bypass defense; Supabase's JWT layer would just break the worker forwarding without adding real security.
 
 ### 2. DMV rows are marked by `certificate_id IS NOT NULL`, NOT by status
 
@@ -99,7 +100,7 @@ Nothing open. Everything critical shipped and verified in production.
 - Don't `wrangler secret put` on `dmv-agentcommunity` (see quirk #3) — use the dashboard
 - Don't `npm publish` from the DMV repo root (see quirk #7) — always `cd packages/dmv-agent` first
 - Don't push PAGE changes to main without reviewing them — PAGE auto-deploys via CF git integration
-- Don't remove the `x-dmv-proxy` gate without a replacement — it's the only thing closing the direct-Supabase bypass
+- Don't remove the `x-dmv-proxy` gate or weaken it back to a public constant — it's now secret-backed (`DMV_PROXY_SECRET`, constant-time compared, fail-closed) and is the only thing closing the direct-Supabase bypass
 
 ## Reference anchors
 
@@ -151,7 +152,11 @@ curl -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agen
 
 curl -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
   -H 'Content-Type: application/json' -H 'x-dmv-proxy: v1' -d '{}'
-# Expect: 400 agent_name is required
+# Expect: 403 direct_access_deprecated
+# The live gate value is now the DMV_PROXY_SECRET shared secret (set on both the
+# Cloudflare Worker and the Supabase project). The public `v1` constant was retired
+# 2026-05-29, so this curl can no longer reach validation — only the worker, which
+# forwards the real secret, gets through.
 ```
 
 **Smoke test the worker proxy:**

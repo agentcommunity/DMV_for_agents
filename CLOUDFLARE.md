@@ -301,15 +301,13 @@ open test-harness/output/index.html
 
 ## Known gaps (separate sprints)
 
-- **Closing the direct-Supabase bypass** — `/api/register` is now the
-  canonical worker-proxied path for browser, CLI, and MCP traffic, BUT
-  `register-agent` on Supabase still accepts direct calls from older
-  CLI versions and any third-party client that hits the Supabase URL
-  directly. The bypass is intentional for now (graceful migration of
-  pinned `bunx dmv-agent` versions); closing it requires
-  `register-agent` to require an `x-dmv-proxy: v1` header set by the
-  worker. Land after enough adoption of the new CLI version that the
-  drop-off cost is acceptable.
+- **Closing the direct-Supabase bypass** — *Closed 2026-05-29.* Replaced
+  with the `DMV_PROXY_SECRET` shared-secret gate (constant-time compared,
+  fail-closed if unset): the worker sets `x-dmv-proxy: <DMV_PROXY_SECRET>`
+  and `register-agent` accepts only that secret. The retired public `v1`
+  constant and any direct-to-Supabase call now return 403
+  `direct_access_deprecated`. `/api/register` on the worker is the only
+  path that reaches validation.
 
 - **DMV-branded OTP email flow** — custom branding via
   `admin.generateLink()` + Resend direct send is future work. See

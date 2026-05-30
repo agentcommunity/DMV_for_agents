@@ -96,15 +96,29 @@ curl -X POST https://dmv.agentcommunity.org/api/register \
     "signup_source": "cli",
     "machine_fingerprint": "test_fingerprint_64chars_long_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   }'
-
-# Legacy direct (still works for backwards compat, scheduled to close):
-curl -X POST \
-  https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_name": "test-deploy", "email": "test@example.com"}'
 ```
 
 Expected: `201` with `certificate_id`, `agent_name`, `domain`, `registration_type`, `permalink_url`, `badge_url`, `badge_card_url`, `message`.
+
+Direct-to-Supabase calls no longer work — they return 403 (see the post-deploy secret-gate check below).
+
+### Post-deploy verification — secret gate
+
+The `x-dmv-proxy` secret gate is the only defense against the direct-Supabase bypass, and there's no automated test for it. After every `register-agent` deploy, run both curls:
+
+```bash
+# No header → rejected
+curl -i -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
+  -H 'Content-Type: application/json' -d '{}'
+# Expect: 403 (direct_access_deprecated)
+
+# Retired public constant → rejected
+curl -i -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
+  -H 'Content-Type: application/json' -H 'x-dmv-proxy: v1' -d '{}'
+# Expect: 403 (the `v1` constant was retired 2026-05-29; only the DMV_PROXY_SECRET shared secret is accepted)
+```
+
+A legit registration must still succeed through the worker at `https://dmv.agentcommunity.org/api/register`, which forwards the real `DMV_PROXY_SECRET`. If either curl above returns anything other than 403, the secret gate is misconfigured (e.g. `DMV_PROXY_SECRET` unset on the Supabase project) — do not consider the deploy complete.
 
 ### Test error cases
 
