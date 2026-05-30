@@ -91,20 +91,15 @@ function getCorsHeaders(req: Request) {
 // (see worker/index.ts handleRegister). Any direct POST to this Supabase URL
 // without a matching header value is rejected with 403.
 //
-// TEMPORARY GRACE WINDOW (zero-downtime secret rollout): we accept the request if
-// the header equals EITHER the legacy public constant `'v1'` OR the value of the
-// `DMV_PROXY_SECRET` env var (constant-time compared). This lets us deploy this
-// accept-both function FIRST while the worker still sends `'v1'`, then set the
-// shared secret on both platforms, with no window where real registrations 403.
-// The `'v1'` constant is public (committed in source) so it is NOT a real defense
-// on its own — replaying it is trivial. Once the worker is confirmed sending the
-// secret (Cloudflare secret set), the legacy branch must be removed so the public
-// constant can no longer be replayed. See AUTH_DMV.md and the PHASE C marker below.
+// The header value is constant-time compared (timingSafeStrEqual) against the
+// shared secret. The legacy public `'v1'` constant was removed once the worker was
+// confirmed sending the secret — the zero-downtime rollout completed 2026-05-29, so
+// `'v1'` can no longer be replayed to reach this function. If DMV_PROXY_SECRET is
+// unset, the gate fails closed (rejects everything). See AUTH_DMV.md.
 //
 // OPTIONS preflights are exempt (browsers don't send custom headers on preflight,
 // and we still want CORS to work for any future debugging).
 const DMV_PROXY_HEADER = 'x-dmv-proxy'
-const DMV_PROXY_VERSION = 'v1'
 
 // Constant-time string comparison (defense-in-depth against timing oracles on the
 // secret branch). Hand-rolled: no early return on first differing char; safely
@@ -124,11 +119,11 @@ Deno.serve(async (req) => {
 
   const proxyHeader = req.headers.get(DMV_PROXY_HEADER)
   const proxySecret = Deno.env.get('DMV_PROXY_SECRET')
-  // PHASE C: remove the legacy v1 branch once worker confirmed sending the secret
-  const legacyOk = proxyHeader === DMV_PROXY_VERSION
-  // `!!proxySecret` guard: an unset DMV_PROXY_SECRET can NEVER accept a request.
+  // `!!proxySecret` guard: an unset DMV_PROXY_SECRET can NEVER accept a request
+  // (fail closed). Constant-time compare against the shared secret only — the
+  // legacy public 'v1' constant is no longer accepted (rollout complete).
   const secretOk = !!proxySecret && timingSafeStrEqual(proxyHeader, proxySecret)
-  if (!legacyOk && !secretOk) {
+  if (!secretOk) {
     return new Response(
       JSON.stringify({
         error: 'direct_access_deprecated',

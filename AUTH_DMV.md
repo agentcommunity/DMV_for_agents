@@ -60,10 +60,10 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │  Supabase URL that would bypass the worker. The       │
       │  header value is the shared DMV_PROXY_SECRET (set on   │
       │  both platforms), replacing the old public `v1`        │
-      │  constant. During the rollout grace window the gate    │
-      │  accepts BOTH `v1` and the secret; Phase C removes the │
-      │  `v1` branch once the worker is confirmed sending the  │
-      │  secret.                                              │
+      │  constant. Rollout completed 2026-05-29: Phase C      │
+      │  removed the `v1` branch, so replaying the public     │
+      │  constant now returns 403. Fails closed (rejects all) │
+      │  if DMV_PROXY_SECRET is unset.                         │
       └──────────────────────┬────────────────────────────────┘
                              │
                              │ DB trigger fires async
@@ -388,7 +388,7 @@ Everything below is shipped in this repo and ready to deploy:
 | DMV-local KV fingerprint cooldown | Done | `worker/rate-limit-kv.ts`, `REGISTER_COOLDOWN_KV` binding |
 | Upstash Redis REMOVED from edge fn | Done | `supabase/functions/register-agent/index.ts` (-90 lines) |
 | Lifetime cap (5/12 per email) | Done | `supabase/functions/register-agent/index.ts` |
-| `x-dmv-proxy: v1` gate on `register-agent` (direct-access block) | Done | `supabase/functions/register-agent/index.ts` — requires the worker-set header on every non-OPTIONS request |
+| `x-dmv-proxy` shared-secret gate on `register-agent` (direct-access block) | Done | `supabase/functions/register-agent/index.ts` — requires the worker-set `DMV_PROXY_SECRET` header value (constant-time compared) on every non-OPTIONS request; the public `v1` constant was retired 2026-05-29 |
 | DMV uses DB default for `status` (no `provisional_dmv`) | Done | `supabase/functions/register-agent/index.ts` — commit `8d73924` removed the stale status line |
 | CORS restricted to known origins | Done | Same file |
 | Input length validation (all fields) | Done | Same file |
@@ -473,4 +473,4 @@ All of the above is **complete as of 2026-04-08**. PAGE-side follow-ups (member 
 6. Test rate limiting (shared CF limiters): register 6 times rapidly with the same email → 6th should return `429 rate_limited` from the worker
 7. Test lifetime cap (Supabase DB): register 6 unique agents with the same email → 6th should return `403` with `error: You've maxed out your quota on this email: up to 5 agent identities. Members who've signed the endorsement letter can pre-register up to 12.`
 8. Test direct-access gate: `curl -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent -H 'Content-Type: application/json' -d '{}'` → should return `403 direct_access_deprecated`
-9. Test worker forwarding: same curl but with `-H 'x-dmv-proxy: v1'` → should return `400 agent_name is required` (gate passes, validation fires)
+9. Test the legacy constant is retired: same curl but with `-H 'x-dmv-proxy: v1'` → should return `403` (the public `v1` constant was removed in the 2026-05-29 secret rollout; only the worker's `DMV_PROXY_SECRET` header value is accepted now)
