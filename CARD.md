@@ -143,18 +143,26 @@ The holo effect uses CSS overlays, not GLSL shaders. Four overlay divs sit on to
 | `--pointer-from-center` | 0–1 | Distance from center (sparkle/glare intensity) |
 | `--holo-intensity` | 0–1 | Set by rarity tier |
 
-## Rarity System
+## Tier System
 
 Computed from `mixHash(fnv1a(name), 0x27d4eb2f) % 100`:
 
-| Rarity | Roll | Drop Rate | Intensity | Stars | Visual |
+| Tier | Roll | Name Share | Intensity | Stars | Visual |
 |--------|------|-----------|-----------|-------|--------|
 | STANDARD | 0–49 | 50% | 0.35 | 40 | Subtle shimmer |
 | ENHANCED | 50–79 | 30% | 0.55 | 70 | Noticeable rainbow |
 | RARE | 80–94 | 15% | 0.75 | 100 | Strong prismatic + seal |
 | LEGENDARY | 95–99 | 5% | 0.95 | 150 | Maximum sparkle + seal |
 
-Rarity affects: holo intensity, star field density, rarity badge, rarity seal (RARE+).
+Tier affects: holo intensity, star field density, tier badge, tier seal (RARE+).
+
+**Framing note (user-facing copy):** the tier is a deterministic property of the
+name string, not a chance roll — anyone can compute which names hash LEGENDARY,
+so it cannot carry real scarcity. Don't use luck/chase language ("drop rate",
+"roll", "try for a rarer card") in user-facing surfaces; present the card as the
+name's fingerprint ("every card is one of a kind"). Real scarcity belongs to
+earned signals: the registration queue ticket number (`queue_number` from
+register-agent) and, later, AID-live / renewal status.
 
 ## Card Layout (Landscape 880x630)
 

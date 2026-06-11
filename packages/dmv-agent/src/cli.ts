@@ -298,6 +298,7 @@ async function confirmAndSubmit(fields: CollectedFields): Promise<void> {
       domain: result.domain,
       email: fields.email,
       viewUrl,
+      queueNumber: result.queueNumber,
     });
 
     // ASCII text card — paste in READMEs or memory files
@@ -397,6 +398,7 @@ async function nonInteractiveRegister(flags: Record<string, string>): Promise<vo
       domain: result.domain,
       email,
       viewUrl,
+      queueNumber: result.queueNumber,
     });
 
     // ASCII text card — paste in READMEs or memory files

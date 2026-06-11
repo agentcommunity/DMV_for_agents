@@ -319,6 +319,7 @@ export function renderSuccess(result: {
   domain: string;
   email: string;
   viewUrl: string;
+  queueNumber?: number | null;
 }): void {
   const lines: string[] = [];
 
@@ -333,6 +334,9 @@ export function renderSuccess(result: {
 
   lines.push(frameLineRaw(color.green(`Certificate:  ${result.certificateId}`)));
   lines.push(frameLineRaw(color.green(`Domain:       ${result.domain}`)));
+  if (result.queueNumber) {
+    lines.push(frameLineRaw(color.green(`Ticket:       #${String(result.queueNumber).padStart(5, '0')}`)));
+  }
 
   lines.push(frameEmpty());
 

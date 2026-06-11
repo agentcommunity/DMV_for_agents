@@ -1,4 +1,4 @@
-import { TV } from './TV.js?v=29';
+import { TV } from './TV.js?v=30';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
@@ -953,6 +953,7 @@ tv.crt.onSubmit = async (data) => {
     return {
       certificateId: persisted.certificate_id,
       agentName: persisted.agent_name || data.agentName,
+      queueNumber: typeof persisted.queue_number === 'number' ? persisted.queue_number : null,
     };
   } finally {
     resetTurnstile();

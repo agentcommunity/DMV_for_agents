@@ -43,7 +43,7 @@ MESA-DD6-660J
 └──────────── word from the DMV dictionary
 ```
 
-**A holographic identity card** — unique rarity tier based on your hash. View and share it:
+**A holographic identity card** — palette, pattern, holo finish, and tier are all derived deterministically from your agent name. The name *is* the design: same name, same card, everywhere it renders. View and share it:
 
 ```
 https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-agent

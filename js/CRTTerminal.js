@@ -970,6 +970,9 @@ export class CRTTerminal {
         if (result?.certificateId) {
           this._certificateId = result.certificateId;
         }
+        if (typeof result?.queueNumber === 'number' && result.queueNumber > 0) {
+          this._queueNumber = result.queueNumber;
+        }
       }
       this.startProcessing();
     } catch (err) {
@@ -1278,6 +1281,12 @@ export class CRTTerminal {
         // Type
         const typePad = bw - 8 - typeLabel.length;
         this.lines.push({ text: `  │  TYPE: ${typeLabel}${' '.repeat(Math.max(0, typePad))}│`, color: this.textColor, typed: 0, answerStart: 10 });
+        // Queue ticket — global pre-registration position, when the server sent one
+        if (this._queueNumber) {
+          const ticket = `#${String(this._queueNumber).padStart(5, '0')}`;
+          const ticketPad = bw - 10 - ticket.length;
+          this.lines.push({ text: `  │  TICKET: ${ticket}${' '.repeat(Math.max(0, ticketPad))}│`, color: this.textColor, typed: 0, answerStart: 12 });
+        }
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
         // Disclaimer
         const disclaim = 'Pre-registration certificate.';
