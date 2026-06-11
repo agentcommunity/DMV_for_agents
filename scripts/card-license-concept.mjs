@@ -22,7 +22,7 @@ const rendererPath = join(here, '..', 'container', 'src', 'card-renderer.js');
 const qrPath = join(here, '..', 'container', 'src', 'qr-encode.js');
 
 const {
-  createCanvas, CardDNA, PALETTES, RARITIES, generateCertId, withAlpha, CW, CH,
+  createCanvas, CardDNA, PALETTES, RARITIES, HOLOS, generateCertId, withAlpha, CW, CH,
 } = await import(rendererPath);
 const { generateQRMatrix } = await import(qrPath);
 
@@ -156,41 +156,187 @@ function drawMicroprint(ctx, x, y, w, pal) {
   ctx.restore();
 }
 
-// ── Machine signature: hash-seeded scrawl (decaying double-sine) ──
-function drawSignature(ctx, x, y, w, seed, color) {
-  const rand = seededRand(seed);
-  const f1 = 0.055 + rand() * 0.03;
-  const f2 = 0.13 + rand() * 0.06;
-  const p1 = rand() * Math.PI * 2;
-  const p2 = rand() * Math.PI * 2;
-  const tilt = (rand() - 0.5) * 0.12; // slight baseline drift
+// ── Machine signature: the bearer signs with its own bytes ──
+//
+// A logic-analyzer trace of the name's UTF-8 bits. Deterministic by
+// construction — the signature IS the unique string, not a drawing of one.
+// Byte boundaries get tick marks and the decoded character underneath.
+function drawSignature(ctx, x, y, w, name, pal) {
+  const bytes = Array.from(new TextEncoder().encode(name));
+  const bits = [];
+  for (const b of bytes) for (let i = 7; i >= 0; i--) bits.push((b >> i) & 1);
+
+  const bitW = Math.max(3.5, Math.min(11, w / bits.length));
+  const drawnBits = Math.min(bits.length, Math.floor(w / bitW));
+  const truncated = drawnBits < bits.length;
+  const hi = y - 16, lo = y + 4;
+
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (const [lw, alpha] of [[2.1, 0.9], [0.9, 0.45]]) {
-    ctx.lineWidth = lw;
-    ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    for (let i = 0; i <= 60; i++) {
-      const t = i / 60;
-      const px = x + t * w;
-      // tall initial letterform, settling into a scrawl that trails off
-      const amp = 26 * (1 - t * 0.75) * (t < 0.06 ? t / 0.06 : 1);
-      const py = y + t * w * tilt
-        + Math.sin(px * f1 + p1) * amp
-        + Math.sin(px * f2 + p2) * amp * 0.45;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  // fade the tail out when a long name doesn't fit
+  if (truncated) {
+    const grad = ctx.createLinearGradient(x, 0, x + drawnBits * bitW, 0);
+    grad.addColorStop(0, pal.sec);
+    grad.addColorStop(0.8, pal.sec);
+    grad.addColorStop(1, withAlpha(pal.sec, 0));
+    ctx.strokeStyle = grad;
+  } else {
+    ctx.strokeStyle = pal.sec;
+  }
+  ctx.lineWidth = 1.6;
+  ctx.lineJoin = 'miter';
+  ctx.shadowColor = pal.glow;
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  let cx = x;
+  ctx.moveTo(cx, bits[0] ? hi : lo);
+  for (let i = 0; i < drawnBits; i++) {
+    const rail = bits[i] ? hi : lo;
+    if (i > 0 && bits[i] !== bits[i - 1]) ctx.lineTo(cx, rail); // edge
+    ctx.lineTo(cx + bitW, rail);
+    cx += bitW;
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // byte-boundary ticks + decoded characters (the string, in the signal)
+  const byteW = bitW * 8;
+  const drawnBytes = Math.floor(drawnBits / 8);
+  ctx.fillStyle = withAlpha(pal.acc, 0.55);
+  for (let i = 0; i <= drawnBytes; i++) {
+    ctx.fillRect(x + i * byteW, lo + 6, 1, 4);
+  }
+  if (byteW >= 26) {
+    ctx.font = `9px ${FONT}`;
+    ctx.textAlign = 'center';
+    for (let i = 0; i < drawnBytes; i++) {
+      ctx.fillStyle = withAlpha(pal.acc, 0.8);
+      ctx.fillText(name[i] ?? '', x + i * byteW + byteW / 2, lo + 16);
     }
+    ctx.textAlign = 'left';
+  }
+  ctx.restore();
+
+  const hex = bytes.map((b) => b.toString(16).toUpperCase().padStart(2, '0'));
+  return { hex, truncated };
+}
+
+// ── Epic borders: 4 DNA-keyed styles, multi-color, tier-scaled glow ──
+const BORDER_NAMES = ['ENGRAVED', 'CIRCUIT', 'FILIGREE', 'GLITCH'];
+
+function drawBorder(ctx, dna, pal, rarity) {
+  const glow = 4 + rarity.intensity * 14;
+  const inset = 8;
+  const style = dna.border;
+  ctx.save();
+
+  if (style === 0) {
+    // ENGRAVED — double frame, accent midpoint ticks, heavy corner brackets
+    ctx.strokeStyle = withAlpha(pal.pri, 0.4);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(inset, inset, CW - inset * 2, CH - inset * 2);
+    ctx.strokeStyle = withAlpha(pal.pri, 0.18);
+    ctx.strokeRect(inset + 5, inset + 5, CW - (inset + 5) * 2, CH - (inset + 5) * 2);
+    ctx.strokeStyle = withAlpha(pal.acc, 0.8);
+    ctx.lineWidth = 2;
+    for (const [mx, my, horiz] of [[CW / 2, inset, 1], [CW / 2, CH - inset, 1], [inset, CH / 2, 0], [CW - inset, CH / 2, 0]]) {
+      ctx.beginPath();
+      if (horiz) { ctx.moveTo(mx - 14, my); ctx.lineTo(mx + 14, my); }
+      else { ctx.moveTo(mx, my - 14); ctx.lineTo(mx, my + 14); }
+      ctx.stroke();
+    }
+  } else if (style === 1) {
+    // CIRCUIT — PCB traces running along the frame with pads and vias
+    const rand = seededRand(dna.borderSeed);
+    ctx.strokeStyle = withAlpha(pal.pri, 0.45);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(inset, inset, CW - inset * 2, CH - inset * 2);
+    const trace = (x1, y1, x2, y2, jog) => {
+      ctx.strokeStyle = withAlpha(pal.pri, 0.7);
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      if (Math.abs(x2 - x1) > Math.abs(y2 - y1)) { ctx.lineTo(mx, y1); ctx.lineTo(mx, y1 + jog); ctx.lineTo(mx + jog, y1 + jog); ctx.lineTo(x2, y1 + jog); }
+      else { ctx.lineTo(x1, my); ctx.lineTo(x1 + jog, my); ctx.lineTo(x1 + jog, my + jog); ctx.lineTo(x1 + jog, y2); }
+      ctx.stroke();
+      // pad + via
+      ctx.fillStyle = pal.acc;
+      ctx.fillRect(x2 - 2.5, (Math.abs(x2 - x1) > Math.abs(y2 - y1) ? y1 + jog : y2) - 2.5, 5, 5);
+      ctx.strokeStyle = withAlpha(pal.acc, 0.9);
+      ctx.beginPath(); ctx.arc(x1, y1, 2.5, 0, Math.PI * 2); ctx.stroke();
+    };
+    for (let i = 0; i < 5; i++) {
+      const t = 0.12 + rand() * 0.76;
+      trace(CW * t, inset + 4, CW * (t + 0.04 + rand() * 0.05), inset + 4, 5 + rand() * 4 | 0);
+      const b = 0.12 + rand() * 0.76;
+      trace(CW * b, CH - inset - 4, CW * (b + 0.04 + rand() * 0.05), CH - inset - 4, -(5 + rand() * 4 | 0));
+    }
+    for (let i = 0; i < 3; i++) {
+      const t = 0.18 + rand() * 0.6;
+      trace(inset + 4, CH * t, inset + 4, CH * (t + 0.06 + rand() * 0.06), 5 + rand() * 4 | 0);
+      trace(CW - inset - 4, CH * t, CW - inset - 4, CH * (t + 0.06 + rand() * 0.06), -(5 + rand() * 4 | 0));
+    }
+  } else if (style === 2) {
+    // FILIGREE — double frame with nested corner arcs and edge diamonds
+    ctx.strokeStyle = withAlpha(pal.pri, 0.45);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(inset, inset, CW - inset * 2, CH - inset * 2);
+    ctx.strokeStyle = withAlpha(pal.sec, 0.25);
+    ctx.strokeRect(inset + 4, inset + 4, CW - (inset + 4) * 2, CH - (inset + 4) * 2);
+    for (const [cx, cy, sx, sy] of [[inset, inset, 1, 1], [CW - inset, inset, -1, 1], [inset, CH - inset, 1, -1], [CW - inset, CH - inset, -1, -1]]) {
+      for (let r = 14; r <= 38; r += 12) {
+        ctx.strokeStyle = withAlpha(r === 26 ? pal.acc : pal.pri, 0.7 - r * 0.008);
+        ctx.lineWidth = r === 26 ? 1.6 : 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, sx > 0 ? (sy > 0 ? 0 : -Math.PI / 2) : (sy > 0 ? Math.PI / 2 : Math.PI),
+          sx > 0 ? (sy > 0 ? Math.PI / 2 : 0) : (sy > 0 ? Math.PI : -Math.PI / 2));
+        ctx.stroke();
+      }
+      ctx.fillStyle = pal.acc;
+      ctx.beginPath();
+      ctx.arc(cx + sx * 46, cy + sy * 8, 2, 0, Math.PI * 2);
+      ctx.arc(cx + sx * 8, cy + sy * 46, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const [mx, my] of [[CW / 2, inset], [CW / 2, CH - inset], [inset, CH / 2], [CW - inset, CH / 2]]) {
+      ctx.fillStyle = withAlpha(pal.sec, 0.85);
+      ctx.beginPath();
+      ctx.moveTo(mx, my - 6); ctx.lineTo(mx + 5, my); ctx.lineTo(mx, my + 6); ctx.lineTo(mx - 5, my);
+      ctx.closePath(); ctx.fill();
+    }
+  } else {
+    // GLITCH — RGB-split frame with seeded dropouts and slice marks
+    const rand = seededRand(dna.borderSeed);
+    for (const [color, dx, alpha] of [[pal.acc2, -2, 0.5], [pal.acc, 2, 0.5], [pal.pri, 0, 0.9]]) {
+      ctx.strokeStyle = withAlpha(color, alpha);
+      ctx.lineWidth = dx === 0 ? 1.4 : 1;
+      ctx.setLineDash([26 + rand() * 30, 4 + rand() * 10, 60 + rand() * 40, 6]);
+      ctx.lineDashOffset = rand() * 80;
+      ctx.strokeRect(inset + dx, inset, CW - inset * 2, CH - inset * 2);
+    }
+    ctx.setLineDash([]);
+    for (let i = 0; i < 7; i++) {
+      const edge = rand();
+      const len = 10 + rand() * 26;
+      ctx.fillStyle = withAlpha(rand() > 0.5 ? pal.acc : pal.acc2, 0.7);
+      if (edge < 0.5) ctx.fillRect(20 + rand() * (CW - 60), (edge < 0.25 ? inset : CH - inset) - 1, len, 2.5);
+      else ctx.fillRect((edge < 0.75 ? inset : CW - inset) - 1, 20 + rand() * (CH - 60), 2.5, len);
+    }
+  }
+
+  // corner brackets — shared brand mark on every style, tier-scaled glow
+  ctx.shadowColor = pal.glow;
+  ctx.shadowBlur = glow;
+  ctx.strokeStyle = withAlpha(pal.pri, 0.9);
+  ctx.lineWidth = 2.5;
+  const B = 28;
+  for (const [cx, cy, dx, dy] of [[inset, inset, 1, 1], [CW - inset, inset, -1, 1], [inset, CH - inset, 1, -1], [CW - inset, CH - inset, -1, -1]]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + dx * B, cy);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx, cy + dy * B);
     ctx.stroke();
   }
-  // flourish underline
-  ctx.globalAlpha = 0.65;
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.08, y + 20);
-  ctx.quadraticCurveTo(x + w * 0.5, y + 27 + (rand() - 0.5) * 6, x + w * 0.85, y + 15);
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -300,6 +446,13 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   ctx.fillStyle = withAlpha(pal.sec, 0.5);
   ctx.textAlign = 'right';
   ctx.fillText('PRE-REGISTRATION', CW - 36, 62);
+  // DNA readout — the card states its own traits
+  ctx.font = `8px ${FONT}`;
+  ctx.fillStyle = withAlpha(pal.acc, 0.6);
+  ctx.fillText(
+    `DNA ${pal.name.toUpperCase()} / ${BORDER_NAMES[dna.border]} / ${HOLOS[dna.holo].name.toUpperCase()} FINISH`,
+    CW - 36, 76,
+  );
   ctx.textAlign = 'left';
 
   // ── portrait (bearer image) ──
@@ -402,14 +555,15 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   // microprint divider
   drawMicroprint(ctx, fx, fy + 8, fw, pal);
 
-  // ── signature ──
+  // ── signature: the bearer's own bytes as a logic trace ──
   const sigY = fy + 64;
-  drawSignature(ctx, fx, sigY, fw * 0.46, dna.borderSeed, pal.sec);
+  const sig = drawSignature(ctx, fx, sigY, fw * 0.52, name, pal);
   ctx.fillStyle = withAlpha(pal.sec, 0.4);
-  ctx.fillRect(fx, sigY + 30, fw * 0.5, 1);
+  ctx.fillRect(fx, sigY + 30, fw * 0.56, 1);
   ctx.font = `8px ${FONT}`;
   ctx.fillStyle = withAlpha(pal.sec, 0.45);
-  ctx.fillText('SIGNATURE OF BEARER', fx, sigY + 44);
+  const hexShown = sig.hex.slice(0, 10).join(' ') + (sig.hex.length > 10 ? ' …' : '');
+  ctx.fillText(`SIGNATURE OF BEARER · UTF-8 0x${hexShown}`, fx, sigY + 44);
 
   // seal overlapping the signature corner
   drawSeal(ctx, fx + fw - 78, sigY - 4, 72, pal, rarity.sym);
@@ -431,20 +585,8 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   ctx.fillText('dmv.agentcommunity.org', CW - 36, ftY + 28);
   ctx.textAlign = 'left';
 
-  // ── frame: outer border + corner brackets (brand continuity) ──
-  ctx.strokeStyle = withAlpha(pal.pri, 0.3);
-  ctx.lineWidth = 1;
-  ctx.strokeRect(8, 8, CW - 16, CH - 16);
-  ctx.strokeStyle = withAlpha(pal.pri, 0.8);
-  ctx.lineWidth = 2;
-  const B = 26;
-  for (const [cx, cy, dx, dy] of [[8, 8, 1, 1], [CW - 8, 8, -1, 1], [8, CH - 8, 1, -1], [CW - 8, CH - 8, -1, -1]]) {
-    ctx.beginPath();
-    ctx.moveTo(cx + dx * B, cy);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(cx, cy + dy * B);
-    ctx.stroke();
-  }
+  // ── frame: DNA-keyed epic border ──
+  drawBorder(ctx, dna, pal, rarity);
 
   // scanlines + vignette (CRT brand continuity, lighter than production)
   ctx.fillStyle = 'rgba(0,0,0,0.05)';
@@ -466,9 +608,20 @@ const samples = [
   { name: 'ghost', type: 'agent' }, // hashes LEGENDARY
 ];
 
+// make sure every border style appears in the demo set
+const covered = new Set(samples.map(({ name }) => new CardDNA(name).border));
+for (const candidate of ['oracle', 'cipher', 'vega', 'helix', 'lumen', 'drift', 'sol', 'echo', 'nova', 'pixel', 'quark', 'raven']) {
+  if (covered.size === 4) break;
+  const b = new CardDNA(candidate).border;
+  if (!covered.has(b)) {
+    covered.add(b);
+    samples.push({ name: candidate, type: 'agent' });
+  }
+}
+
 for (const { name, type } of samples) {
   const canvas = createCanvas(CW, CH);
-  const { rarity, pal } = renderLicenseCard(canvas, name, { accountType: type });
+  const { rarity, pal, dna } = renderLicenseCard(canvas, name, { accountType: type });
   writeFileSync(`/tmp/license-${name}.png`, canvas.toBuffer('image/png'));
-  console.log(`license-${name}.png  tier=${rarity.name}  palette=${pal.name}`);
+  console.log(`license-${name}.png  tier=${rarity.name}  palette=${pal.name}  border=${BORDER_NAMES[dna.border]}`);
 }
