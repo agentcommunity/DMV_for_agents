@@ -481,7 +481,7 @@ export class CRTTerminal {
         ctx.fillStyle = textColor;
         ctx.shadowColor = textColor;
         ctx.shadowBlur = this.glowBlur;
-        ctx.fillText('▶', x - 18, y + 14);
+        ctx.fillText('▶', x - 18, y + 10);
         ctx.shadowBlur = 0;
       }
 
@@ -489,10 +489,10 @@ export class CRTTerminal {
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
-      ctx.fillText(`  [${options[i].key}]  ${options[i].title}`, x + 12, y + 14);
+      ctx.fillText(`  [${options[i].key}]  ${options[i].title}`, x + 12, y + 10);
       ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
       ctx.fillStyle = this.dimColor;
-      ctx.fillText(`       ${options[i].subtitle}`, x + 12, y + 38);
+      ctx.fillText(`       ${options[i].subtitle}`, x + 12, y + 36);
       this._addTapTarget(options[i].action, x, y, boxWidth, boxHeight);
       ctx.shadowBlur = 0;
 
@@ -529,7 +529,7 @@ export class CRTTerminal {
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
-      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
+      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 13);
       ctx.shadowBlur = 0;
 
       this._addTapTarget(buttons[i].action, x, y, boxWidth, boxHeight);
@@ -562,7 +562,7 @@ export class CRTTerminal {
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
-      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
+      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 13);
       ctx.shadowBlur = 0;
 
       this._addTapTarget(i === 0 ? 'done_view' : 'done_share', x, y, boxWidth, boxHeight);
@@ -709,7 +709,7 @@ export class CRTTerminal {
 
   drawSubmitButton(ctx, startY) {
     const boxWidth = 340;
-    const boxHeight = 48;
+    const boxHeight = 56;
     const x = this.padding + 16;
     const isBusy = this.isSubmitting;
 
@@ -721,12 +721,12 @@ export class CRTTerminal {
     ctx.fillStyle = isBusy ? this.dimColor : this.headerColor;
     ctx.shadowColor = isBusy ? this.dimColor : this.headerColor;
     ctx.shadowBlur = this.glowBlur;
-    ctx.fillText(isBusy ? '  VERIFYING...' : '  SUBMIT REGISTRATION', x + 12, startY + 16);
+    ctx.fillText(isBusy ? '  VERIFYING...' : '  SUBMIT REGISTRATION', x + 12, startY + 10);
     ctx.shadowBlur = 0;
 
     ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText(isBusy ? '  Please wait' : '  Tap or press Enter', x + 12, startY + 34);
+    ctx.fillText(isBusy ? '  Please wait' : '  Tap or press Enter', x + 12, startY + 35);
 
     if (!isBusy) {
       this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
@@ -751,7 +751,7 @@ export class CRTTerminal {
       ctx.fillStyle = this.textColor;
       ctx.shadowColor = this.textColor;
       ctx.shadowBlur = this.glowBlur;
-      ctx.fillText('  NEXT \u25B8', x + 12, btnY + 14);
+      ctx.fillText('  NEXT \u25B8', x + 12, btnY + 11);
       ctx.shadowBlur = 0;
 
       this._addTapTarget('form_next', x, btnY, boxWidth, boxHeight);
@@ -785,12 +785,12 @@ export class CRTTerminal {
       ctx.fillStyle = this.textColor;
       ctx.shadowColor = this.textColor;
       ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
-      ctx.fillText(`  [${btn.key}] ${btn.title}`, bx + 8, y + 11);
+      ctx.fillText(`  [${btn.key}] ${btn.title}`, bx + 8, y + 9);
       ctx.shadowBlur = 0;
 
       ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
       ctx.fillStyle = this.dimColor;
-      ctx.fillText(`  ${btn.subtitle}`, bx + 8, y + 31);
+      ctx.fillText(`  ${btn.subtitle}`, bx + 8, y + 33);
 
       this._addTapTarget(btn.action, bx, y, boxWidth, boxHeight);
     }
