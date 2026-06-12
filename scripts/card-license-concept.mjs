@@ -206,11 +206,11 @@ function drawSignature(ctx, x, y, w, name, pal) {
     ctx.fillRect(x + i * byteW, lo + 6, 1, 4);
   }
   if (byteW >= 26) {
-    ctx.font = `9px ${FONT}`;
+    ctx.font = `10px ${FONT}`;
     ctx.textAlign = 'center';
     for (let i = 0; i < drawnBytes; i++) {
-      ctx.fillStyle = withAlpha(pal.acc, 0.8);
-      ctx.fillText(name[i] ?? '', x + i * byteW + byteW / 2, lo + 16);
+      ctx.fillStyle = withAlpha(pal.acc, 0.95);
+      ctx.fillText(name[i] ?? '', x + i * byteW + byteW / 2, lo + 17);
     }
     ctx.textAlign = 'left';
   }
@@ -419,9 +419,9 @@ export function renderLicenseCard(canvas, name, opts = {}) {
 
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
-  ctx.font = `11px ${FONT}`;
-  ctx.fillStyle = withAlpha(pal.sec, 0.6);
-  ctx.fillText('D E P T .   O F   M A C H I N E   V E R I F I C A T I O N', 36, 32);
+  ctx.font = `13px ${FONT}`;
+  ctx.fillStyle = withAlpha(pal.sec, 0.88);
+  ctx.fillText('D E P T .  O F  M A C H I N E  V E R I F I C A T I O N', 36, 32);
 
   ctx.font = `27px ${FONT}`;
   ctx.fillStyle = pal.pri;
@@ -447,11 +447,11 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   ctx.textAlign = 'right';
   ctx.fillText('PRE-REGISTRATION', CW - 36, 62);
   // DNA readout — the card states its own traits
-  ctx.font = `8px ${FONT}`;
-  ctx.fillStyle = withAlpha(pal.acc, 0.6);
+  ctx.font = `9.5px ${FONT}`;
+  ctx.fillStyle = withAlpha(pal.acc, 0.8);
   ctx.fillText(
     `DNA ${pal.name.toUpperCase()} / ${BORDER_NAMES[dna.border]} / ${HOLOS[dna.holo].name.toUpperCase()} FINISH`,
-    CW - 36, 76,
+    CW - 36, 77,
   );
   ctx.textAlign = 'left';
 
@@ -477,8 +477,8 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   ctx.strokeStyle = withAlpha(pal.pri, 0.55);
   ctx.lineWidth = 1;
   ctx.strokeRect(phX, phY, phW, phH);
-  ctx.font = `8px ${FONT}`;
-  ctx.fillStyle = withAlpha(pal.sec, 0.45);
+  ctx.font = `9.5px ${FONT}`;
+  ctx.fillStyle = withAlpha(pal.sec, 0.68);
   ctx.textAlign = 'center';
   ctx.fillText('BEARER IMAGE · MACHINE-GENERATED', phX + phW / 2, phY + phH - 12);
   ctx.textAlign = 'left';
@@ -486,10 +486,10 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   // QR under the portrait
   const qrSize = 108;
   drawQR(ctx, phX + (phW - qrSize) / 2, phY + phH + 26, qrSize, permalink, pal.pri);
-  ctx.font = `9px ${FONT}`;
-  ctx.fillStyle = withAlpha(pal.sec, 0.5);
+  ctx.font = `10px ${FONT}`;
+  ctx.fillStyle = withAlpha(pal.sec, 0.7);
   ctx.textAlign = 'center';
-  ctx.fillText('SCAN TO VERIFY', phX + phW / 2, phY + phH + 26 + qrSize + 16);
+  ctx.fillText('SCAN TO VERIFY', phX + phW / 2, phY + phH + 26 + qrSize + 17);
   ctx.textAlign = 'left';
 
   // ── fields (right column) ──
@@ -560,10 +560,10 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   const sig = drawSignature(ctx, fx, sigY, fw * 0.52, name, pal);
   ctx.fillStyle = withAlpha(pal.sec, 0.4);
   ctx.fillRect(fx, sigY + 30, fw * 0.56, 1);
-  ctx.font = `8px ${FONT}`;
-  ctx.fillStyle = withAlpha(pal.sec, 0.45);
+  ctx.font = `10.5px ${FONT}`;
+  ctx.fillStyle = withAlpha(pal.sec, 0.78);
   const hexShown = sig.hex.slice(0, 10).join(' ') + (sig.hex.length > 10 ? ' …' : '');
-  ctx.fillText(`SIGNATURE OF BEARER · UTF-8 0x${hexShown}`, fx, sigY + 44);
+  ctx.fillText(`SIGNATURE OF BEARER · UTF-8 0x${hexShown}`, fx, sigY + 46);
 
   // seal overlapping the signature corner
   drawSeal(ctx, fx + fw - 78, sigY - 4, 72, pal, rarity.sym);
@@ -573,15 +573,15 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   ctx.fillStyle = withAlpha(pal.pri, 0.35);
   ctx.fillRect(36, ftY, CW - 72, 1);
   drawBarcode(ctx, 36, ftY + 12, 240, 24, certId, withAlpha(pal.pri, 0.8));
-  ctx.font = `8px ${FONT}`;
-  ctx.fillStyle = withAlpha(pal.sec, 0.45);
-  ctx.fillText(certId, 36, ftY + 47);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = withAlpha(pal.sec, 0.5);
   ctx.font = `9px ${FONT}`;
+  ctx.fillStyle = withAlpha(pal.sec, 0.6);
+  ctx.fillText(certId, 36, ftY + 48);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = withAlpha(pal.sec, 0.68);
+  ctx.font = `10px ${FONT}`;
   ctx.fillText('NOT VALID FOR HUMAN IDENTIFICATION', CW / 2, ftY + 28);
   ctx.textAlign = 'right';
-  ctx.fillStyle = withAlpha(pal.pri, 0.6);
+  ctx.fillStyle = withAlpha(pal.pri, 0.75);
   ctx.fillText('dmv.agentcommunity.org', CW - 36, ftY + 28);
   ctx.textAlign = 'left';
 
