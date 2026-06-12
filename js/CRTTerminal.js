@@ -367,18 +367,21 @@ export class CRTTerminal {
       return;
     }
 
+    // `suffix` renders dimmed after the cursor and is appended to the baked
+    // answer (the system-added `.agent`). `placeholder` is a dim hint shown only
+    // while the field is empty. Both are read generically by the renderer.
     if (this.accountType === 'org') {
       this.fields = [
-        { key: 'userName',    prompt: 'Your name',               value: '', active: false },
-        { key: 'orgEmail',    prompt: 'Organization email',      value: '', active: false },
-        { key: 'companyName', prompt: 'Company name',            value: '', active: false },
-        { key: 'agentName',   prompt: 'Agent name (.agent)',     value: '', active: false },
+        { key: 'userName',    prompt: 'Your name',          placeholder: 'full name', value: '', active: false },
+        { key: 'orgEmail',    prompt: 'Organization email', value: '', active: false },
+        { key: 'companyName', prompt: 'Company name',       value: '', active: false },
+        { key: 'agentName',   prompt: 'Agent name',         suffix: '.agent', value: '', active: false },
       ];
     } else {
       this.fields = [
-        { key: 'userName',  prompt: 'Your name',             value: '', active: false },
-        { key: 'email',     prompt: 'Email address',          value: '', active: false },
-        { key: 'agentName', prompt: 'Agent name (.agent)',   value: '', active: false },
+        { key: 'userName',  prompt: 'Your name',     placeholder: 'full name', value: '', active: false },
+        { key: 'email',     prompt: 'Email address', value: '', active: false },
+        { key: 'agentName', prompt: 'Agent name',    suffix: '.agent', value: '', active: false },
       ];
     }
 
@@ -622,12 +625,24 @@ export class CRTTerminal {
     return null;
   }
 
+  // Canonicalize an agent-name slug: trim, lowercase, strip user-typed trailing
+  // `.agent` suffix(es) — the UI/system appends `.agent`, so a pasted
+  // "mybot.agent" must become "mybot", never "mybot.agent.agent".
+  _normalizeAgentSlug(raw) {
+    let v = (raw || '').trim().toLowerCase();
+    while (v.endsWith('.agent')) v = v.slice(0, -'.agent'.length);
+    return v;
+  }
+
   handleFormInput(key) {
     if (this.currentField < 0 || this.currentField >= this.fields.length) return;
     this.dirty = true;
     const f = this.fields[this.currentField];
 
     if (key === 'Enter') {
+      if (f.key === 'agentName') {
+        f.value = this._normalizeAgentSlug(f.value);
+      }
       const error = this.validateField(f);
       if (error) {
         this.validationError = error;
@@ -641,12 +656,14 @@ export class CRTTerminal {
         f.value = trimmed;
       }
 
-      // Bake the typed value into the prompt line (dim color for the answer)
+      // Bake the typed value into the prompt line (dim color for the answer).
+      // Fields with a suffix (agent name) show the full value it resolves to.
+      const display = f.suffix ? `${f.value}${f.suffix}` : f.value;
       const lastLine = this.lines[this.lines.length - 1];
       lastLine.fullyTyped = true;
-      lastLine.text += f.value;
+      lastLine.text += display;
       lastLine.typed = lastLine.text.length;
-      lastLine.answerStart = lastLine.text.length - f.value.length;
+      lastLine.answerStart = lastLine.text.length - display.length;
 
       this.currentField++;
 
@@ -1528,10 +1545,23 @@ export class CRTTerminal {
         ctx.fillText(inputText, this.padding + promptWidth, y);
         ctx.shadowBlur = 0;
 
+        const cursorX = this.padding + promptWidth + ctx.measureText(inputText).width;
+        const cursorW = this.fontSize * 0.55;
         if (this.cursorVisible) {
-          const cursorX = this.padding + promptWidth + ctx.measureText(inputText).width;
           ctx.fillStyle = this.cursorColor;
-          ctx.fillRect(cursorX + 2, y + 2, this.fontSize * 0.55, this.fontSize - 2);
+          ctx.fillRect(cursorX + 2, y + 2, cursorW, this.fontSize - 2);
+        }
+
+        // Dim hint trailing the cursor: a field's `suffix` always shows (the
+        // system-appended `.agent`); its `placeholder` shows only while empty.
+        const activeField = this.fields[this.currentField];
+        const hint = activeField.suffix ?? (!inputText ? activeField.placeholder : null);
+        if (hint) {
+          ctx.fillStyle = this.dimColor;
+          ctx.shadowColor = this.dimColor;
+          ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
+          ctx.fillText(hint, cursorX + cursorW + 6, y);
+          ctx.shadowBlur = 0;
         }
 
         if (this.validationError) {

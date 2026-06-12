@@ -3,7 +3,7 @@
 // Client packages never see database credentials.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { validateRegistrationFields } from '../_shared/registration-validation.ts'
+import { normalizeAgentName, validateRegistrationFields } from '../_shared/registration-validation.ts'
 
 // --- Certificate ID generation (duplicated from package — ~50 lines, no deps) ---
 
@@ -153,6 +153,11 @@ Deno.serve(async (req) => {
       { status: 400, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
     )
   }
+
+  // Canonicalize agent_name before validation (trim/lowercase/strip trailing
+  // `.agent`) — mirrors the Worker, and guards the direct-to-Supabase path so a
+  // user-typed "mybot.agent" can never become "mybot.agent.agent" downstream.
+  body.agent_name = normalizeAgentName(body.agent_name)
 
   // Validate
   const validationError = validateRequest(body)
