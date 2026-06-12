@@ -53,7 +53,7 @@ The 3D scene has **one driving axis** — scroll progress — and **four "deep" 
 |---|---|---|---|
 | **Landing** | `lastScrollProgress < 0.30` | none | header, footer, center CTA, `#scrollHint`, "DAY/NIGHT" label |
 | **CRT booting** | `lastScrollProgress` between 0.30 and 0.75 | `crtBooted=true` at 0.60 | header, footer, CRT visual on TV |
-| **CRT interactive** | `isCRTInteractive() === true` | `tv.crt.bootPhase ≥ 2`, `progress > 0.75` | header, footer (compact on mobile), `#sceneExit` ("TOP" on mobile) |
+| **CRT interactive** | `isCRTInteractive() === true` | `tv.crt.bootPhase ≥ 2`, `progress > 0.75` | header, footer (compact on mobile), `#sceneExit` ("HOME" on mobile) |
 | **Card zoom** | `tv.isCardZoomed` | `holoCard.getMesh().visible` | `#cardShareBar` (non-permalink), `#sceneExit` ("BACK") |
 | **About zoom** | `tv.isAboutZoomed` | `aboutPoster.visible` | `#sceneExit` ("CLOSE") |
 | **Agent View** | `agentViewOpen` (DOM takeover) | canvas hidden | full-page agent docs, `#sceneExit` ("CLOSE") |
@@ -96,11 +96,14 @@ State flags live on `tv` (`isCardZoomed`, `isAboutZoomed`), `tv.crt` (`bootPhase
 1. `agentViewOpen` — Escape closes Agent View. All other keys swallowed.
 2. `tv.isAboutZoomed` — Escape closes About. Arrow/PgUp/PgDn/Home/End scroll the poster.
 3. `tv.isCardZoomed` — Escape calls `dismissCard()` (which navigates to `/` in permalink mode).
-4. CRT passthrough — Backspace/Enter/Arrows/Escape and printable keys go to `tv.crt.handleKey`.
+4. Escape (any other state) — CRT reading mode exits to review (`handleReviewInput('Escape')`); otherwise, if CRT-interactive, the scene zooms out via `scrollToTop()`.
+5. CRT passthrough — Backspace/Enter/Arrows and printable keys go to `tv.crt.handleKey`.
+
+In the CRT form (boot phase 4), **ArrowUp steps back to the previous field**: the current input is discarded, the previous answer is cleared, and its prompt re-opens for retyping (`CRTTerminal.handleFormInput`).
 
 ### Hidden input (`#hiddenInput`)
 
-Mobile keyboard funnel. `inputmode="text"`, `enterkeyhint="next"`. Listens to `input` and `keydown` to mirror typing into the CRT form (`app.js:1228`).
+Mobile keyboard funnel. `inputmode="text"`, `enterkeyhint="next"`. Listens to `input` and `keydown` to mirror typing into the CRT form (`app.js:1228`). Its keydown handler calls `stopPropagation()` while focused (the normal desktop typing state), so it handles Escape (blur + `scrollToTop()`) and ArrowUp (field step-back + re-sync) itself, mirroring the window handler.
 
 ---
 
@@ -123,7 +126,7 @@ visible = agentViewOpen
 | Context | Label |
 |---|---|
 | Permalink + card zoomed | `HOME` |
-| Mobile, CRT-interactive, no zoom | `TOP` |
+| Mobile, CRT-interactive, no zoom | `HOME` (scrolls back to top) |
 | Anything else (About / Agent View / Card / Reading) | `CLOSE` |
 
 **Click action** — `exitCurrentZoomState()` in `app.js:307`, checked in priority order:
@@ -132,7 +135,7 @@ visible = agentViewOpen
 2. `tv.isAboutZoomed` → `closeAbout()`
 3. `tv.isCardZoomed` → `dismissCard()` (→ `/` in permalink mode)
 4. CRT reading mode → `tv.crt.handleReviewInput('Escape')`
-5. Mobile + CRT-interactive → `scrollToTop()`
+5. CRT-interactive (any viewport) → `scrollToTop()` — keyboard Escape reaches this branch too
 
 **Theming** — `.scene-exit` in `css/styles.css`. Day = green (`#33ff88`), night = orange (`#ffaa33`), driven by `:root.ui-dark`. Position is `top + right` with safe-area insets. z-index 220, above the card share bar (210) and permalink overlay (200).
 
@@ -195,7 +198,7 @@ Parsed at module load (`parsePermalink()` in `app.js:12`). When present:
 | **Agent View** | `#sceneExit` ("CLOSE"), Escape, re-click header "For Agents" link |
 | **CRT reading** | `#sceneExit` ("CLOSE"), Escape, `Q` key, click outside `review_scroll_up` tap target (mobile), pull-up overscroll gesture (mobile, 12 ticks) |
 | **Permalink (card zoomed)** | `#sceneExit` ("HOME"), Escape, Get-Yours CTA, click empty world (loads TV model on demand) |
-| **Mobile CRT-interactive** | `#sceneExit` ("TOP") → scrollToTop |
+| **Mobile CRT-interactive** | `#sceneExit` ("HOME") → scrollToTop, Escape |
 | **Landing** | n/a (no zoom state) |
 
 ---

@@ -690,10 +690,16 @@ body.scrolled .center-cta__cli { pointer-events: none; }
     font-size: 0.92rem;
   }
 
-  /* When the scene-exit pill is active in mobile-compact mode, the sound
-     toggle would sit underneath it in the top-right corner. They serve
-     opposite contexts (landing vs. focused) — hide sound while focused. */
-  body.mobile-ui-compact .start-header__right { opacity: 0; pointer-events: none; }
+  /* When the HOME pill is active in mobile-compact mode it sits in the same
+     top-right corner as the sound toggle. They serve opposite contexts
+     (landing vs. focused) — hide sound while focused. visibility:hidden in
+     addition to opacity so the toggle can never paint or hit-test under the
+     pill. (The kb-open/DONE state already hides the whole .start-header.) */
+  body.mobile-ui-compact .start-header__right {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
 
   /* Soft keyboard open: lift the CRT into the visible viewport so the
      active input sits above the keyboard. We snap `top` instead of

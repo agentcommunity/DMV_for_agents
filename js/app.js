@@ -1,4 +1,4 @@
-import { TV } from './TV.js?v=30';
+import { TV } from './TV.js?v=37';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
@@ -279,6 +279,14 @@ function isCRTInteractive() {
   return lastScrollProgress > 0.75 && tv.crt.bootPhase >= 2;
 }
 
+// True while the CRT is zoomed in AND in a state the user can back out of.
+// Excludes the in-flight submit (isSubmitting) and the processing animation
+// (phase 6): scrolling out then would be immediately overridden by the card
+// zoom that onComplete triggers, producing a jarring double-motion.
+function canExitCRTToTop() {
+  return isCRTInteractive() && !tv.crt.isSubmitting && tv.crt.bootPhase !== 6;
+}
+
 function scrollToTop() {
   document.getElementById('scroller').scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -337,7 +345,7 @@ function exitCurrentZoomState() {
     tv.crt.handleReviewInput('Escape');
     return;
   }
-  if (isMobileViewport() && isCRTInteractive()) { scrollToTop(); return; }
+  if (canExitCRTToTop()) { scrollToTop(); return; }
 }
 
 function syncSceneExit() {
@@ -352,7 +360,7 @@ function syncSceneExit() {
     let label = 'CLOSE';
     if (isKbOpen) label = 'DONE';
     else if (permalink && tv.isCardZoomed) label = 'HOME';
-    else if (isMobileCrt && !isReading) label = 'TOP';
+    else if (isMobileCrt && !isReading) label = 'HOME';
     sceneExitLabel.textContent = label;
   }
 }
@@ -1266,6 +1274,20 @@ hiddenInput?.addEventListener('input', () => {
 hiddenInput?.addEventListener('keydown', (e) => {
   if (!tv.crt.inputActive || tv.crt.bootPhase !== 4) return;
   e.stopPropagation();
+  // The hidden input swallows keydown while focused (the normal typing state),
+  // so Escape/ArrowUp must be handled here as well as on window.
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    hiddenInput.blur();
+    if (canExitCRTToTop()) scrollToTop();
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    tv.crt.handleKey('ArrowUp');
+    focusTerminalInput(); // re-sync the hidden input to the now-cleared field
+    return;
+  }
   if (e.key !== 'Enter') return;
   e.preventDefault();
   tv.crt.handleKey('Enter');
@@ -1280,7 +1302,6 @@ hiddenInput?.addEventListener('keydown', (e) => {
 const passthroughKeys = new Set([
   'Backspace', 'Enter',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-  'Escape',
 ]);
 
 window.addEventListener('keydown', (e) => {
@@ -1334,6 +1355,18 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && tv.isCardZoomed) {
     e.preventDefault();
     dismissCard();
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    // Reading mode (terms/charter) exits back to the review screen; any other
+    // zoomed-in CRT state zooms the scene out to the top.
+    if (tv.crt.bootPhase === 5 && tv.crt.reviewReading) {
+      tv.crt.handleReviewInput('Escape');
+    } else if (canExitCRTToTop()) {
+      scrollToTop();
+    }
     return;
   }
 

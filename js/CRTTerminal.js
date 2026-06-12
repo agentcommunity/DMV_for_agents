@@ -674,6 +674,24 @@ export class CRTTerminal {
         this.fields[this.currentField].active = true;
         this.addFormPrompt();
       }
+    } else if (key === 'ArrowUp') {
+      // Step back to the previous field: discard the current input, clear the
+      // previous answer, and re-open its prompt so it can be retyped.
+      if (this.currentField > 0) {
+        this.validationError = null;
+        f.active = false;
+        f.value = '';
+        this.lines.pop(); // current field's prompt line
+        this.currentField--;
+        const prev = this.fields[this.currentField];
+        prev.active = true;
+        prev.value = '';
+        const line = this.lines[this.lines.length - 1];
+        line.text = `  > ${prev.prompt}: `;
+        line.typed = line.text.length;
+        delete line.answerStart;
+        delete line.fullyTyped;
+      }
     } else if (key === 'Backspace') {
       f.value = f.value.slice(0, -1);
       this.validationError = null;
