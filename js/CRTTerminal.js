@@ -367,18 +367,21 @@ export class CRTTerminal {
       return;
     }
 
+    // `suffix` renders dimmed after the cursor and is appended to the baked
+    // answer (the system-added `.agent`). `placeholder` is a dim hint shown only
+    // while the field is empty. Both are read generically by the renderer.
     if (this.accountType === 'org') {
       this.fields = [
-        { key: 'userName',    prompt: 'Your name',               value: '', active: false },
-        { key: 'orgEmail',    prompt: 'Organization email',      value: '', active: false },
-        { key: 'companyName', prompt: 'Company name',            value: '', active: false },
-        { key: 'agentName',   prompt: 'Agent name (.agent)',     value: '', active: false },
+        { key: 'userName',    prompt: 'Your name',          placeholder: 'full name', value: '', active: false },
+        { key: 'orgEmail',    prompt: 'Organization email', value: '', active: false },
+        { key: 'companyName', prompt: 'Company name',       value: '', active: false },
+        { key: 'agentName',   prompt: 'Agent name',         suffix: '.agent', value: '', active: false },
       ];
     } else {
       this.fields = [
-        { key: 'userName',  prompt: 'Your name',             value: '', active: false },
-        { key: 'email',     prompt: 'Email address',          value: '', active: false },
-        { key: 'agentName', prompt: 'Agent name (.agent)',   value: '', active: false },
+        { key: 'userName',  prompt: 'Your name',     placeholder: 'full name', value: '', active: false },
+        { key: 'email',     prompt: 'Email address', value: '', active: false },
+        { key: 'agentName', prompt: 'Agent name',    suffix: '.agent', value: '', active: false },
       ];
     }
 
@@ -481,7 +484,7 @@ export class CRTTerminal {
         ctx.fillStyle = textColor;
         ctx.shadowColor = textColor;
         ctx.shadowBlur = this.glowBlur;
-        ctx.fillText('▶', x - 18, y + 14);
+        ctx.fillText('▶', x - 18, y + 10);
         ctx.shadowBlur = 0;
       }
 
@@ -489,10 +492,10 @@ export class CRTTerminal {
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
-      ctx.fillText(`  [${options[i].key}]  ${options[i].title}`, x + 12, y + 14);
+      ctx.fillText(`  [${options[i].key}]  ${options[i].title}`, x + 12, y + 10);
       ctx.font = `${this.fontSize - 4}px "Courier New", monospace`;
       ctx.fillStyle = this.dimColor;
-      ctx.fillText(`       ${options[i].subtitle}`, x + 12, y + 38);
+      ctx.fillText(`       ${options[i].subtitle}`, x + 12, y + 36);
       this._addTapTarget(options[i].action, x, y, boxWidth, boxHeight);
       ctx.shadowBlur = 0;
 
@@ -529,7 +532,7 @@ export class CRTTerminal {
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
-      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
+      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 13);
       ctx.shadowBlur = 0;
 
       this._addTapTarget(buttons[i].action, x, y, boxWidth, boxHeight);
@@ -562,7 +565,7 @@ export class CRTTerminal {
       ctx.fillStyle = textColor;
       ctx.shadowColor = isHighlighted ? textColor : 'transparent';
       ctx.shadowBlur = isHighlighted ? this.glowBlur : 0;
-      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 16);
+      ctx.fillText(`  [${buttons[i].key}]  ${buttons[i].label}`, x + 12, y + 13);
       ctx.shadowBlur = 0;
 
       this._addTapTarget(i === 0 ? 'done_view' : 'done_share', x, y, boxWidth, boxHeight);
@@ -622,12 +625,24 @@ export class CRTTerminal {
     return null;
   }
 
+  // Canonicalize an agent-name slug: trim, lowercase, strip user-typed trailing
+  // `.agent` suffix(es) — the UI/system appends `.agent`, so a pasted
+  // "mybot.agent" must become "mybot", never "mybot.agent.agent".
+  _normalizeAgentSlug(raw) {
+    let v = (raw || '').trim().toLowerCase();
+    while (v.endsWith('.agent')) v = v.slice(0, -'.agent'.length);
+    return v;
+  }
+
   handleFormInput(key) {
     if (this.currentField < 0 || this.currentField >= this.fields.length) return;
     this.dirty = true;
     const f = this.fields[this.currentField];
 
     if (key === 'Enter') {
+      if (f.key === 'agentName') {
+        f.value = this._normalizeAgentSlug(f.value);
+      }
       const error = this.validateField(f);
       if (error) {
         this.validationError = error;
@@ -641,12 +656,14 @@ export class CRTTerminal {
         f.value = trimmed;
       }
 
-      // Bake the typed value into the prompt line (dim color for the answer)
+      // Bake the typed value into the prompt line (dim color for the answer).
+      // Fields with a suffix (agent name) show the full value it resolves to.
+      const display = f.suffix ? `${f.value}${f.suffix}` : f.value;
       const lastLine = this.lines[this.lines.length - 1];
       lastLine.fullyTyped = true;
-      lastLine.text += f.value;
+      lastLine.text += display;
       lastLine.typed = lastLine.text.length;
-      lastLine.answerStart = lastLine.text.length - f.value.length;
+      lastLine.answerStart = lastLine.text.length - display.length;
 
       this.currentField++;
 
@@ -656,6 +673,24 @@ export class CRTTerminal {
       } else {
         this.fields[this.currentField].active = true;
         this.addFormPrompt();
+      }
+    } else if (key === 'ArrowUp') {
+      // Step back to the previous field: discard the current input, clear the
+      // previous answer, and re-open its prompt so it can be retyped.
+      if (this.currentField > 0) {
+        this.validationError = null;
+        f.active = false;
+        f.value = '';
+        this.lines.pop(); // current field's prompt line
+        this.currentField--;
+        const prev = this.fields[this.currentField];
+        prev.active = true;
+        prev.value = '';
+        const line = this.lines[this.lines.length - 1];
+        line.text = `  > ${prev.prompt}: `;
+        line.typed = line.text.length;
+        delete line.answerStart;
+        delete line.fullyTyped;
       }
     } else if (key === 'Backspace') {
       f.value = f.value.slice(0, -1);
@@ -709,7 +744,7 @@ export class CRTTerminal {
 
   drawSubmitButton(ctx, startY) {
     const boxWidth = 340;
-    const boxHeight = 48;
+    const boxHeight = 56;
     const x = this.padding + 16;
     const isBusy = this.isSubmitting;
 
@@ -721,12 +756,12 @@ export class CRTTerminal {
     ctx.fillStyle = isBusy ? this.dimColor : this.headerColor;
     ctx.shadowColor = isBusy ? this.dimColor : this.headerColor;
     ctx.shadowBlur = this.glowBlur;
-    ctx.fillText(isBusy ? '  VERIFYING...' : '  SUBMIT REGISTRATION', x + 12, startY + 16);
+    ctx.fillText(isBusy ? '  VERIFYING...' : '  SUBMIT REGISTRATION', x + 12, startY + 10);
     ctx.shadowBlur = 0;
 
     ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
     ctx.fillStyle = this.dimColor;
-    ctx.fillText(isBusy ? '  Please wait' : '  Tap or press Enter', x + 12, startY + 34);
+    ctx.fillText(isBusy ? '  Please wait' : '  Tap or press Enter', x + 12, startY + 35);
 
     if (!isBusy) {
       this._addTapTarget('review_submit', x, startY, boxWidth, boxHeight);
@@ -751,7 +786,7 @@ export class CRTTerminal {
       ctx.fillStyle = this.textColor;
       ctx.shadowColor = this.textColor;
       ctx.shadowBlur = this.glowBlur;
-      ctx.fillText('  NEXT \u25B8', x + 12, btnY + 14);
+      ctx.fillText('  NEXT \u25B8', x + 12, btnY + 11);
       ctx.shadowBlur = 0;
 
       this._addTapTarget('form_next', x, btnY, boxWidth, boxHeight);
@@ -785,12 +820,12 @@ export class CRTTerminal {
       ctx.fillStyle = this.textColor;
       ctx.shadowColor = this.textColor;
       ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
-      ctx.fillText(`  [${btn.key}] ${btn.title}`, bx + 8, y + 11);
+      ctx.fillText(`  [${btn.key}] ${btn.title}`, bx + 8, y + 9);
       ctx.shadowBlur = 0;
 
       ctx.font = `${this.fontSize - 6}px "Courier New", monospace`;
       ctx.fillStyle = this.dimColor;
-      ctx.fillText(`  ${btn.subtitle}`, bx + 8, y + 31);
+      ctx.fillText(`  ${btn.subtitle}`, bx + 8, y + 33);
 
       this._addTapTarget(btn.action, bx, y, boxWidth, boxHeight);
     }
@@ -969,6 +1004,9 @@ export class CRTTerminal {
         const result = await this.onSubmit(this.getFormData());
         if (result?.certificateId) {
           this._certificateId = result.certificateId;
+        }
+        if (typeof result?.queueNumber === 'number' && result.queueNumber > 0) {
+          this._queueNumber = result.queueNumber;
         }
       }
       this.startProcessing();
@@ -1278,6 +1316,12 @@ export class CRTTerminal {
         // Type
         const typePad = bw - 8 - typeLabel.length;
         this.lines.push({ text: `  │  TYPE: ${typeLabel}${' '.repeat(Math.max(0, typePad))}│`, color: this.textColor, typed: 0, answerStart: 10 });
+        // Queue ticket — global pre-registration position, when the server sent one
+        if (this._queueNumber) {
+          const ticket = `#${String(this._queueNumber).padStart(5, '0')}`;
+          const ticketPad = bw - 10 - ticket.length;
+          this.lines.push({ text: `  │  TICKET: ${ticket}${' '.repeat(Math.max(0, ticketPad))}│`, color: this.textColor, typed: 0, answerStart: 12 });
+        }
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
         // Disclaimer
         const disclaim = 'Pre-registration certificate.';
@@ -1519,10 +1563,23 @@ export class CRTTerminal {
         ctx.fillText(inputText, this.padding + promptWidth, y);
         ctx.shadowBlur = 0;
 
+        const cursorX = this.padding + promptWidth + ctx.measureText(inputText).width;
+        const cursorW = this.fontSize * 0.55;
         if (this.cursorVisible) {
-          const cursorX = this.padding + promptWidth + ctx.measureText(inputText).width;
           ctx.fillStyle = this.cursorColor;
-          ctx.fillRect(cursorX + 2, y + 2, this.fontSize * 0.55, this.fontSize - 2);
+          ctx.fillRect(cursorX + 2, y + 2, cursorW, this.fontSize - 2);
+        }
+
+        // Dim hint trailing the cursor: a field's `suffix` always shows (the
+        // system-appended `.agent`); its `placeholder` shows only while empty.
+        const activeField = this.fields[this.currentField];
+        const hint = activeField.suffix ?? (!inputText ? activeField.placeholder : null);
+        if (hint) {
+          ctx.fillStyle = this.dimColor;
+          ctx.shadowColor = this.dimColor;
+          ctx.shadowBlur = Math.max(1, this.glowBlur - 1);
+          ctx.fillText(hint, cursorX + cursorW + 6, y);
+          ctx.shadowBlur = 0;
         }
 
         if (this.validationError) {

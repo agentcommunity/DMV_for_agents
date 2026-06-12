@@ -28,6 +28,20 @@ export const FIELD_LIMITS = {
   descriptionMax: 500,
 } as const;
 
+/**
+ * Canonicalize a user-supplied agent name BEFORE validation: trim, lowercase,
+ * and strip any user-typed trailing `.agent` suffix(es). The system appends
+ * `.agent` when composing `domain_requested`, so the slug must be bare ("mybot",
+ * not "mybot.agent"). Without this, a pasted "mybot.agent" would fail the
+ * dot-free AGENT_NAME_REGEX outright — this turns that confusing rejection into
+ * graceful acceptance, rather than guarding against any real "mybot.agent.agent".
+ */
+export function normalizeAgentName(raw: unknown): string {
+  let name = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  while (name.endsWith('.agent')) name = name.slice(0, -'.agent'.length);
+  return name;
+}
+
 export interface RegistrationFields {
   agent_name?: string;
   email?: string;

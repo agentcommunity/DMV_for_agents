@@ -12,6 +12,18 @@ export interface ValidationError {
   message: string;
 }
 
+/**
+ * Canonicalize a user-supplied agent name before validation: trim, lowercase,
+ * and strip any trailing `.agent` suffix(es). The system appends `.agent` when
+ * composing the domain, so "mybot.agent" must become "mybot" — never
+ * "mybot.agent.agent". Mirrors the server-side normalizeAgentName.
+ */
+export function normalizeAgentName(raw: string): string {
+  let name = (raw || '').trim().toLowerCase();
+  while (name.endsWith('.agent')) name = name.slice(0, -'.agent'.length);
+  return name;
+}
+
 export function validateAgentName(name: string): string | null {
   if (!name) return 'Agent name is required';
   if (name.length < 3) return 'Agent name must be at least 3 characters';

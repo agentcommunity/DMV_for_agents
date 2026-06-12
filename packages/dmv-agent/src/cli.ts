@@ -12,7 +12,7 @@
 
 import { registerAgent } from './register.js';
 import { verifyCertificateId } from './certificate.js';
-import { validateAgentName, validateEmail } from './validate.js';
+import { normalizeAgentName, validateAgentName, validateEmail } from './validate.js';
 import { checkRateLimit, recordAttempt, getMachineFingerprint } from './rate-limit.js';
 import {
   clearScreen, hideCursor, showCursor,
@@ -167,7 +167,7 @@ async function collectFields(): Promise<CollectedFields> {
       'What should this agent be called? (lowercase, 3-63 chars)',
       completed,
     );
-    agentName = await prompt(`  ${color.green('>')} `);
+    agentName = normalizeAgentName(await prompt(`  ${color.green('>')} `));
     const err = validateAgentName(agentName);
     if (!err) {
       validationOk(`${agentName}.agent`);
@@ -298,6 +298,7 @@ async function confirmAndSubmit(fields: CollectedFields): Promise<void> {
       domain: result.domain,
       email: fields.email,
       viewUrl,
+      queueNumber: result.queueNumber,
     });
 
     // ASCII text card — paste in READMEs or memory files
@@ -346,7 +347,7 @@ function parseFlags(argv: string[]): Record<string, string> {
 }
 
 async function nonInteractiveRegister(flags: Record<string, string>): Promise<void> {
-  const agentName = flags.name;
+  const agentName = normalizeAgentName(flags.name ?? '');
   const email = flags.email;
   const operatorName = flags.operator;
   const description = flags.description || undefined;
@@ -397,6 +398,7 @@ async function nonInteractiveRegister(flags: Record<string, string>): Promise<vo
       domain: result.domain,
       email,
       viewUrl,
+      queueNumber: result.queueNumber,
     });
 
     // ASCII text card — paste in READMEs or memory files

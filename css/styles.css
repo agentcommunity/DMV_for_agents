@@ -57,8 +57,14 @@
   --about-scroll-label: rgba(16, 16, 17, 0.38);
   --transition: 0.5s ease-in-out;
   --container-padding: 11.7rem;
+  /* CRT accent — green by day, orange by night (mirrors the terminal palette).
+     Used by the floating action buttons (card share bar, permalink CTAs). */
+  --crt-rgb: 51, 255, 136;
+  --crt-bg-rgb: 10, 13, 10;
 }
 :root.ui-dark {
+  --crt-rgb: 255, 170, 51;
+  --crt-bg-rgb: 13, 9, 8;
   --ui-text-primary: rgba(255, 255, 255, 0.95);
   --ui-text-secondary: rgba(255, 255, 255, 0.72);
   --ui-text-muted: rgba(255, 255, 255, 0.6);
@@ -220,33 +226,33 @@ ul { display: block; margin: 0; padding: 0; list-style-type: none; }
 .header-link {
   display: inline-flex;
   align-items: center;
-  padding: 0.4rem 0;
+  padding: 0.5rem 1.3rem;
+  border: 1px solid var(--ui-line);
+  border-radius: 3px;
   font-family: var(--floating-ui-font-mono);
-  font-size: 1.55rem;
+  font-size: 1.45rem;
   line-height: 1.1;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  transition: opacity 0.3s ease;
-  opacity: 0.62;
+  transition: opacity 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+  opacity: 0.72;
 }
 .header-link.is-active {
   opacity: 1;
   color: var(--ui-link-active);
+  border-color: currentColor;
 }
-@media (hover: hover) { .header-link:hover { opacity: 1; } }
+@media (hover: hover) {
+  .header-link:hover {
+    opacity: 1;
+    border-color: var(--ui-line-strong);
+  }
+}
 
 .header-brand__links {
   display: flex;
   align-items: center;
-  gap: 1.2rem;
-}
-.header-brand__sep {
-  font-family: var(--floating-ui-font-mono);
-  font-size: 1.6rem;
-  line-height: 1;
-  color: var(--ui-text-faint);
-  opacity: 0.7;
-  user-select: none;
+  gap: 0.9rem;
 }
 
 /* === Toggle (clean track + thumb) === */
@@ -470,42 +476,48 @@ body.scrolled .center-cta__cli { pointer-events: none; }
 .permalink-overlay__cta {
   all: unset; cursor: pointer; pointer-events: auto;
   display: flex; flex-direction: column; align-items: center;
-  padding: 1.6rem 3.2rem;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
-  background: rgba(16, 16, 17, 0.5);
+  padding: 1.4rem 3rem;
+  border: 1px solid rgba(var(--crt-rgb), 0.5);
+  border-radius: 6px;
+  background: rgba(var(--crt-bg-rgb), 0.82);
+  color: rgba(var(--crt-rgb), 0.95);
+  text-shadow: 0 0 8px rgba(var(--crt-rgb), 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   transition: border-color 0.3s ease, transform 0.2s ease, background 0.3s ease;
 }
 .permalink-overlay__cta:hover {
-  border-color: rgba(255, 255, 255, 0.7);
-  background: rgba(16, 16, 17, 0.7);
+  border-color: rgba(var(--crt-rgb), 0.95);
+  background: rgba(var(--crt-bg-rgb), 0.95);
   transform: translateY(-2px);
 }
 .permalink-overlay__cta--share {
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: none;
 }
 .permalink-overlay__cta--share:hover {
-  border-color: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.95);
 }
 .permalink-overlay__cta-text {
-  font-size: 2.4rem; letter-spacing: 0.1em; text-transform: uppercase;
+  font-size: 1.9rem; letter-spacing: 0.1em; text-transform: uppercase;
 }
 .permalink-overlay__cta-sub {
   font-family: var(--floating-ui-font-mono);
-  font-size: 1.2rem; opacity: 0.4; margin-top: 0.4rem;
+  font-size: 1.15rem; opacity: 0.55; margin-top: 0.4rem;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 
-/* === Header CTA (permalink mode) === */
+/* === Header CTA (permalink mode) — keeps the .header-link chip shape === */
 .header-cta {
-  font-family: var(--floating-ui-font-mono);
-  font-size: 1.5rem; font-weight: 400; line-height: 1.1;
-  text-transform: uppercase; letter-spacing: 0.05em;
-  padding: 0.4rem 0;
-  transition: opacity 0.3s ease;
-  color: #33ff88;
+  color: rgb(var(--crt-rgb));
+  border-color: rgba(var(--crt-rgb), 0.5);
+  text-shadow: 0 0 8px rgba(var(--crt-rgb), 0.35);
 }
-@media (hover: hover) { .header-cta:hover { opacity: 0.7; } }
+@media (hover: hover) {
+  .header-cta:hover { border-color: rgb(var(--crt-rgb)); }
+}
 
 /* === In-scene card share CTA === */
 .card-share-bar {
@@ -523,6 +535,8 @@ body.scrolled .center-cta__cli { pointer-events: none; }
 .card-share-bar__actions {
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 1rem;
 }
 
@@ -532,22 +546,32 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 1.2rem 2.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 4px;
-  background: rgba(16, 16, 17, 0.62);
+  padding: 1rem 2.2rem;
+  border: 1px solid rgba(var(--crt-rgb), 0.45);
+  border-radius: 999px;
+  background: rgba(var(--crt-bg-rgb), 0.86);
+  color: rgba(var(--crt-rgb), 0.95);
+  text-shadow: 0 0 6px rgba(var(--crt-rgb), 0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
 }
 
 .card-share-bar__btn--secondary {
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(16, 16, 17, 0.54);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: none;
 }
 
 .card-share-bar__btn:hover {
-  border-color: rgba(255, 255, 255, 0.74);
-  background: rgba(16, 16, 17, 0.76);
-  transform: translateY(-2px);
+  border-color: rgba(var(--crt-rgb), 0.9);
+  background: rgba(var(--crt-bg-rgb), 0.95);
+  transform: translateY(-1px);
+}
+
+.card-share-bar__btn--secondary:hover {
+  border-color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .card-share-bar__btn:disabled {
@@ -556,7 +580,8 @@ body.scrolled .center-cta__cli { pointer-events: none; }
 }
 
 .card-share-bar__btn-text {
-  font-size: 1.9rem;
+  font-size: 1.5rem;
+  letter-spacing: 0.1em;
 }
 
 .card-share-bar__ticker {
@@ -564,7 +589,8 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   font-size: 1.2rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(136, 255, 204, 0.88);
+  color: rgba(var(--crt-rgb), 0.9);
+  text-shadow: 0 0 6px rgba(var(--crt-rgb), 0.35);
   opacity: 0;
   transition: opacity 0.18s ease;
 }
@@ -598,7 +624,12 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   }
 
   .header-link {
-    font-size: 1.22rem;
+    font-size: 1.15rem;
+    padding: 0.35rem 0.9rem;
+  }
+
+  .header-brand__links {
+    gap: 0.6rem;
   }
 
   .toggle {
@@ -659,10 +690,16 @@ body.scrolled .center-cta__cli { pointer-events: none; }
     font-size: 0.92rem;
   }
 
-  /* When the scene-exit pill is active in mobile-compact mode, the sound
-     toggle would sit underneath it in the top-right corner. They serve
-     opposite contexts (landing vs. focused) — hide sound while focused. */
-  body.mobile-ui-compact .start-header__right { opacity: 0; pointer-events: none; }
+  /* When the HOME pill is active in mobile-compact mode it sits in the same
+     top-right corner as the sound toggle. They serve opposite contexts
+     (landing vs. focused) — hide sound while focused. visibility:hidden in
+     addition to opacity so the toggle can never paint or hit-test under the
+     pill. (The kb-open/DONE state already hides the whole .start-header.) */
+  body.mobile-ui-compact .start-header__right {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
 
   /* Soft keyboard open: lift the CRT into the visible viewport so the
      active input sits above the keyboard. We snap `top` instead of
@@ -683,26 +720,32 @@ body.scrolled .center-cta__cli { pointer-events: none; }
   }
 
   .card-share-bar__actions {
-    gap: 0.8rem;
+    gap: 0.7rem;
   }
 
   .card-share-bar__btn {
-    padding: 1rem 2rem;
+    padding: 0.8rem 1.6rem;
   }
 
   .card-share-bar__btn-text {
-    font-size: 1.6rem;
+    font-size: 1.25rem;
   }
 
   .permalink-overlay {
     padding: 1.6rem var(--container-padding) 2.4rem;
     gap: 1.2rem;
   }
+  .permalink-overlay__actions {
+    gap: 1rem;
+  }
   .permalink-overlay__cta {
-    padding: 1.2rem 2.4rem;
+    padding: 1rem 2rem;
   }
   .permalink-overlay__cta-text {
-    font-size: 2rem;
+    font-size: 1.5rem;
+  }
+  .permalink-overlay__cta-sub {
+    font-size: 1rem;
   }
   .permalink-overlay__label {
     font-size: 1.6rem;

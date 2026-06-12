@@ -24,4 +24,6 @@ export interface RegistrationResult {
   agentName: string;
   domain: string;
   message: string;
+  /** Global position in the pre-registration queue ("now serving" ticket). */
+  queueNumber?: number | null;
 }

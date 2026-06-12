@@ -3,7 +3,7 @@
 // Client packages never see database credentials.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { validateRegistrationFields } from '../_shared/registration-validation.ts'
+import { normalizeAgentName, validateRegistrationFields } from '../_shared/registration-validation.ts'
 
 // --- Certificate ID generation (duplicated from package — ~50 lines, no deps) ---
 
@@ -154,6 +154,11 @@ Deno.serve(async (req) => {
     )
   }
 
+  // Canonicalize agent_name before validation (trim/lowercase/strip trailing
+  // `.agent`) — mirrors the Worker, and guards the direct-to-Supabase path so a
+  // user-typed "mybot.agent" can never become "mybot.agent.agent" downstream.
+  body.agent_name = normalizeAgentName(body.agent_name)
+
   // Validate
   const validationError = validateRequest(body)
   if (validationError) {
@@ -294,12 +299,28 @@ Deno.serve(async (req) => {
     )
   }
 
+  // Ticket number — global position in the pre-registration queue ("NOW
+  // SERVING" flavor on the kiosk done screen and CLI success screen).
+  // Counted after the insert so the new row is included (#1 for the first
+  // registrant). Approximate under concurrent inserts, which is fine for a
+  // cosmetic counter. Fail OPEN: the registration already succeeded, so a
+  // count error just omits the field rather than failing the request.
+  let queueNumber: number | null = null
+  const { count: globalCount, error: queueCountError } = await supabase
+    .from('registrations')
+    .select('*', { count: 'exact', head: true })
+    .not('certificate_id', 'is', null)
+  if (!queueCountError && typeof globalCount === 'number' && globalCount > 0) {
+    queueNumber = globalCount
+  }
+
   return new Response(
     JSON.stringify({
       certificate_id: certificateId,
       agent_name: agentName,
       domain,
       registration_type: registrationType,
+      queue_number: queueNumber,
       permalink_url: permalinkUrl,
       badge_url: badgeUrl,
       badge_card_url: badgeCardUrl,

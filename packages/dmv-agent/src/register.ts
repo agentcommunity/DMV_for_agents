@@ -94,5 +94,6 @@ export async function registerAgent(
     agentName: json.agent_name as string,
     domain: json.domain as string,
     message: json.message as string,
+    queueNumber: typeof json.queue_number === 'number' ? json.queue_number : null,
   };
 }

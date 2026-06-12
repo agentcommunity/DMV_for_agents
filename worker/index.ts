@@ -21,7 +21,7 @@
 import { Container, getContainer } from '@cloudflare/containers';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import { incrementKvCooldown } from './rate-limit-kv';
-import { validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
+import { normalizeAgentName, validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
 
 // Cloudflare Containers ship as Durable Objects under the hood.
 // `defaultPort` is the port the container's HTTP server listens on.
@@ -317,7 +317,9 @@ function parseRegisterBody(body: unknown): { value: CanonicalRegisterBody | null
   }
 
   const raw = body as Record<string, unknown>;
-  const agentName = typeof raw.agent_name === 'string' ? raw.agent_name.trim() : '';
+  // Trim + lowercase + strip user-typed trailing `.agent` suffix(es) — the
+  // system appends `.agent` later, so "mybot.agent" canonicalizes to "mybot".
+  const agentName = normalizeAgentName(raw.agent_name);
   const email = typeof raw.email === 'string' ? raw.email.trim().toLowerCase() : '';
   const operatorName = typeof raw.operator_name === 'string' ? raw.operator_name.trim() : '';
   const organizationName = typeof raw.organization_name === 'string' ? raw.organization_name.trim() : '';

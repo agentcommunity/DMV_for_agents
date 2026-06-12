@@ -26,7 +26,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { registerAgent } from './register.js';
 import { verifyCertificateId } from './certificate.js';
-import { validateAgentName, validateEmail } from './validate.js';
+import { normalizeAgentName, validateAgentName, validateEmail } from './validate.js';
 import { checkRateLimit, recordAttempt, getMachineFingerprint } from './rate-limit.js';
 
 const server = new Server(
@@ -103,7 +103,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   if (name === 'register_agent') {
-    const agentName = (args?.agent_name as string) || '';
+    const agentName = normalizeAgentName((args?.agent_name as string) || '');
     const email = (args?.email as string) || '';
     const operatorName = (args?.operator_name as string) || undefined;
     const description = (args?.description as string) || undefined;
