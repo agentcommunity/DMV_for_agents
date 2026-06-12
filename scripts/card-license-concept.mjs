@@ -427,7 +427,7 @@ export function renderLicenseCard(canvas, name, opts = {}) {
   ctx.fillStyle = pal.pri;
   ctx.shadowColor = pal.glow;
   ctx.shadowBlur = 12;
-  ctx.fillText('AGENT OPERATOR LICENSE', 36, 64);
+  ctx.fillText('MACHINE IDENTITY CERTIFICATE', 36, 64);
   ctx.shadowBlur = 0;
 
   // tier chip (top right) — deterministic finish, not a prize
