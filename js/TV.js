@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { CRTTerminal } from './CRTTerminal.js?v=22';
+import { CRTTerminal } from './CRTTerminal.js?v=25';
 
 const gsap = window.gsap;
 
@@ -74,18 +74,20 @@ export class TV {
 
     this.camera = null;
     this.cameraPosition = { x: 0, y: -0.5, z: 20 };
-    // Fit target for card/about zoom framing (CRT screen dimensions).
+    // Fit target for card/about + scroll-zoom framing (CRT screen dimensions).
+    // Remeasured from the model's `Glass` mesh bounds on load.
     this.tvFitSize = { width: 2.8, height: 2.4 };
-    // Fit target for scroll-zoom framing (derived from screen + bezel padding).
-    this.tvFrameSize = { width: 2.8 * 1.45, height: 2.4 * 1.45 };
+    // World z of the TV face (front of the CRT glass bulge). Scroll-zoom fit
+    // distances are camera-to-plane distances measured from THIS plane, not the
+    // origin. Fallback 1.97 = `Glass` mesh bounds.max.z in tv1.glb (used only in
+    // permalink/skipModel mode before the GLB lazy-loads); remeasured on load.
+    this.tvFrontZ = 1.97;
     this.viewportProfiles = [
       // Tuned against common mobile widths:
       // 320-360 (small phones), 375-390 (mid phones), 412-430 (large phones)
       {
         name: 'small-phone',
         maxWidth: 360,
-        scrollMargin: 1.16,
-        scrollExtraZ: 0.25,
         scrollY: 0.30,
         scrollLookY: 0.32,
         cardMargin: 1.62,
@@ -95,8 +97,6 @@ export class TV {
       {
         name: 'phone',
         maxWidth: 390,
-        scrollMargin: 1.14,
-        scrollExtraZ: 0.2,
         scrollY: 0.35,
         scrollLookY: 0.37,
         cardMargin: 1.54,
@@ -106,8 +106,6 @@ export class TV {
       {
         name: 'large-phone',
         maxWidth: 430,
-        scrollMargin: 1.12,
-        scrollExtraZ: 0.15,
         scrollY: 0.40,
         scrollLookY: 0.42,
         cardMargin: 1.48,
@@ -117,8 +115,6 @@ export class TV {
       {
         name: 'tablet',
         maxWidth: 768,
-        scrollMargin: 1.10,
-        scrollExtraZ: 0.08,
         scrollY: 0.46,
         scrollLookY: 0.48,
         cardMargin: 1.40,
@@ -128,8 +124,6 @@ export class TV {
       {
         name: 'desktop',
         maxWidth: Infinity,
-        scrollMargin: 1.08,
-        scrollExtraZ: 0,
         scrollY: 0.5,
         scrollLookY: 0.5,
         cardMargin: 1.3,
@@ -225,14 +219,9 @@ export class TV {
           screenBounds.getSize(screenSize);
           if (screenSize.x > 0 && screenSize.y > 0) {
             this.tvFitSize = { width: screenSize.x, height: screenSize.y };
+            this.tvFrontZ = screenBounds.max.z;
           }
         }
-        // Derive bezel/frame size from screen bounds + padding.
-        // The TV bezel is roughly 45% wider and taller than the CRT glass.
-        this.tvFrameSize = {
-          width:  this.tvFitSize.width  * 1.45,
-          height: this.tvFitSize.height * 1.45
-        };
         this.modelLoaded = true;
         resolve();
       }, (xhr) => {
@@ -304,18 +293,18 @@ export class TV {
     const profile = this._getViewportProfile();
     const aspect = this.sizes.aspect;
     const isPortrait = aspect < 1;
-    let margin = profile.scrollMargin;
-    if (isPortrait && aspect < 0.55) margin += 0.03;
-    if (isPortrait && aspect < 0.5) margin += 0.02;
 
-    // Use full TV frame/bezel bounds so the camera stops with bezel edges
-    // aligned to the viewport, rather than zooming past them to show only the screen glass.
-    // On portrait phones we intentionally allow light side cropping of the TV shell
-    // so the CRT doesn't become too tiny from strict full-width fit.
-    const fitWidth = isPortrait ? this.tvFrameSize.width * 0.70 : this.tvFrameSize.width;
-    let endZ = this._zoomDistanceToFit(fitWidth, this.tvFrameSize.height, margin);
-    endZ += profile.scrollExtraZ;
-    if (isPortrait && aspect < 0.45) endZ += 0.1;
+    // End-of-scroll framing, measured at the TV face plane (tvFrontZ — the fit
+    // distance is camera-to-plane, so the end position must be offset by it).
+    // The factor says how much of the glass the viewport spans at full zoom
+    // (1.0 = glass exactly fills it; lower = closer). Portrait binds on width,
+    // landscape on height. CRT text sits ~9% inside the glass edge, so factors
+    // down to ~0.9 keep all text visible.
+    const PORTRAIT_FIT = 0.88;   // cuts ~6%/side into the curved glass rim; text stays ~3% clear
+    const LANDSCAPE_FIT = 1.16;  // glass + black bezel ring; TV shell crops top/bottom
+    const fit = isPortrait ? PORTRAIT_FIT : LANDSCAPE_FIT;
+    const endZ = this.tvFrontZ +
+      this._zoomDistanceToFit(this.tvFitSize.width * fit, this.tvFitSize.height * fit, 1.0);
 
     const endY = isPortrait ? profile.scrollY : 0.5;
     const lookY = isPortrait ? profile.scrollLookY : 0.5;
