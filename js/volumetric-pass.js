@@ -271,5 +271,6 @@ export function createVolumetricPass(THREE, opts = {}) {
     }
   }
 
-  return { fsQuad, volMat, sun, group, ready, setReady, updateUniforms, driveArc, dispose };
+  // `ready` is a getter (not a snapshot) so TV.js's `this._volPass.ready` reflects setReady() live.
+  return { fsQuad, volMat, sun, group, get ready() { return ready; }, setReady, updateUniforms, driveArc, dispose };
 }
