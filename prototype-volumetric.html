@@ -72,6 +72,7 @@ const passMat = new THREE.ShaderMaterial({
     uInvProj:{value:new THREE.Matrix4()}, uCamWorld:{value:new THREE.Matrix4()}, uCamPos:{value:new THREE.Vector3()},
     uMode:{value:1}, // 1 = debug worldpos, 0 = passthrough
     uShadowMap:{value:null}, uShadowMatrix:{value:new THREE.Matrix4()},
+    uLightColor:{value:new THREE.Color(WARM)}, uDensity:{value:0.8}, uIntensity:{value:1.0}, uMaxDist:{value:60.0},
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
   fragmentShader: `
@@ -79,6 +80,7 @@ const passMat = new THREE.ShaderMaterial({
     uniform sampler2D tDiffuse; uniform sampler2D tDepth;
     uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform int uMode;
     uniform sampler2D uShadowMap; uniform mat4 uShadowMatrix;
+    uniform vec3 uLightColor; uniform float uDensity; uniform float uIntensity; uniform float uMaxDist;
     vec3 worldFromDepth(vec2 uv, float rawDepth){
       // NDC (note three depth texture stores [0,1])
       vec4 ndc = vec4(uv*2.0-1.0, rawDepth*2.0-1.0, 1.0);
@@ -95,25 +97,34 @@ const passMat = new THREE.ShaderMaterial({
     void main(){
       vec3 col = texture2D(tDiffuse, vUv).rgb;
       float d = texture2D(tDepth, vUv).x;
-      if (uMode==1){
-        if (d >= 1.0){ gl_FragColor=vec4(0.0,0.0,0.0,1.0); return; } // sky / no geometry
-        vec3 w = worldFromDepth(vUv, d);
-        gl_FragColor = vec4(fract(w*0.2), 1.0);            // banded world-pos viz
-        return;
+
+      // ray from camera through this pixel, out to the scene hit (or uMaxDist for sky)
+      vec3 hit;
+      if (d >= 1.0){ hit = uCamPos + normalize(worldFromDepth(vUv, 0.999) - uCamPos) * uMaxDist; }
+      else { hit = worldFromDepth(vUv, d); }
+      vec3 ro = uCamPos;
+      vec3 rd = hit - ro;
+      float marchLen = min(length(rd), uMaxDist);
+      rd = normalize(rd);
+
+      const int MAXS = 96;
+      float fsteps = 56.0;                              // overridden by uniform below if added
+      float stepSize = marchLen / fsteps;
+      float accum = 0.0;
+      vec3 p = ro;
+      for (int i=0;i<MAXS;i++){
+        if (float(i) >= fsteps) break;
+        p += rd * stepSize;
+        float lit = sampleShadow(p);
+        accum += lit;
       }
-      if (uMode==2){
-        if (d >= 1.0){ gl_FragColor=vec4(0.02,0.0,0.0,1.0); return; }
-        vec3 w = worldFromDepth(vUv, d);
-        float lit = sampleShadow(w);
-        gl_FragColor = vec4(vec3(lit), 1.0);                            // white=lit, black=shadow
-        return;
-      }
-      gl_FragColor = vec4(col, 1.0);
+      accum *= stepSize * uDensity;                     // integrate in-scatter
+      vec3 glow = uLightColor * accum * uIntensity;
+      gl_FragColor = vec4(col + glow, 1.0);
     }`,
   depthTest:false, depthWrite:false,
 });
 const fsQuad = new FullScreenQuad(passMat);
-passMat.uniforms.uMode.value = 2;
 
 let monitorReady = false;
 const draco = new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/libs/draco/');
@@ -148,6 +159,9 @@ function renderFrame(){
   passMat.uniforms.uCamPos.value.copy(camera.position);
   if (sun.shadow.map){ passMat.uniforms.uShadowMap.value = sun.shadow.map.texture; }
   passMat.uniforms.uShadowMatrix.value.copy(sun.shadow.matrix);
+  passMat.uniforms.uLightColor.value.set(WARM);
+  passMat.uniforms.uDensity.value = +ctrl.density.value;
+  passMat.uniforms.uIntensity.value = +ctrl.intensity.value;
   renderer.setRenderTarget(null); fsQuad.render(renderer);
 }
 function tick(now){
