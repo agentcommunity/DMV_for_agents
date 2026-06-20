@@ -67,9 +67,34 @@ function setSize(w, h){ camera.aspect = w/h; camera.updateProjectionMatrix(); re
 
 // Passthrough display material (swapped for the volumetric material in Task 4).
 const passMat = new THREE.ShaderMaterial({
-  uniforms: { tDiffuse:{value:null} },
+  uniforms: {
+    tDiffuse:{value:null}, tDepth:{value:null},
+    uInvProj:{value:new THREE.Matrix4()}, uCamWorld:{value:new THREE.Matrix4()}, uCamPos:{value:new THREE.Vector3()},
+    uMode:{value:1}, // 1 = debug worldpos, 0 = passthrough
+  },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
-  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; void main(){ gl_FragColor = texture2D(tDiffuse, vUv); }`,
+  fragmentShader: `
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform sampler2D tDepth;
+    uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform int uMode;
+    vec3 worldFromDepth(vec2 uv, float rawDepth){
+      // NDC (note three depth texture stores [0,1])
+      vec4 ndc = vec4(uv*2.0-1.0, rawDepth*2.0-1.0, 1.0);
+      vec4 view = uInvProj * ndc; view /= view.w;        // view space
+      vec4 world = uCamWorld * view;                      // world space
+      return world.xyz;
+    }
+    void main(){
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      float d = texture2D(tDepth, vUv).x;
+      if (uMode==1){
+        if (d >= 1.0){ gl_FragColor=vec4(0.0,0.0,0.0,1.0); return; } // sky / no geometry
+        vec3 w = worldFromDepth(vUv, d);
+        gl_FragColor = vec4(fract(w*0.2), 1.0);            // banded world-pos viz
+        return;
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }`,
   depthTest:false, depthWrite:false,
 });
 const fsQuad = new FullScreenQuad(passMat);
@@ -101,6 +126,10 @@ function renderFrame(){
   renderer.setRenderTarget(sceneRT); renderer.clear(); renderer.render(scene, camera);
   // 2) display sceneRT to screen (passthrough for now)
   passMat.uniforms.tDiffuse.value = sceneRT.texture;
+  passMat.uniforms.tDepth.value = sceneRT.depthTexture;
+  passMat.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
+  passMat.uniforms.uCamWorld.value.copy(camera.matrixWorld);
+  passMat.uniforms.uCamPos.value.copy(camera.position);
   renderer.setRenderTarget(null); fsQuad.render(renderer);
 }
 function tick(now){
