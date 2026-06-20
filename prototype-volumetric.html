@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<!-- PROTOTYPE — throwaway. True WebGL2 volumetric (shadow-aware raymarch) god-ray
+     lighting on the monitor. Not wired into the app. Delete once validated. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROTOTYPE — volumetric</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:ui-monospace,monospace}
+  #c{display:block;width:100vw;height:100vh}
+  .panel{position:fixed;top:12px;left:12px;z-index:10;background:rgba(0,0,0,.55);color:#ffd9a8;padding:10px 12px;border-radius:8px;font-size:11px;line-height:1.9;backdrop-filter:blur(6px);border:1px solid rgba(255,200,120,.2);max-width:240px;user-select:none}
+  .panel label{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .panel input[type=range]{width:120px;accent-color:#ffb86b}
+  .play{position:fixed;bottom:18px;right:18px;z-index:10;background:rgba(0,0,0,.55);color:#ffd9a8;border:1px solid rgba(255,200,120,.2);padding:8px 12px;border-radius:8px;font-size:12px;cursor:pointer}
+  .err{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#ff8a8a;font-size:13px;background:rgba(0,0,0,.7);padding:14px;border-radius:8px;max-width:60vw;z-index:20;display:none;white-space:pre-wrap}
+</style></head>
+<body>
+  <canvas id="c"></canvas>
+  <div class="panel" id="panel">
+    <div id="state">loading…</div><hr>
+    <label>exposure <input id="exposure" type="range" min="0.15" max="2.5" step="0.05" value="1.0"></label>
+    <label>density <input id="density" type="range" min="0" max="2.5" step="0.02" value="0.8"></label>
+    <label>intensity <input id="intensity" type="range" min="0" max="3" step="0.05" value="1.0"></label>
+    <label>steps <input id="steps" type="range" min="16" max="96" step="8" value="56"></label>
+  </div>
+  <div class="play" id="playbtn">⏸ pause &nbsp;·&nbsp; <span id="scrub">arc 0%</span></div>
+  <div class="err" id="err"></div>
+
+  <script type="importmap">
+  { "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/"
+  } }
+  </script>
+  <script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { Pass } from 'three/addons/postprocessing/Pass.js';
+
+const WARM = 0xffb86b;
+const SUBJECT = new THREE.Vector3(0, 0.3, 0.4);
+const showErr = (e)=>{ const el=document.getElementById('err'); el.style.display='block'; el.textContent=String(e&&e.stack||e); console.error(e); };
+window.addEventListener('error', (e)=>showErr(e.message));
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.CineonToneMapping; renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(0,-0.7,12.5); camera.lookAt(0,0.6,0);
+scene.add(new THREE.AmbientLight(0xffffff, 0.02));
+
+// Hero shadow-casting light (the lamp). Its shadow map breaks the volumetric beams.
+const sun = new THREE.DirectionalLight(WARM, 0);
+sun.castShadow = true; sun.shadow.mapSize.set(2048,2048);
+const sc = sun.shadow.camera; sc.left=-7; sc.right=7; sc.top=7; sc.bottom=-7; sc.near=1; sc.far=120; sc.updateProjectionMatrix();
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
+sun.position.set(2,4,-9); sun.target.position.copy(SUBJECT); scene.add(sun, sun.target);
+
+// Color + depth render target for the scene (depth feeds the raymarch).
+function makeRT(){ const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter });
+  rt.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight); rt.depthTexture.type = THREE.UnsignedShortType; return rt; }
+let sceneRT = makeRT();
+
+// Passthrough display material (swapped for the volumetric material in Task 4).
+const passMat = new THREE.ShaderMaterial({
+  uniforms: { tDiffuse:{value:null} },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
+  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; void main(){ gl_FragColor = texture2D(tDiffuse, vUv); }`,
+  depthTest:false, depthWrite:false,
+});
+const fsQuad = new Pass.FullScreenQuad(passMat);
+
+let monitorReady = false;
+const draco = new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/libs/draco/');
+const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
+loader.load('/models/tv1.glb', (g)=>{
+  scene.add(g.scene);
+  for (const n of ['Cube','Cube007','Cube006','Rubber','Glass']) { const m=g.scene.getObjectByName(n); if(m){m.castShadow=true;m.receiveShadow=true;} }
+  const glass=g.scene.getObjectByName('Glass'); if(glass) glass.material=new THREE.MeshBasicMaterial({color:0x040404,toneMapped:false});
+  const plane=g.scene.getObjectByName('Plane'); if(plane){plane.receiveShadow=true;renderer.localClippingEnabled=true;plane.material.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),-1.9)];}
+  monitorReady = true; document.getElementById('state').textContent='ready';
+}, undefined, (e)=>showErr('GLB load failed: '+e));
+
+const ctrl = { exposure:exposure, density:density, intensity:intensity, steps:steps };
+function applyControls(){ renderer.toneMappingExposure = +ctrl.exposure.value; }
+Object.values(ctrl).forEach(el=>el.addEventListener('input', applyControls));
+
+let arc = 0.25, playing = false, last = performance.now();
+function placeSun(a){ // simple arc for now; refined in Task 6
+  const th = THREE.MathUtils.degToRad(200 + (40-200)*a);
+  sun.position.set(SUBJECT.x+1.0, SUBJECT.y + Math.sin(th)*6, SUBJECT.z + Math.cos(th)*9);
+  sun.target.position.copy(SUBJECT); sun.target.updateMatrixWorld();
+  sun.intensity = 2.0;
+}
+function renderFrame(){
+  // 1) scene → sceneRT (lights + shadows)
+  renderer.setRenderTarget(sceneRT); renderer.clear(); renderer.render(scene, camera);
+  // 2) display sceneRT to screen (passthrough for now)
+  passMat.uniforms.tDiffuse.value = sceneRT.texture;
+  renderer.setRenderTarget(null); fsQuad.render(renderer);
+}
+function tick(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if (playing) arc=(arc+dt/9)%1;
+  if (monitorReady){ placeSun(arc); renderFrame(); }
+  document.getElementById('scrub').textContent='arc '+Math.round(arc*100)+'%';
+  requestAnimationFrame(tick);
+}
+addEventListener('keydown',(e)=>{ if(e.key===' '){playing=!playing; document.getElementById('playbtn').firstChild.textContent=playing?'⏸ pause ':'▶ play ';} });
+document.getElementById('playbtn').onclick=()=>{playing=!playing; document.getElementById('playbtn').firstChild.textContent=playing?'⏸ pause ':'▶ play ';};
+addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); const old=sceneRT; sceneRT=makeRT(); old.dispose(); });
+
+window.__V = { THREE, renderer, scene, camera, sun, sceneRT:()=>sceneRT, fsQuad, passMat, SUBJECT, get arc(){return arc;}, set arc(v){arc=v;}, set playing(v){playing=v;}, placeSun, renderFrame }; // TEMP debug handle
+applyControls(); requestAnimationFrame(tick);
+  </script>
+</body></html>
