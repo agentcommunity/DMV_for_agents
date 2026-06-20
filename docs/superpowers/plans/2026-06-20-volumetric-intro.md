@@ -41,7 +41,7 @@ There is exactly one file because this is a throwaway visual prototype; splittin
   - `renderer` (THREE.WebGLRenderer), `scene`, `camera` (PerspectiveCamera), `SUBJECT` (THREE.Vector3), `WARM` (0xffb86b).
   - `sun` (THREE.DirectionalLight, castShadow true, the hero light).
   - `sceneRT` (THREE.WebGLRenderTarget with `.depthTexture` a THREE.DepthTexture).
-  - `fsQuad` pattern: a fullscreen pass rendered by a `THREE.Mesh(new THREE.PlaneGeometry(2,2), passMaterial)` in a separate ortho scene `quadScene` + `quadCam` (THREE.OrthographicCamera) — OR three's `FullScreenQuad` from `three/addons/postprocessing/Pass.js`. Use `Pass.FullScreenQuad`.
+  - `fsQuad`: three's `FullScreenQuad` (a NAMED export of `three/addons/postprocessing/Pass.js` in r152 — `import { FullScreenQuad }`, then `new FullScreenQuad(passMat)`; it has a `.render(renderer)` method). NOT `Pass.FullScreenQuad` (removed in r152).
   - `tick(now)` render loop calling `renderFrame()`.
   - `renderFrame()`: renders `scene`→`sceneRT`, then displays `sceneRT.texture` to screen via a passthrough material (this task) — later tasks swap the passthrough for the volumetric material.
 
@@ -86,7 +86,7 @@ Create `prototype-volumetric.html`:
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { Pass } from 'three/addons/postprocessing/Pass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const WARM = 0xffb86b;
 const SUBJECT = new THREE.Vector3(0, 0.3, 0.4);
@@ -123,7 +123,7 @@ const passMat = new THREE.ShaderMaterial({
   fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; void main(){ gl_FragColor = texture2D(tDiffuse, vUv); }`,
   depthTest:false, depthWrite:false,
 });
-const fsQuad = new Pass.FullScreenQuad(passMat);
+const fsQuad = new FullScreenQuad(passMat);
 
 let monitorReady = false;
 const draco = new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/libs/draco/');

@@ -34,7 +34,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { Pass } from 'three/addons/postprocessing/Pass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const WARM = 0xffb86b;
 const SUBJECT = new THREE.Vector3(0, 0.3, 0.4);
@@ -60,9 +60,10 @@ sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
 sun.position.set(2,4,-9); sun.target.position.copy(SUBJECT); scene.add(sun, sun.target);
 
 // Color + depth render target for the scene (depth feeds the raymarch).
-function makeRT(){ const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter });
-  rt.depthTexture = new THREE.DepthTexture(innerWidth, innerHeight); rt.depthTexture.type = THREE.UnsignedShortType; return rt; }
-let sceneRT = makeRT();
+function makeRT(w, h){ const rt = new THREE.WebGLRenderTarget(w, h, { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter });
+  rt.depthTexture = new THREE.DepthTexture(w, h); rt.depthTexture.type = THREE.UnsignedShortType; return rt; }
+let sceneRT = makeRT(Math.max(1,innerWidth), Math.max(1,innerHeight));
+function setSize(w, h){ camera.aspect = w/h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false); const old = sceneRT; sceneRT = makeRT(w, h); old.dispose(); }
 
 // Passthrough display material (swapped for the volumetric material in Task 4).
 const passMat = new THREE.ShaderMaterial({
@@ -71,7 +72,7 @@ const passMat = new THREE.ShaderMaterial({
   fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; void main(){ gl_FragColor = texture2D(tDiffuse, vUv); }`,
   depthTest:false, depthWrite:false,
 });
-const fsQuad = new Pass.FullScreenQuad(passMat);
+const fsQuad = new FullScreenQuad(passMat);
 
 let monitorReady = false;
 const draco = new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/libs/draco/');
@@ -111,9 +112,9 @@ function tick(now){
 }
 addEventListener('keydown',(e)=>{ if(e.key===' '){playing=!playing; document.getElementById('playbtn').firstChild.textContent=playing?'⏸ pause ':'▶ play ';} });
 document.getElementById('playbtn').onclick=()=>{playing=!playing; document.getElementById('playbtn').firstChild.textContent=playing?'⏸ pause ':'▶ play ';};
-addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); const old=sceneRT; sceneRT=makeRT(); old.dispose(); });
+addEventListener('resize',()=>{ setSize(Math.max(1,innerWidth), Math.max(1,innerHeight)); });
 
-window.__V = { THREE, renderer, scene, camera, sun, sceneRT:()=>sceneRT, fsQuad, passMat, SUBJECT, get arc(){return arc;}, set arc(v){arc=v;}, set playing(v){playing=v;}, placeSun, renderFrame }; // TEMP debug handle
+window.__V = { THREE, renderer, scene, camera, sun, sceneRT:()=>sceneRT, fsQuad, passMat, SUBJECT, get arc(){return arc;}, set arc(v){arc=v;}, set playing(v){playing=v;}, placeSun, renderFrame, setSize }; // TEMP debug handle
 applyControls(); requestAnimationFrame(tick);
   </script>
 </body></html>
