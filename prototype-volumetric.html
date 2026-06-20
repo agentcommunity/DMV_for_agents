@@ -106,9 +106,14 @@ const passMat = new THREE.ShaderMaterial({
     }
     float sampleShadow(vec3 worldPos){
       vec4 sc = uShadowMatrix * vec4(worldPos, 1.0); sc /= sc.w; // three's matrix → [0,1] uv + depth
-      if (sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z>1.0) return 1.0; // outside the shadow frustum = lit
+      // VOLUMETRIC beam membership: a directional light scatters in ALL open air, which washes the
+      // whole sky to white. Confine scattering to the light's frustum (the beam) so the silhouette's
+      // shadow shaft reads against a dark sky. Outside the frustum = not in the beam = no scatter.
+      if (sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z>1.0) return 0.0;
       float occ = texture2D(uShadowMap, sc.xy).x;                       // stored nearest depth [0,1]
-      return (sc.z - 0.0015 > occ) ? 0.0 : 1.0;                          // bias to avoid acne
+      float lit = (sc.z - 0.0015 > occ) ? 0.0 : 1.0;                     // shadow test (bias avoids acne)
+      vec2 e = smoothstep(0.0, 0.18, sc.xy) * smoothstep(0.0, 0.18, 1.0 - sc.xy); // soft beam edges
+      return lit * e.x * e.y;
     }
     void main(){
       vec3 col = texture2D(tDiffuse, vUv).rgb;
@@ -137,8 +142,11 @@ const passMat = new THREE.ShaderMaterial({
         p += rd * stepSize;
       }
       float phase = hg(dot(rd, normalize(uLightDir)), uG); // forward scatter toward the lamp
-      accum *= stepSize * uDensity * (0.4 + 1.6 * phase);
+      // 0.02 maps the ~35-unit lit-air integral back into a sane [0,1]-ish range so density~1 reads
+      // as a soft beam rather than a blown-white wall.
+      accum *= stepSize * uDensity * 0.02 * (0.4 + 1.6 * phase);
       vec3 glow = uLightColor * accum * uIntensity;
+      glow = vec3(1.0) - exp(-glow);                       // exposure rolloff: saturate gracefully, never hard-clip
       gl_FragColor = vec4(col + glow, 1.0);
     }`,
   depthTest:false, depthWrite:false,
