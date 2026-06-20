@@ -224,6 +224,14 @@ export class Intro {
   _buildTimeline() {
     const S = this._S;
     const BEAT = this.config.beats;
+    // The fade/black/end are DERIVED from the arc end + durations so that changing ARC_DUR
+    // (or ARC_START) stretches the WHOLE timeline. If they were fixed absolute positions, a
+    // longer arc would just be truncated by a fade that still fires at the same second.
+    // Defaults reproduce the old absolutes exactly: 3.55+6.60=10.15 → FADE 10.35 → BLACK 11.20 → END 12.25.
+    const ARC_END    = BEAT.ARC_START + BEAT.ARC_DUR;
+    const FADE_START = ARC_END + 0.20;             // brief hold at full arc, then fade
+    const BLACK      = FADE_START + BEAT.FADE_DUR;
+    const END        = BLACK + BEAT.REVEAL_DUR + 0.15;
     const tl = gsap.timeline({ onComplete: () => this._finalize() });
 
     // Crack the shutter to letterbox right away so the button flicker is
@@ -253,19 +261,19 @@ export class Intro {
     // revealed scene black). The lamp/beam stay at full and are torn down with
     // the pass under the black.
     tl.to(this, { _blackAmt: 1, duration: BEAT.FADE_DUR, ease: 'power2.in',
-      onUpdate: () => this._applyFade() }, BEAT.FADE_START);
+      onUpdate: () => this._applyFade() }, FADE_START);
 
     // FULL BLACK — restore the exact normal scene under cover; wall sign in.
-    tl.call(() => { this._restoreScene(); if (this.onReveal) this.onReveal(); }, null, BEAT.BLACK);
+    tl.call(() => { this._restoreScene(); if (this.onReveal) this.onReveal(); }, null, BLACK);
 
     // REVEAL — lift the black; the normal flat-lit scene is underneath.
     tl.to(this, { _blackAmt: 0, duration: BEAT.REVEAL_DUR, ease: 'power2.out',
-      onUpdate: () => this._applyFade() }, BEAT.BLACK + 0.05);
+      onUpdate: () => this._applyFade() }, BLACK + 0.05);
     if (this.overlay) {
-      tl.call(() => this.overlay.classList.add('is-clearing'), null, BEAT.BLACK);
+      tl.call(() => this.overlay.classList.add('is-clearing'), null, BLACK);
     }
 
-    tl.to({}, { duration: Math.max(0.1, BEAT.END - (BEAT.BLACK + 0.05 + BEAT.REVEAL_DUR)) });
+    tl.to({}, { duration: Math.max(0.1, END - (BLACK + 0.05 + BEAT.REVEAL_DUR)) });
 
     return tl;
   }
