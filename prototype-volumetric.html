@@ -73,6 +73,7 @@ const passMat = new THREE.ShaderMaterial({
     uMode:{value:1}, // 1 = debug worldpos, 0 = passthrough
     uShadowMap:{value:null}, uShadowMatrix:{value:new THREE.Matrix4()},
     uLightColor:{value:new THREE.Color(WARM)}, uDensity:{value:0.8}, uIntensity:{value:1.0}, uMaxDist:{value:60.0},
+    uSteps:{value:56.0}, uLightDir:{value:new THREE.Vector3()}, uG:{value:0.6},
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
   fragmentShader: `
@@ -81,6 +82,21 @@ const passMat = new THREE.ShaderMaterial({
     uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform int uMode;
     uniform sampler2D uShadowMap; uniform mat4 uShadowMatrix;
     uniform vec3 uLightColor; uniform float uDensity; uniform float uIntensity; uniform float uMaxDist;
+    uniform float uSteps; uniform vec3 uLightDir; uniform float uG;
+    float bayer4(vec2 p){
+      // 4x4 ordered dither, returns [0,1)
+      int x = int(mod(p.x,4.0)); int y = int(mod(p.y,4.0));
+      int idx = x + y*4;
+      float m[16];
+      m[0]=0.;m[1]=8.;m[2]=2.;m[3]=10.;m[4]=12.;m[5]=4.;m[6]=14.;m[7]=6.;
+      m[8]=3.;m[9]=11.;m[10]=1.;m[11]=9.;m[12]=15.;m[13]=7.;m[14]=13.;m[15]=5.;
+      float v=0.0; for(int i=0;i<16;i++){ if(i==idx) v=m[i]; }
+      return v/16.0;
+    }
+    float hg(float cosT, float g){
+      float g2=g*g; float denom=1.0+g2-2.0*g*cosT;
+      return (1.0-g2)/(4.0*3.14159265*pow(max(denom,1e-3),1.5));
+    }
     vec3 worldFromDepth(vec2 uv, float rawDepth){
       // NDC (note three depth texture stores [0,1])
       vec4 ndc = vec4(uv*2.0-1.0, rawDepth*2.0-1.0, 1.0);
@@ -107,18 +123,21 @@ const passMat = new THREE.ShaderMaterial({
       float marchLen = min(length(rd), uMaxDist);
       rd = normalize(rd);
 
-      const int MAXS = 96;
-      float fsteps = 56.0;                              // overridden by uniform below if added
+      float fsteps = clamp(uSteps, 8.0, 96.0);
       float stepSize = marchLen / fsteps;
+      float jitter = bayer4(gl_FragCoord.xy);            // break banding
       float accum = 0.0;
-      vec3 p = ro;
-      for (int i=0;i<MAXS;i++){
+      vec3 p = ro + rd * stepSize * jitter;
+      for (int i=0;i<96;i++){
         if (float(i) >= fsteps) break;
-        p += rd * stepSize;
         float lit = sampleShadow(p);
-        accum += lit;
+        // distance fog falloff so near-camera haze doesn't dominate
+        float fog = exp(-length(p - ro) * 0.02);
+        accum += lit * fog;
+        p += rd * stepSize;
       }
-      accum *= stepSize * uDensity;                     // integrate in-scatter
+      float phase = hg(dot(rd, normalize(uLightDir)), uG); // forward scatter toward the lamp
+      accum *= stepSize * uDensity * (0.4 + 1.6 * phase);
       vec3 glow = uLightColor * accum * uIntensity;
       gl_FragColor = vec4(col + glow, 1.0);
     }`,
@@ -162,6 +181,8 @@ function renderFrame(){
   passMat.uniforms.uLightColor.value.set(WARM);
   passMat.uniforms.uDensity.value = +ctrl.density.value;
   passMat.uniforms.uIntensity.value = +ctrl.intensity.value;
+  passMat.uniforms.uSteps.value = +ctrl.steps.value;
+  passMat.uniforms.uLightDir.value.copy(SUBJECT).sub(sun.position).normalize();
   renderer.setRenderTarget(null); fsQuad.render(renderer);
 }
 function tick(now){
