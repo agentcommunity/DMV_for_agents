@@ -410,9 +410,11 @@ export function createIntroControlPanel({ config, intro, tv }) {
   panel.appendChild(scrubLabel);
   panel.appendChild(scrubWrap);
 
-  // Capture-phase listeners: ANY slider/select/toggle/color change auto-persists config.
-  panel.addEventListener('input',  save, true);
-  panel.addEventListener('change', save, true);
+  // Bubble-phase listeners: ANY slider/select/toggle/color change auto-persists config.
+  // MUST be bubble phase (not capture) so save() runs AFTER each control's own handler
+  // mutates config — capture phase would serialize the pre-change value (off-by-one).
+  panel.addEventListener('input',  save);
+  panel.addEventListener('change', save);
 
   // Panel appended to body (not intro overlay) so it survives intro completion.
   document.body.appendChild(panel);
