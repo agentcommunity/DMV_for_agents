@@ -3,7 +3,7 @@ import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=9';
+import { Intro } from './Intro.js?v=56';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -1126,7 +1126,13 @@ if (runIntro) {
   intro.play().then(finishIntro).catch((err) => {
     console.error('Intro failed — falling back to normal scene:', err);
     window.removeEventListener('keydown', onIntroKey, true);
+    // Route the failure through the intro's own teardown so the volumetric pass
+    // is detached (tv.setVolumetricPass(null)), disposed, and its light group
+    // removed — otherwise the pass + sceneRT would leak on the error path.
+    // skip() is idempotent (guards on _done) and funnels through _restoreScene.
+    try { intro.skip(); } catch { /* best-effort */ }
     tv.introActive = false;
+    tv.setVolumetricPass(null);
     tv.renderer.setClearColor(tv.fogColor, 1);
     if (tv.ambientLight) tv.ambientLight.intensity = 0.5;
     if (tv.pointLight) tv.pointLight.intensity = 0.5;

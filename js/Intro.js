@@ -1,6 +1,10 @@
 import * as THREE from 'three';
+import { createVolumetricPass } from './volumetric-pass.js?v=1';
 
 const gsap = window.gsap;
+
+// Per-frame volumetric tunables (Task 5 will replace this with a live config).
+const VOL_PARAMS = { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50, color: '#ffb86b' };
 
 // Cinematic "video mode" intro — a slow warm sunrise reveal of the TV scene.
 //
@@ -29,13 +33,10 @@ const BEAT = {
   END: 12.25,
 };
 
+// The lamp aims here — the monitor centre. Passed to createVolumetricPass as its
+// arc/aim subject so the volumetric DirectionalLight focuses the same focal point
+// the old SpotLight arc did. (The arc radius/angles now live inside the pass.)
 const SUBJECT = new THREE.Vector3(0, 0.25, 0.4);
-const ARC_R = 9.0;
-const ARC_RY = 5.5;
-const ARC_SIDE = 1.2;
-const ARC_THETA0 = THREE.MathUtils.degToRad(206); // behind & low (horizon)
-const ARC_THETA1 = THREE.MathUtils.degToRad(40);  // front & up, above viewpoint
-const SUN_PEAK = 18;
 const LAMP_COLOR = 0xffb86b; // warm Edison amber
 const BTN_DAY = 0x33ff88;    // CRT power-button colour (day palette)
 const C_BLACK = new THREE.Color(0x000000);
@@ -151,30 +152,22 @@ export class Intro {
     if (this.tv.pointLight) this.tv.pointLight.intensity = 0;
     if (this.tv.triggerEl) this.tv.triggerEl.material.color.setHex(0x000000);
 
-    // The lamp — a hard, focused, warm SpotLight. We never render the source;
-    // only what it lands on.
-    const sun = new THREE.SpotLight(LAMP_COLOR, 0);
-    sun.angle = THREE.MathUtils.degToRad(38);
-    sun.penumbra = 0.16;
-    sun.decay = 0;
-    sun.distance = 0;
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 60;
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.03;
-    sun.shadow.radius = 1.6;
-    sun.target.position.copy(SUBJECT);
-    rig.add(sun, sun.target);
-    this.sun = sun;
-    this._placeSun(0);
+    // The lamp — a real volumetric god-ray pass (shadow-casting DirectionalLight +
+    // a full-screen ray-march composited over the scene render target). We never
+    // render the source; only the lit air + what it lands on. Aim it at the same
+    // SUBJECT the old SpotLight arc targeted so the monitor stays the focal point.
+    this.pass = createVolumetricPass(THREE, { subject: SUBJECT });
+    this.scene.add(this.pass.group);
+    this.tv.setVolumetricPass(this.pass);
+    // The main scene (GLB) is already present by the time the intro is built, so
+    // the shadow map will be live on the first two-pass frame. TV also guards on
+    // `_sceneRT`, so flipping ready here is safe.
+    this.pass.setReady(true);
+    this.pass.driveArc(this._S.a, VOL_PARAMS); // seat the lamp at the arc start
 
-    // A contained warm backlight halo sitting just behind the monitor. The
-    // monitor occludes its core (depth-tested), so what shows is a glow wrapping
-    // the monitor's edges — the backlit silhouette. It only appears during the
-    // low sunrise and is gone before the lamp climbs, so it never reads as a
-    // floating disc.
+    // (Task 4 deletes the sprite/halo + radial-texture/bezel-matte code cleanly.)
+    // For now the visual is the volumetric pass ALONE — keep the sprite allocated
+    // but never render it: skip its per-frame update (see _tick) and hide it.
     this._sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this._radialTexture(256, 0.5), // a soft halo with a readable bright core
       color: LAMP_COLOR,
@@ -185,6 +178,7 @@ export class Intro {
       depthTest: true,
       toneMapped: false,
     }));
+    this._sunGlow.visible = false;
     rig.add(this._sunGlow);
 
     if (this.tv.camera) {
@@ -194,15 +188,6 @@ export class Intro {
 
     this._applyBars();
     this._applyFade();
-  }
-
-  _placeSun(a) {
-    const theta = ARC_THETA0 + (ARC_THETA1 - ARC_THETA0) * a;
-    this.sun.position.set(
-      SUBJECT.x + ARC_SIDE,
-      SUBJECT.y + Math.sin(theta) * ARC_RY,
-      SUBJECT.z + Math.cos(theta) * ARC_R
-    );
   }
 
   _smooth(x, e0, e1) {
@@ -257,21 +242,22 @@ export class Intro {
       this._addButtonFlicker(tl, BEAT.POWER);
       tl.call(() => { if (this.onStart) this.onStart(); }, null, BEAT.SUNRISE);
 
-      // SUNRISE — the warm lamp glows up from behind, stationary (a stays 0).
-      tl.fromTo(this.sun, { intensity: 0 },
-        { intensity: 9, duration: BEAT.ARC_START - BEAT.SUNRISE, ease: 'power2.out' }, BEAT.SUNRISE);
+      // SUNRISE — the warm lamp glows up from behind, stationary (a stays 0). The
+      // lamp brightness + volumetric density are now owned by driveArc(a); here we
+      // only ramp pass-1 exposure to lift the scene out of black.
       tl.fromTo(this.renderer, { toneMappingExposure: 0.42 },
         { toneMappingExposure: 3.0, duration: 6.5, ease: 'power2.out' }, BEAT.SUNRISE);
 
       // ARC — the lamp starts MOVING (visible from the borders) and keeps
-      // strengthening: behind → over the top → high in front.
+      // strengthening: behind → over the top → high in front. driveArc(a) reads
+      // this tween every frame in _tick, so it drives both the lamp arc AND the
+      // volumetric beam strength.
       tl.to(S, { a: 1, duration: BEAT.ARC_DUR, ease: 'sine.inOut' }, BEAT.ARC_START);
-      tl.to(this.sun, { intensity: SUN_PEAK, duration: BEAT.ARC_DUR * 0.85, ease: 'power1.in' }, BEAT.ARC_START);
 
-      // FADE TO BLACK — the lamp dies and the DOM black layer covers; we do NOT
-      // tween exposure here (it would race the exposure restore in _restoreScene
-      // and could leave the revealed scene black).
-      tl.to(this.sun, { intensity: 0, duration: BEAT.FADE_DUR, ease: 'power2.in' }, BEAT.FADE_START);
+      // FADE TO BLACK — the DOM black layer covers; we do NOT tween exposure here
+      // (it would race the exposure restore in _restoreScene and could leave the
+      // revealed scene black). The lamp/beam stay at full and are torn down with
+      // the pass under the black.
       tl.to(this, { _blackAmt: 1, duration: BEAT.FADE_DUR, ease: 'power2.in',
         onUpdate: () => this._applyFade() }, BEAT.FADE_START);
 
@@ -325,24 +311,15 @@ export class Intro {
     if (this._done) return;
     this._t += dt;
     const a = this._S.a;
-    this._placeSun(a);
 
-    // The warm halo ORBITS the monitor following the lamp: behind it during the
-    // sunrise (the backlit silhouette), then travelling up and over to the
-    // front WITH the lamp. It fades in once the arc starts (no halo during the
-    // initial sunrise) and never fades back out.
-    if (this._sunGlow) {
-      this._gv1.copy(this.sun.position).sub(SUBJECT).normalize();
-      this._gv2.copy(SUBJECT).addScaledVector(this._gv1, 4.5); // orbit radius
-      this._sunGlow.position.copy(this._gv2);
-      const cam = this.tv.camera;
-      const dist = cam ? this._gv2.distanceTo(cam.position) : 18;
-      const s = dist * 0.5; // keep a roughly constant (large) on-screen size as it travels
-      this._sunGlow.scale.set(s, s, 1);
-      const k = Math.min(1, this.sun.intensity / SUN_PEAK);
-      const vis = this._smooth(a, 0.0, 0.16); // fade in as the arc begins; no fade-out
-      this._sunGlow.material.opacity = vis * (0.55 + 0.45 * k);
-    }
+    // Drive the volumetric lamp arc from the GSAP-tweened arc value. driveArc owns
+    // the DirectionalLight position/intensity + the beam uniforms; TV.js calls
+    // updateUniforms() + renders the full-screen pass AFTER this tick (its two-pass
+    // branch runs in _render, after the render-callback loop).
+    if (this.pass) this.pass.driveArc(a, VOL_PARAMS);
+
+    // (Sprite halo is neutralized this task — invisible + not updated. Task 4
+    // removes it. The visual is the volumetric pass alone.)
 
     // Restore the bezel's gloss only once the lamp is above/front, so the panel
     // doesn't reflect the light before it gets there.
@@ -390,6 +367,19 @@ export class Intro {
     this.tv.progress = 0;
     this.tv.introActive = false;
 
+    // Tear down the volumetric pass: detach it from TV's render seam (disposes
+    // _sceneRT), release the pass's GPU resources, and remove its DirectionalLight
+    // group from the scene. Idempotent via _sceneRestored, but null the handle too
+    // so a stray double-call can't dispose twice.
+    if (this.pass) {
+      this.tv.setVolumetricPass(null);
+      this.pass.dispose(); // also removes this.pass.group from its parent
+      if (this.pass.group && this.pass.group.parent) {
+        this.pass.group.parent.remove(this.pass.group);
+      }
+      this.pass = null;
+    }
+
     const cbs = this.tv._renderCallbacks;
     if (cbs) {
       const i = cbs.indexOf(this._renderCb);
@@ -416,7 +406,8 @@ export class Intro {
 
   _disposeRig() {
     if (!this.rig) return;
-    if (this.sun) { this.sun.dispose?.(); this.sun = null; }
+    // (The lamp/DirectionalLight now lives in the volumetric pass, torn down in
+    // _restoreScene via this.pass.dispose(). The rig only holds the dormant sprite.)
     this.scene.remove(this.rig);
     this.rig.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose();
