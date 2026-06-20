@@ -68,6 +68,9 @@ export class TV {
     this.fakeTrigger = null;
     this.progress = 0;
     this.crtBooted = false;
+    // While the cinematic intro plays it owns the camera + lighting; the normal
+    // per-frame camera driver (rotateCamera) yields to it. See Intro.js.
+    this.introActive = false;
 
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(this.fogColor, 27, 29);
@@ -143,6 +146,11 @@ export class TV {
     this._renderCallbacks = [];
     this._clock = new THREE.Clock();
 
+    // Volumetric post-process seam — null until setVolumetricPass() is called.
+    // When _volPass is null the render path is byte-identical to before.
+    this._sceneRT = null;
+    this._volPass = null;
+
     document.addEventListener('mouseleave', (e) => {
       if (e.clientY <= 0 || e.clientX <= 0 ||
           e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
@@ -152,11 +160,50 @@ export class TV {
     });
   }
 
+  // --- Volumetric post-process seam ---
+
+  makeVolRT(w, h) {
+    const rt = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+    });
+    rt.depthTexture = new THREE.DepthTexture(w, h);
+    rt.depthTexture.type = THREE.UnsignedShortType;
+    return rt;
+  }
+
+  setVolumetricPass(pass) {
+    if (pass) {
+      this._volPass = pass;
+      const ctx = this.renderer.getContext();
+      const w = ctx.drawingBufferWidth;
+      const h = ctx.drawingBufferHeight;
+      if (this._sceneRT) {
+        this._sceneRT.depthTexture.dispose();
+        this._sceneRT.dispose();
+      }
+      this._sceneRT = this.makeVolRT(w, h);
+    } else {
+      if (this._sceneRT) {
+        this._sceneRT.depthTexture.dispose();
+        this._sceneRT.dispose();
+        this._sceneRT = null;
+      }
+      this._volPass = null;
+    }
+  }
+
   getScene() {
     return this.scene;
   }
 
   async init(options = {}) {
+    // Shadow mapping is enabled once and left on. The normal scene's lights
+    // (ambient + point) don't cast, so it renders identically to before; only
+    // the cinematic intro's sun casts shadows. Enabling it up-front avoids a
+    // mid-session shader recompile hitch. See Intro.js.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     if (!options.skipModel) {
       try { await this.loadModel(); }
       catch (err) { console.error('Error loading model:', err); }
@@ -279,7 +326,7 @@ export class TV {
   }
 
   rotateCamera() {
-    if (!this.camera || this.isCardZoomed || this.isAboutZoomed) return;
+    if (!this.camera || this.isCardZoomed || this.isAboutZoomed || this.introActive) return;
     this.mouseTarget.lerp(this.toNDC(), 0.05);
     this.camera.position.x = 0.5 * 14.7 * this.mouseTarget.x * (1 - this.progress);
     // Fit terminal framing dynamically so narrow phones don't over-zoom.
@@ -606,7 +653,16 @@ export class TV {
     for (const cb of this._renderCallbacks) cb(dt);
 
     if (this.camera) {
-      this.renderer.render(this.scene, this.camera);
+      if (this.introActive && this._volPass && this._volPass.ready && this._sceneRT) {
+        this.renderer.setRenderTarget(this._sceneRT);
+        this.renderer.clear();
+        this.renderer.render(this.scene, this.camera);
+        this._volPass.updateUniforms(this._sceneRT, this.camera);
+        this.renderer.setRenderTarget(null);
+        this._volPass.fsQuad.render(this.renderer);
+      } else {
+        this.renderer.render(this.scene, this.camera);
+      }
       this._setLabelPosition();
       this.rotateCamera();
     }
@@ -646,6 +702,12 @@ export class TV {
     this.sizes.width = box.width;
     this.sizes.height = box.height;
     this._setRendererSizes();
+    if (this._sceneRT) {
+      this._sceneRT.depthTexture.dispose();
+      this._sceneRT.dispose();
+      const ctx = this.renderer.getContext();
+      this._sceneRT = this.makeVolRT(ctx.drawingBufferWidth, ctx.drawingBufferHeight);
+    }
     this.camera.aspect = this.sizes.aspect;
     this.camera.updateProjectionMatrix();
     if (this.isCardZoomed) {

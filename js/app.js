@@ -1,8 +1,9 @@
-import { TV } from './TV.js?v=37';
+import { TV } from './TV.js?v=40';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
 import { WallNumber } from './WallNumber.js?v=1';
+import { Intro } from './Intro.js?v=9';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -206,6 +207,23 @@ function resetTurnstile() {
 }
 
 const tv = new TV(container, label);
+
+// ─── Cinematic intro gate ("video mode") ──────────────────────────
+// The reveal plays on the landing page only. Skipped for permalinks/demo,
+// when the user asks (?skipintro), or when reduced-motion is preferred.
+const introParams = new URLSearchParams(location.search);
+const prefersReducedMotion =
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const runIntro = !permalink
+  && !introParams.has('demo')
+  && !introParams.has('skipintro')
+  && !prefersReducedMotion;
+if (runIntro) {
+  // Go black before the very first frame so there's no flash of the lit scene.
+  document.body.classList.add('intro-active');
+  tv.renderer.setClearColor(0x000000, 1);
+}
+
 // In permalink mode skip the 2.2MB GLB model — user just wants the card.
 // The model will be loaded on demand if the user navigates back to the full experience.
 await tv.init({ skipModel: !!permalink });
@@ -227,10 +245,19 @@ const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
 
 const wallSign = new WallSign(tv.getScene());
-setTimeout(() => wallSign.flickerOn(), 1200);
-
 const wallNumber = new WallNumber(tv.getScene());
-setTimeout(() => { const cta = document.getElementById('centerCta'); if (cta) cta.classList.add('is-visible'); }, 2800);
+
+function showCenterCta() {
+  const cta = document.getElementById('centerCta');
+  if (cta) cta.classList.add('is-visible');
+}
+
+// Without the cinematic intro, the wall sign + CTA come up on their own timers.
+// With it, the intro orchestrates both (flicker at the reveal, CTA on finish).
+if (!runIntro) {
+  setTimeout(() => wallSign.flickerOn(), 1200);
+  setTimeout(showCenterCta, 2800);
+}
 
 function applyOuterUITheme(isNightMode) {
   const dark = Boolean(isNightMode);
@@ -1038,11 +1065,76 @@ soundToggle?.addEventListener('click', () => {
   soundOn = !soundOn;
   soundToggle.classList.toggle('active', soundOn);
   if (soundOn) {
+    audio.volume = 1;
     audio.play();
   } else {
     audio.pause();
   }
 });
+
+// ─── Cinematic intro ("video mode") ───────────────────────────────
+// Black → backlit silhouette → laser+smoke reveal → arrive at the landing.
+// Music starts on the light-stab; if the browser blocks autoplay the stage
+// shows a "tap for sound" hint and the first click starts it. Skippable.
+if (runIntro) {
+  const introSoundHint = document.getElementById('introSound');
+
+  function markSoundOn() {
+    if (soundOn) return;
+    soundOn = true;
+    soundToggle?.classList.add('active');
+  }
+  function startIntroAudio() {
+    if (soundOn) return;
+    try { audio.currentTime = 0; } catch { /* not seekable yet */ }
+    audio.volume = 0;
+    const p = audio.play();
+    if (!p || typeof p.then !== 'function') { markSoundOn(); return; }
+    p.then(() => {
+      markSoundOn();
+      introSoundHint?.classList.remove('is-visible');
+      gsap.to(audio, { volume: 1, duration: 0.8, ease: 'sine.out' });
+    }).catch(() => {
+      introSoundHint?.classList.add('is-visible'); // autoplay blocked → prompt
+    });
+  }
+
+  const intro = new Intro(tv, {
+    wallSign,
+    overlay: document.getElementById('introOverlay'),
+  });
+  intro.onStart = startIntroAudio;
+  intro.onSoundRequest = startIntroAudio;
+  intro.onReveal = () => wallSign.flickerOn();
+
+  // Esc / Space / Enter skip the intro.
+  const onIntroKey = (e) => {
+    if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      intro.skip();
+    }
+  };
+  window.addEventListener('keydown', onIntroKey, true);
+
+  const finishIntro = () => {
+    window.removeEventListener('keydown', onIntroKey, true);
+    document.body.classList.remove('intro-active');
+    showCenterCta();
+  };
+
+  intro.play().then(finishIntro).catch((err) => {
+    console.error('Intro failed — falling back to normal scene:', err);
+    window.removeEventListener('keydown', onIntroKey, true);
+    tv.introActive = false;
+    tv.renderer.setClearColor(tv.fogColor, 1);
+    if (tv.ambientLight) tv.ambientLight.intensity = 0.5;
+    if (tv.pointLight) tv.pointLight.intensity = 0.5;
+    document.body.classList.remove('intro-active');
+    wallSign.flickerOn();
+    showCenterCta();
+  });
+}
 
 function updateClock() {
   const now = new Date();
@@ -1200,6 +1292,8 @@ window.addEventListener('gesturechange', (e) => { if (shouldSuppressNativeGestur
 window.addEventListener('gestureend', (e) => { if (shouldSuppressNativeGesture()) e.preventDefault(); }, { passive: false });
 
 window.addEventListener('click', (e) => {
+  // While the cinematic intro owns the stage, clicks belong to it (sound/skip).
+  if (document.body.classList.contains('intro-active')) return;
   maybeEnableGyro();
   if (e.target.closest('.card-share-bar')) return;
   if (e.target.closest('.permalink-overlay')) return;
