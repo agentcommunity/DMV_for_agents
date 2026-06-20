@@ -20,6 +20,7 @@
     <label>density <input id="density" type="range" min="0" max="2.5" step="0.02" value="1.8"></label>
     <label>intensity <input id="intensity" type="range" min="0" max="3" step="0.05" value="2.0"></label>
     <label>steps <input id="steps" type="range" min="16" max="96" step="8" value="96"></label>
+    <label>light <input id="lightcol" type="color" value="#ffb86b"></label>
   </div>
   <div class="play" id="playbtn">⏸ pause &nbsp;·&nbsp; <span id="scrub">arc 0%</span></div>
   <div class="err" id="err"></div>
@@ -176,6 +177,11 @@ const ctrl = { exposure:exposure, density:density, intensity:intensity, steps:st
 function applyControls(){ renderer.toneMappingExposure = +ctrl.exposure.value; }
 Object.values(ctrl).forEach(el=>el.addEventListener('input', applyControls));
 
+// Light color drives BOTH the lamp (scene shading) and the volumetric glow, so the whole light
+// changes together (e.g. warm Edison -> white). Default matches WARM (#ffb86b).
+const lightColor = new THREE.Color(WARM);
+lightcol.addEventListener('input', ()=>{ lightColor.set(lightcol.value); sun.color.set(lightcol.value); });
+
 let arc = 0, playing = true, last = performance.now();
 const smooth=(x,a,b)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);};
 function driveArc(a){
@@ -202,7 +208,7 @@ function renderFrame(){
   passMat.uniforms.uCamPos.value.copy(camera.position);
   if (sun.shadow.map){ passMat.uniforms.uShadowMap.value = sun.shadow.map.texture; }
   passMat.uniforms.uShadowMatrix.value.copy(sun.shadow.matrix);
-  passMat.uniforms.uLightColor.value.set(WARM);
+  passMat.uniforms.uLightColor.value.copy(lightColor);
   passMat.uniforms.uSteps.value = +ctrl.steps.value;
   passMat.uniforms.uLightDir.value.copy(SUBJECT).sub(sun.position).normalize();
   renderer.setRenderTarget(null); fsQuad.render(renderer);
