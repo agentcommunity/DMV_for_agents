@@ -1147,6 +1147,7 @@ if (runIntro) {
   intro.onSoundRequest = startIntroAudio;
   intro.onReveal = () => wallSign.flickerOn();
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=1').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
 
   // Esc / Space / Enter skip the intro.
   const onIntroKey = (e) => {
