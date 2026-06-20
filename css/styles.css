@@ -1124,3 +1124,132 @@ body.scrolled .center-cta__cli { pointer-events: none; }
 @media (max-width: 767px) {
   .agent-view { padding-top: 10rem; }
 }
+
+/* === Cinematic intro ("video mode") === */
+/* While it plays, the outer UI is hidden and the page scroll is locked so the
+   reveal owns the whole frame. The class is added before the first paint and
+   removed when the director finishes (UI fades in). */
+.start-header,
+.start-screen__footer { transition: opacity 0.8s ease; }
+
+body.intro-active .start-header,
+body.intro-active .start-screen__footer,
+body.intro-active .center-cta,
+body.intro-active .start-screen__mode-switcher,
+body.intro-active .scroll-hint {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+body.intro-active #scroller { overflow: hidden; }
+
+.intro-overlay {
+  position: fixed; inset: 0;
+  z-index: 9000;
+  pointer-events: none;            /* base layer is click-through... */
+  --intro-bar: 1;                  /* 1 = shutter closed, ~0.28 = letterbox, 0 = open */
+  --intro-fade: 0;                 /* end-of-intro fade-to-black (0..1) */
+}
+
+/* Full-screen black used for the "everything goes black, then the normal scene
+   loads" hand-off. Sits above the cinematic layers but below the buttons. */
+.intro-overlay__fade {
+  position: absolute; inset: 0;
+  background: #000;
+  opacity: var(--intro-fade);
+  z-index: 1;
+}
+.intro-overlay[hidden] { display: none; }
+.intro-overlay.is-playing { pointer-events: auto; } /* ...until it owns the stage */
+
+/* Letterbox shutter — two black bars that crack open from a closed black frame
+   to a cinematic letterbox, then retract fully at the end. */
+.intro-overlay__bar {
+  position: absolute; left: 0; width: 100%;
+  height: 50vh; height: 50dvh;
+  background: #000;
+  transform: scaleY(var(--intro-bar));
+  will-change: transform;
+}
+.intro-overlay__bar--top { top: 0; transform-origin: top; }
+.intro-overlay__bar--bottom { bottom: 0; transform-origin: bottom; }
+
+/* Vignette + film grain — only present while the stage is lit. */
+.intro-overlay__vignette {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  background: radial-gradient(ellipse at center,
+    transparent 38%, rgba(0, 0, 0, 0.55) 100%);
+}
+.intro-overlay__grain {
+  position: absolute; inset: -50%;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  mix-blend-mode: overlay;
+  animation: introGrain 0.5s steps(3) infinite;
+}
+.intro-overlay.is-lit .intro-overlay__vignette { opacity: 1; }
+.intro-overlay.is-lit .intro-overlay__grain { opacity: 0.14; }
+.intro-overlay.is-clearing .intro-overlay__vignette,
+.intro-overlay.is-clearing .intro-overlay__grain { opacity: 0; }
+
+@keyframes introGrain {
+  0%   { transform: translate(0, 0); }
+  33%  { transform: translate(-4%, 3%); }
+  66%  { transform: translate(3%, -2%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* Skip + sound affordances — sit inside the bottom letterbox bar. */
+.intro-overlay__skip,
+.intro-overlay__sound {
+  position: absolute; bottom: 3rem;
+  z-index: 2;
+  pointer-events: auto;
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.3rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  background: transparent;
+  transition: opacity 0.5s ease 0.2s, color 0.25s ease;
+}
+.intro-overlay__skip {
+  right: 4rem;
+  color: rgba(255, 255, 255, 0.5);
+  opacity: 0;
+}
+.intro-overlay.is-lit .intro-overlay__skip { opacity: 1; }
+.intro-overlay.is-clearing .intro-overlay__skip { opacity: 0; }
+.intro-overlay__skip:hover { color: rgba(255, 255, 255, 0.95); }
+
+.intro-overlay__sound {
+  left: 50%; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 0.9rem;
+  color: rgba(255, 255, 255, 0.85);
+  opacity: 0; visibility: hidden;
+  animation: introSoundPulse 1.7s ease-in-out infinite;
+}
+.intro-overlay__sound.is-visible { opacity: 1; visibility: visible; }
+.intro-overlay.is-clearing .intro-overlay__sound { opacity: 0; }
+.intro-overlay__sound-dot {
+  width: 0.7rem; height: 0.7rem; border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+}
+
+@keyframes introSoundPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+@media (max-width: 767px) {
+  .intro-overlay__skip { right: 2.4rem; bottom: 2.2rem; }
+  .intro-overlay__sound { bottom: 2.2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-overlay__grain { animation: none; }
+  .intro-overlay__sound { animation: none; }
+}
