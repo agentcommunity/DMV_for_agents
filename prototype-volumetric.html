@@ -19,7 +19,7 @@
     <label>exposure <input id="exposure" type="range" min="0.15" max="2.5" step="0.05" value="1.0"></label>
     <label>density <input id="density" type="range" min="0" max="2.5" step="0.02" value="1.8"></label>
     <label>intensity <input id="intensity" type="range" min="0" max="3" step="0.05" value="2.0"></label>
-    <label>steps <input id="steps" type="range" min="16" max="96" step="8" value="64"></label>
+    <label>steps <input id="steps" type="range" min="16" max="96" step="8" value="96"></label>
   </div>
   <div class="play" id="playbtn">⏸ pause &nbsp;·&nbsp; <span id="scrub">arc 0%</span></div>
   <div class="err" id="err"></div>
@@ -111,7 +111,7 @@ const passMat = new THREE.ShaderMaterial({
       // shadow shaft reads against a dark sky. Outside the frustum = not in the beam = no scatter.
       if (sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z>1.0) return 0.0;
       float occ = texture2D(uShadowMap, sc.xy).x;                       // stored nearest depth [0,1]
-      float lit = (sc.z - 0.0015 > occ) ? 0.0 : 1.0;                     // shadow test (bias avoids acne)
+      float lit = 1.0 - smoothstep(0.0, 0.0015, (sc.z - 0.0015) - occ);  // soft shadow test (de-bands the rays)
       vec2 e = smoothstep(0.0, 0.18, sc.xy) * smoothstep(0.0, 0.18, 1.0 - sc.xy); // soft beam edges
       return lit * e.x * e.y;
     }
@@ -147,6 +147,14 @@ const passMat = new THREE.ShaderMaterial({
       accum *= stepSize * uDensity * 0.02 * (0.4 + 1.6 * phase);
       vec3 glow = uLightColor * accum * uIntensity;
       glow = vec3(1.0) - exp(-glow);                       // exposure rolloff: saturate gracefully, never hard-clip
+      // Screen-space source-halo occlusion (the missing camera-side gate). In-scatter from lit haze between
+      // the camera and the monitor screen-projects OVER the near-black silhouette and reads as rays. Sky
+      // pixels (d>=1) keep full glow (the backdrop beams); over solid foreground, fade glow by the underlying
+      // pixel brightness so the dark silhouette + its shadow-shaft stay clean while the lit ledge keeps glow.
+      // Uses col (already has clean baked shadows) — no extra shadow fetch, no acne, camera-distance-agnostic.
+      float occMask = smoothstep(0.02, 0.14, dot(col, vec3(0.299, 0.587, 0.114)));
+      float foreground = step(d, 0.9999);
+      glow *= mix(1.0, occMask, foreground);
       gl_FragColor = vec4(col + glow, 1.0);
     }`,
   depthTest:false, depthWrite:false,
