@@ -239,8 +239,12 @@ export function createVolumetricPass(THREE, opts = {}) {
     sun.target.position.copy(SUBJECT);
     sun.target.updateMatrixWorld();
 
-    // lamp brightness: weak sunrise → strong; modest peak so the reveal never blows out
-    sun.intensity = (0.2 + 0.8 * a) * 2.6;
+    // lamp brightness: 3-point piecewise-linear envelope (initial→mid→final).
+    // Defaults 0.52/1.56/2.60 reproduce the old line (0.2+0.8a)*2.6 exactly.
+    const i0 = p.initialIntensity != null ? p.initialIntensity : 0.52; // a=0
+    const i1 = p.midIntensity     != null ? p.midIntensity     : 1.56; // a=0.5 (peak)
+    const i2 = p.finalIntensity   != null ? p.finalIntensity   : 2.60; // a=1
+    sun.intensity = a < 0.5 ? (i0 + (i1 - i0) * (a / 0.5)) : (i1 + (i2 - i1) * ((a - 0.5) / 0.5));
 
     // light color — drives both the lamp (scene shading) and the volumetric glow
     _lightColor.set(color);

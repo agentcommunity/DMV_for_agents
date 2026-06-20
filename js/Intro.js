@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createVolumetricPass } from './volumetric-pass.js?v=1';
+import { createVolumetricPass } from './volumetric-pass.js?v=2';
 
 const gsap = window.gsap;
 

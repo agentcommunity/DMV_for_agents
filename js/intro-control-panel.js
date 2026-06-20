@@ -3,9 +3,9 @@
  * Writes to the shared introConfig object; calls intro.rebuild() for structural changes.
  * Delete this file + the single "// DEV-TUNE" line in app.js to remove completely.
  *
- * NOTE: config.lamp.initialIntensity / midIntensity / finalIntensity are stored
- * here but NOT yet read by driveArc() in volumetric-pass.js. The sliders are
- * wired into config and ready for when driveArc's envelope is extended.
+ * Persistence: every control change saves config to localStorage ('dmv-intro-tune').
+ * Replay reloads the page (restoring saved config), giving a true from-the-top replay.
+ * Reset clears localStorage and reloads (restores factory defaults).
  */
 
 // ─── flickerPreset helper ────────────────────────────────────────────────────
@@ -162,10 +162,16 @@ function makeButton(text, onClick) {
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 export function createIntroControlPanel({ config, intro, tv }) {
-  // Initialise lamp intensity fields if not present (config.lamp only ships with color).
-  if (config.lamp.initialIntensity === undefined) config.lamp.initialIntensity = 1.5;
-  if (config.lamp.midIntensity     === undefined) config.lamp.midIntensity     = 12.0;
-  if (config.lamp.finalIntensity   === undefined) config.lamp.finalIntensity   = 8.0;
+  // Ensure lamp intensity fields are present (introConfig.lamp ships them as of v2,
+  // but guard against stale localStorage blobs that might be missing them).
+  if (config.lamp.initialIntensity == null) config.lamp.initialIntensity = 0.52;
+  if (config.lamp.midIntensity     == null) config.lamp.midIntensity     = 1.56;
+  if (config.lamp.finalIntensity   == null) config.lamp.finalIntensity   = 2.60;
+
+  // Persist entire config to localStorage so reloads (Replay) restore tuned values.
+  function save() {
+    try { localStorage.setItem('dmv-intro-tune', JSON.stringify(config)); } catch { /* quota/private */ }
+  }
 
   // Panel container.
   const panel = document.createElement('div');
@@ -232,22 +238,19 @@ export function createIntroControlPanel({ config, intro, tv }) {
   // ── Lamp ────────────────────────────────────────────────────────────
   panel.appendChild(header('Lamp'));
 
-  // NOTE: initialIntensity / midIntensity / finalIntensity are stored in
-  // config.lamp but NOT yet read by driveArc() in volumetric-pass.js.
-  // Extend driveArc's intensity envelope to honour them.
-  const { wrap: lampInitWrap } = makeSlider(0, 12, config.lamp.initialIntensity, 0.1, (v) => {
-    config.lamp.initialIntensity = v;
-    // live: no rebuild needed once driveArc reads this field
+  // Intensity sliders are LIVE: driveArc() reads them each frame via p.initialIntensity etc.
+  const { wrap: lampInitWrap } = makeSlider(0, 3, config.lamp.initialIntensity, 0.05, (v) => {
+    config.lamp.initialIntensity = v; // live — no rebuild needed
   });
   panel.appendChild(row('initial intensity', lampInitWrap));
 
-  const { wrap: lampMidWrap } = makeSlider(6, 30, config.lamp.midIntensity, 0.5, (v) => {
-    config.lamp.midIntensity = v;
+  const { wrap: lampMidWrap } = makeSlider(0, 6, config.lamp.midIntensity, 0.1, (v) => {
+    config.lamp.midIntensity = v; // live
   });
   panel.appendChild(row('peak intensity', lampMidWrap));
 
-  const { wrap: lampFinalWrap } = makeSlider(4, 24, config.lamp.finalIntensity, 0.5, (v) => {
-    config.lamp.finalIntensity = v;
+  const { wrap: lampFinalWrap } = makeSlider(0, 6, config.lamp.finalIntensity, 0.1, (v) => {
+    config.lamp.finalIntensity = v; // live
   });
   panel.appendChild(row('final intensity', lampFinalWrap));
 
@@ -338,10 +341,19 @@ export function createIntroControlPanel({ config, intro, tv }) {
   // ── Utility ─────────────────────────────────────────────────────────
   panel.appendChild(header('Utility'));
 
-  // Replay button.
+  // Replay button: persist current config then reload so the full intro plays
+  // from the very top with the tuned settings (restore logic runs in app.js).
   const replayBtn = makeButton('Replay', () => {
-    intro.rebuild();
+    save();
+    location.reload();
   });
+
+  // Reset button: clear stored config and reload to restore factory defaults.
+  const resetBtn = makeButton('Reset', () => {
+    try { localStorage.removeItem('dmv-intro-tune'); } catch { /* private mode */ }
+    location.reload();
+  });
+  resetBtn.style.color = '#f88';
 
   // Scrub arc slider.
   const gsap = window.gsap;
@@ -388,6 +400,7 @@ export function createIntroControlPanel({ config, intro, tv }) {
   const utilRow = document.createElement('div');
   utilRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;';
   utilRow.appendChild(replayBtn);
+  utilRow.appendChild(resetBtn);
   utilRow.appendChild(copyBtn);
   panel.appendChild(utilRow);
 
@@ -397,6 +410,11 @@ export function createIntroControlPanel({ config, intro, tv }) {
   panel.appendChild(scrubLabel);
   panel.appendChild(scrubWrap);
 
+  // Capture-phase listeners: ANY slider/select/toggle/color change auto-persists config.
+  panel.addEventListener('input',  save, true);
+  panel.addEventListener('change', save, true);
+
+  // Panel appended to body (not intro overlay) so it survives intro completion.
   document.body.appendChild(panel);
   return panel;
 }

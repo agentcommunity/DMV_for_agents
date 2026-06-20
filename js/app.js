@@ -240,7 +240,7 @@ const introConfig = {
     REVEAL_DUR: 0.90,  // lift the black to show the normal scene
     END:        12.25,
   },
-  lamp:  { color: '#ffb86b' },        // warm Edison amber; fed to driveArc each frame
+  lamp:  { color: '#ffb86b', initialIntensity: 0.52, midIntensity: 1.56, finalIntensity: 2.60 }, // warm Edison amber; fed to driveArc each frame
   vol:   { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
   dark:  true,
   music: { startAt: 'SUNRISE' },      // only 'SUNRISE' is supported for now
@@ -1138,6 +1138,31 @@ if (runIntro) {
     });
   }
 
+  // DEV-TUNE: restore tuned settings from localStorage so reloads preserve values.
+  if (introParams.has('tune')) {
+    try {
+      const stored = localStorage.getItem('dmv-intro-tune');
+      if (stored) {
+        const saved = JSON.parse(stored);
+        // Deep-merge each known nested section; ignore unknown keys.
+        for (const key of ['flicker', 'beats', 'lamp', 'vol']) {
+          if (saved[key] && typeof saved[key] === 'object') {
+            Object.assign(introConfig[key], saved[key]);
+          }
+        }
+        for (const key of ['dark', 'music', 'signReveal']) {
+          if (key in saved) {
+            if (key === 'music' && typeof saved[key] === 'object') {
+              Object.assign(introConfig[key], saved[key]);
+            } else {
+              introConfig[key] = saved[key];
+            }
+          }
+        }
+      }
+    } catch { /* corrupt blob — fall back to defaults */ }
+  } // DEV-TUNE
+
   const intro = new Intro(tv, {
     wallSign,
     overlay: document.getElementById('introOverlay'),
@@ -1147,7 +1172,7 @@ if (runIntro) {
   intro.onSoundRequest = startIntroAudio;
   intro.onReveal = () => wallSign.flickerOn();
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
-  if (introParams.has('tune')) { import('./intro-control-panel.js?v=1').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=2').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
 
   // Esc / Space / Enter skip the intro.
   const onIntroKey = (e) => {
