@@ -71,18 +71,26 @@ const passMat = new THREE.ShaderMaterial({
     tDiffuse:{value:null}, tDepth:{value:null},
     uInvProj:{value:new THREE.Matrix4()}, uCamWorld:{value:new THREE.Matrix4()}, uCamPos:{value:new THREE.Vector3()},
     uMode:{value:1}, // 1 = debug worldpos, 0 = passthrough
+    uShadowMap:{value:null}, uShadowMatrix:{value:new THREE.Matrix4()},
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
   fragmentShader: `
     varying vec2 vUv;
     uniform sampler2D tDiffuse; uniform sampler2D tDepth;
     uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform int uMode;
+    uniform sampler2D uShadowMap; uniform mat4 uShadowMatrix;
     vec3 worldFromDepth(vec2 uv, float rawDepth){
       // NDC (note three depth texture stores [0,1])
       vec4 ndc = vec4(uv*2.0-1.0, rawDepth*2.0-1.0, 1.0);
       vec4 view = uInvProj * ndc; view /= view.w;        // view space
       vec4 world = uCamWorld * view;                      // world space
       return world.xyz;
+    }
+    float sampleShadow(vec3 worldPos){
+      vec4 sc = uShadowMatrix * vec4(worldPos, 1.0); sc /= sc.w; // three's matrix → [0,1] uv + depth
+      if (sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z>1.0) return 1.0; // outside the shadow frustum = lit
+      float occ = texture2D(uShadowMap, sc.xy).x;                       // stored nearest depth [0,1]
+      return (sc.z - 0.0015 > occ) ? 0.0 : 1.0;                          // bias to avoid acne
     }
     void main(){
       vec3 col = texture2D(tDiffuse, vUv).rgb;
@@ -93,11 +101,19 @@ const passMat = new THREE.ShaderMaterial({
         gl_FragColor = vec4(fract(w*0.2), 1.0);            // banded world-pos viz
         return;
       }
+      if (uMode==2){
+        if (d >= 1.0){ gl_FragColor=vec4(0.02,0.0,0.0,1.0); return; }
+        vec3 w = worldFromDepth(vUv, d);
+        float lit = sampleShadow(w);
+        gl_FragColor = vec4(vec3(lit), 1.0);                            // white=lit, black=shadow
+        return;
+      }
       gl_FragColor = vec4(col, 1.0);
     }`,
   depthTest:false, depthWrite:false,
 });
 const fsQuad = new FullScreenQuad(passMat);
+passMat.uniforms.uMode.value = 2;
 
 let monitorReady = false;
 const draco = new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/libs/draco/');
@@ -130,6 +146,8 @@ function renderFrame(){
   passMat.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
   passMat.uniforms.uCamWorld.value.copy(camera.matrixWorld);
   passMat.uniforms.uCamPos.value.copy(camera.position);
+  if (sun.shadow.map){ passMat.uniforms.uShadowMap.value = sun.shadow.map.texture; }
+  passMat.uniforms.uShadowMatrix.value.copy(sun.shadow.matrix);
   renderer.setRenderTarget(null); fsQuad.render(renderer);
 }
 function tick(now){
