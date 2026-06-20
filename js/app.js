@@ -3,7 +3,7 @@ import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=2';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=57';
+import { Intro } from './Intro.js?v=58';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -207,6 +207,45 @@ function resetTurnstile() {
 }
 
 const tv = new TV(container, label);
+
+// ─── Shared intro config (Task 5) ─────────────────────────────────
+// Single mutable object that owns every intro tunable. Passed into Intro so
+// a dev control panel (Task 6) can edit values here and call intro.rebuild()
+// to replay with the new settings. Defaults reproduce the prototype-approved look.
+const introConfig = {
+  flicker: {
+    type: 'struggle',
+    // Each entry: [t, brightness] or [t, brightness, duration]. Duration defaults
+    // to 0.06s inside _addButtonFlicker when omitted (3rd element absent).
+    keyframes: [
+      [0.00, 0.0, 0.01],
+      [0.12, 0.30],
+      [0.24, 0.0],
+      [0.50, 0.60],
+      [0.62, 0.04],
+      [0.86, 1.00],
+      [0.96, 0.10],
+    ],
+    catchAt: 1.12,   // time offset (from BEAT.POWER) when the button catches and holds
+    catchDur: 0.32,  // duration of the final catch tween
+  },
+  beats: {
+    POWER:      0.30,  // CRT button starts blinking on/off (~1.4s)
+    SUNRISE:    1.80,  // lamp intensity begins to rise (behind, stationary)
+    ARC_START:  3.55,  // lamp begins to MOVE on its arc (visible from the borders)
+    ARC_DUR:    6.60,  // arc movement: behind → over the top → high in front
+    FADE_START: 10.35, // arc done (front lit) → begin fade to black
+    FADE_DUR:   0.85,
+    BLACK:      11.20, // fully black → restore the normal scene under cover
+    REVEAL_DUR: 0.90,  // lift the black to show the normal scene
+    END:        12.25,
+  },
+  lamp:  { color: '#ffb86b' },        // warm Edison amber; fed to driveArc each frame
+  vol:   { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
+  dark:  true,
+  music: { startAt: 'SUNRISE' },      // only 'SUNRISE' is supported for now
+  signReveal: 'at_reveal',
+};
 
 // ─── Cinematic intro gate ("video mode") ──────────────────────────
 // The reveal plays on the landing page only. Skipped for permalinks/demo,
@@ -1102,6 +1141,7 @@ if (runIntro) {
   const intro = new Intro(tv, {
     wallSign,
     overlay: document.getElementById('introOverlay'),
+    config: introConfig,
   });
   intro.onStart = startIntroAudio;
   intro.onSoundRequest = startIntroAudio;
