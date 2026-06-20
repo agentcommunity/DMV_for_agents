@@ -79,7 +79,6 @@ export class Intro {
     this._renderCb = (dt) => this._tick(dt);
     this._onOverlayClick = (e) => this._handleOverlayClick(e);
     this._shadowMeshes = [];
-    this._panelMats = [];
     this._gv1 = new THREE.Vector3();
     this._gv2 = new THREE.Vector3();
 
@@ -126,25 +125,6 @@ export class Intro {
       this._shadowMeshes.push(m);
     }
 
-    // The glossy front bezel (Rubber) + bottom slab (Cube006) would catch a
-    // specular reflection of the lamp before it's even in front. Make them
-    // matte during the intro and restore the gloss only once the lamp is above.
-    // (Rubber + Cube006 share one material — capture the original roughness
-    // before matting, and dedupe so the shared material is handled once.)
-    const seenMat = new Set();
-    for (const name of ['Rubber', 'Cube006']) {
-      const m = this.scene.getObjectByName(name);
-      if (!m || !m.material || m.material.roughness === undefined) continue;
-      if (seenMat.has(m.material)) continue;
-      seenMat.add(m.material);
-      this._panelMats.push({ mat: m.material, orig: m.material.roughness });
-    }
-    // Mild matte (not full) — enough to soften a flat front specular but still
-    // let the edges catch a rim from the backlight.
-    for (const p of this._panelMats) p.mat.roughness = 0.5;
-
-    this.scene.fog = new THREE.FogExp2(0x000000, 0.02);
-
     this.tv.introActive = true;
     this.renderer.setClearColor(C_BLACK, 1);
     this.renderer.toneMappingExposure = 0.42;
@@ -165,22 +145,6 @@ export class Intro {
     this.pass.setReady(true);
     this.pass.driveArc(this._S.a, VOL_PARAMS); // seat the lamp at the arc start
 
-    // (Task 4 deletes the sprite/halo + radial-texture/bezel-matte code cleanly.)
-    // For now the visual is the volumetric pass ALONE — keep the sprite allocated
-    // but never render it: skip its per-frame update (see _tick) and hide it.
-    this._sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: this._radialTexture(256, 0.5), // a soft halo with a readable bright core
-      color: LAMP_COLOR,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      depthTest: true,
-      toneMapped: false,
-    }));
-    this._sunGlow.visible = false;
-    rig.add(this._sunGlow);
-
     if (this.tv.camera) {
       this.tv.camera.position.set(0, -0.5, 20);
       this.tv.camera.lookAt(this._look.x, this._look.y, this._look.z);
@@ -193,25 +157,6 @@ export class Intro {
   _smooth(x, e0, e1) {
     const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
     return t * t * (3 - 2 * t);
-  }
-
-  // Radial glow texture for the backlit halo. hardness 0..1 keeps a brighter
-  // core before the falloff.
-  _radialTexture(size, hardness = 0.0) {
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = size;
-    const ctx = cv.getContext('2d');
-    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    const mid = 0.22 + hardness * 0.34;
-    g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(mid * 0.6, 'rgba(255,255,255,0.82)');
-    g.addColorStop(mid, 'rgba(255,255,255,0.2)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, size);
-    const tex = new THREE.CanvasTexture(cv);
-    tex.encoding = THREE.sRGBEncoding;
-    return tex;
   }
 
   // ── Playback ──────────────────────────────────────────────────────
@@ -318,15 +263,6 @@ export class Intro {
     // branch runs in _render, after the render-callback loop).
     if (this.pass) this.pass.driveArc(a, VOL_PARAMS);
 
-    // (Sprite halo is neutralized this task — invisible + not updated. Task 4
-    // removes it. The visual is the volumetric pass alone.)
-
-    // Restore the bezel's gloss only once the lamp is above/front, so the panel
-    // doesn't reflect the light before it gets there.
-    if (this._panelMats.length) {
-      const gloss = this._smooth(this._S.a, 0.45, 0.66);
-      for (const p of this._panelMats) p.mat.roughness = 0.5 + (p.orig - 0.5) * gloss;
-    }
     if (this.tv.camera) this.tv.camera.lookAt(this._look.x, this._look.y, this._look.z);
   }
 
@@ -356,8 +292,6 @@ export class Intro {
     }
     for (const m of this._shadowMeshes) { m.castShadow = false; m.receiveShadow = false; }
     this._shadowMeshes = [];
-    for (const p of this._panelMats) p.mat.roughness = p.orig;
-    this._panelMats = [];
 
     if (this.tv.camera) {
       this.tv.camera.position.set(0, -0.5, 20);
@@ -374,9 +308,6 @@ export class Intro {
     if (this.pass) {
       this.tv.setVolumetricPass(null);
       this.pass.dispose(); // also removes this.pass.group from its parent
-      if (this.pass.group && this.pass.group.parent) {
-        this.pass.group.parent.remove(this.pass.group);
-      }
       this.pass = null;
     }
 
@@ -406,8 +337,8 @@ export class Intro {
 
   _disposeRig() {
     if (!this.rig) return;
-    // (The lamp/DirectionalLight now lives in the volumetric pass, torn down in
-    // _restoreScene via this.pass.dispose(). The rig only holds the dormant sprite.)
+    // (The lamp/DirectionalLight lives in the volumetric pass, torn down in
+    // _restoreScene via this.pass.dispose(). The rig has no children after Task 4.)
     this.scene.remove(this.rig);
     this.rig.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose();
