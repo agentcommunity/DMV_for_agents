@@ -1107,7 +1107,7 @@ if (!permalink && agentToggleLink) {
   });
 }
 
-const audio = new Audio(encodeURI('/audio/pat102 - electro dance.mp3'));
+const audio = new Audio(encodeURI('/audio/pat102 - electro dance.mp3?v=2')); // ?v bump = trimmed (no lead silence)
 audio.loop = true;
 let soundOn = false;
 const soundToggle = document.getElementById('soundToggle');
