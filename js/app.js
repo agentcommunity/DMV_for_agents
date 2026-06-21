@@ -1115,8 +1115,9 @@ soundToggle?.addEventListener('click', () => {
   soundOn = !soundOn;
   soundToggle.classList.toggle('active', soundOn);
   if (soundOn) {
+    audio.muted = false;       // the intro may be autoplaying MUTED — unmute it
     audio.volume = 1;
-    audio.play();
+    audio.play().catch(() => {});
   } else {
     audio.pause();
   }
@@ -1134,19 +1135,34 @@ if (runIntro) {
     soundOn = true;
     soundToggle?.classList.add('active');
   }
+  // Browsers block audio autoplay WITH SOUND on a cold load (Safari/iOS hard-block; no override).
+  // So we autoplay MUTED (every browser allows that) — the track runs in sync from the light-stab —
+  // and UNMUTE it the instant the user does anything (unlockAudio). No "tap for sound" prompt, and
+  // because it's already playing, unmuting lands mid-track so the music-aligned reveal still holds.
+  let audioUnlocked = false;
+  let audioStarted = false;
   function startIntroAudio() {
-    if (soundOn) return;
+    if (audioStarted) return;
+    audioStarted = true;
     try { audio.currentTime = 0; } catch { /* not seekable yet */ }
-    audio.volume = 0;
+    audio.muted = !audioUnlocked;   // muted autoplay until a gesture
+    audio.volume = 1;
     const p = audio.play();
-    if (!p || typeof p.then !== 'function') { markSoundOn(); return; }
-    p.then(() => {
-      markSoundOn();
-      introSoundHint?.classList.remove('is-visible');
-      gsap.to(audio, { volume: 1, duration: 0.8, ease: 'sine.out' });
-    }).catch(() => {
-      introSoundHint?.classList.add('is-visible'); // autoplay blocked → prompt
-    });
+    if (p && typeof p.then === 'function') {
+      p.then(() => { if (audioUnlocked) markSoundOn(); }).catch(() => { audioStarted = false; });
+    } else if (audioUnlocked) { markSoundOn(); }
+  }
+  function unlockAudio(e) {
+    if (audioUnlocked) return;
+    // The sound toggle owns its own click (don't fight it over on/off state).
+    if (e && e.target && typeof e.target.closest === 'function' && e.target.closest('#soundToggle')) return;
+    audioUnlocked = true;
+    if (!audioStarted) startIntroAudio();
+    audio.muted = false;
+    if (audio.paused) audio.play().catch(() => {});
+    audio.volume = 0; gsap.to(audio, { volume: 1, duration: 0.4, ease: 'sine.out' }); // soft unmute (no-op vol on iOS)
+    introSoundHint?.classList.remove('is-visible');
+    markSoundOn();
   }
 
   // DEV-TUNE: restore tuned settings from localStorage so reloads preserve values.
@@ -1181,12 +1197,11 @@ if (runIntro) {
   });
   intro.onStart = startIntroAudio;
   intro.onSoundRequest = startIntroAudio;
-  // Safari/iOS block autoplay outright (Chrome allows it on engaged/localhost sites — hence the
-  // difference). If the timeline's onStart play() was blocked, unlock on the FIRST user gesture
-  // ANYWHERE — including the ?tune panel, not just a stage click — so any interaction starts the music.
-  const unlockAudioOnce = () => { if (!soundOn) startIntroAudio(); };
-  window.addEventListener('pointerdown', unlockAudioOnce, { once: true, capture: true });
-  window.addEventListener('keydown', unlockAudioOnce, { once: true, capture: true });
+  // Unmute the (already muted-playing) track on the FIRST user gesture ANYWHERE — panel, stage,
+  // scroll, or a keypress — so the music becomes audible the instant the user does anything.
+  window.addEventListener('pointerdown', unlockAudio, { capture: true });
+  window.addEventListener('keydown', unlockAudio, { capture: true });
+  window.addEventListener('wheel', unlockAudio, { capture: true, passive: true });
   intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
   if (introParams.has('tune')) { import('./intro-control-panel.js?v=8').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
