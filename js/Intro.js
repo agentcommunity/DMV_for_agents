@@ -96,7 +96,6 @@ export class Intro {
     this.config = opts.config || JSON.parse(JSON.stringify(DEFAULT_CONFIG));
 
     this.onStart = null;
-    this.onSoundRequest = null;
     this.onReveal = null;
 
     this._done = false;
@@ -123,7 +122,6 @@ export class Intro {
     this._look = { x: 0, y: lookY, z: 0 };
 
     this._renderCb = (dt) => this._tick(dt);
-    this._onOverlayClick = (e) => this._handleOverlayClick(e);
     this._shadowMeshes = [];
     this._gv1 = new THREE.Vector3();
     this._gv2 = new THREE.Vector3();
@@ -230,7 +228,6 @@ export class Intro {
     if (this.overlay) {
       this.overlay.hidden = false;
       this.overlay.classList.add('is-playing');
-      this.overlay.addEventListener('click', this._onOverlayClick);
       const skip = this.overlay.querySelector('#introSkip');
       if (skip) skip.addEventListener('click', (e) => { e.stopPropagation(); this.skip(); });
     }
@@ -481,7 +478,6 @@ export class Intro {
     this._restoreScene();
 
     if (this.overlay) {
-      this.overlay.removeEventListener('click', this._onOverlayClick);
       this.overlay.classList.remove('is-playing', 'is-lit', 'is-clearing');
       this.overlay.hidden = true;
       this.overlay.style.removeProperty('--intro-fade');
@@ -515,10 +511,5 @@ export class Intro {
   _applyFade() {
     if (!this.overlay) return;
     this.overlay.style.setProperty('--intro-fade', this._blackAmt.toFixed(4));
-  }
-
-  _handleOverlayClick(e) {
-    if (e.target.closest('#introSkip')) return;
-    if (this.onSoundRequest) this.onSoundRequest();
   }
 }

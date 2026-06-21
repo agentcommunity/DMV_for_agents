@@ -1247,9 +1247,8 @@ body.intro-active #scroller { overflow: hidden; }
   100% { transform: translate(0, 0); }
 }
 
-/* Skip + sound affordances — sit inside the bottom letterbox bar. */
-.intro-overlay__skip,
-.intro-overlay__sound {
+/* Skip affordance — sits inside the bottom letterbox bar. */
+.intro-overlay__skip {
   position: absolute; bottom: 3rem;
   z-index: 2;
   pointer-events: auto;
@@ -1269,32 +1268,10 @@ body.intro-active #scroller { overflow: hidden; }
 .intro-overlay.is-clearing .intro-overlay__skip { opacity: 0; }
 .intro-overlay__skip:hover { color: rgba(255, 255, 255, 0.95); }
 
-.intro-overlay__sound {
-  left: 50%; transform: translateX(-50%);
-  display: inline-flex; align-items: center; gap: 0.9rem;
-  color: rgba(255, 255, 255, 0.85);
-  opacity: 0; visibility: hidden;
-  animation: introSoundPulse 1.7s ease-in-out infinite;
-}
-.intro-overlay__sound.is-visible { opacity: 1; visibility: visible; }
-.intro-overlay.is-clearing .intro-overlay__sound { opacity: 0; }
-.intro-overlay__sound-dot {
-  width: 0.7rem; height: 0.7rem; border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
-}
-
-@keyframes introSoundPulse {
-  0%, 100% { opacity: 0.55; }
-  50%      { opacity: 1; }
-}
-
 @media (max-width: 767px) {
   .intro-overlay__skip { right: 2.4rem; bottom: 2.2rem; }
-  .intro-overlay__sound { bottom: 2.2rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .intro-overlay__grain { animation: none; }
-  .intro-overlay__sound { animation: none; }
 }
