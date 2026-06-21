@@ -1125,8 +1125,8 @@ soundToggle?.addEventListener('click', () => {
 
 // ─── Cinematic intro ("video mode") ───────────────────────────────
 // Black → backlit silhouette → laser+smoke reveal → arrive at the landing.
-// Music starts on the light-stab; if the browser blocks autoplay the stage
-// shows a "tap for sound" hint and the first click starts it. Skippable.
+// Music starts (audibly if allowed, else muted-in-sync) on the light-stab and becomes audible on
+// the first user gesture anywhere — no "tap for sound" prompt. Skippable.
 if (runIntro) {
   const introSoundHint = document.getElementById('introSound');
 
@@ -1207,7 +1207,7 @@ if (runIntro) {
     config: introConfig,
   });
   intro.onStart = startIntroAudio;
-  intro.onSoundRequest = startIntroAudio;
+  intro.onSoundRequest = unlockAudio;   // overlay "I want sound" click → unmute, not re-trigger autoplay
   // Unmute the (already muted-playing) track on the FIRST user gesture ANYWHERE — panel, stage,
   // scroll, or a keypress — so the music becomes audible the instant the user does anything.
   window.addEventListener('pointerdown', unlockAudio, { capture: true });
