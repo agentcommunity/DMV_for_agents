@@ -59,11 +59,11 @@ const DEFAULT_CONFIG = {
     END: 12.25,
   },
   timing: {
-    leadIn:  0.4,               // ① seconds of dark AFTER the button catches, before first light
+    leadIn:  0.95,              // ① seconds of dark AFTER the button catches, before first light
     aBehind: 0.30,              // a-value where leg ② (sunrise/behind) ends and leg ③ (rise) begins
     aTop:    0.65,              // a-value where leg ③ (rise) ends and leg ④ (crest) begins
-    sunrise: { length: 2.5, curve: 'decelerate' }, // ② a:0→aBehind + exposure brighten
-    rise:    { length: 3.5, curve: 'constant'   }, // ③ a:aBehind→aTop (behind → over the top)
+    sunrise: { length: 5.7, curve: 'smooth'     }, // ② a:0→aBehind + exposure brighten
+    rise:    { length: 4.8, curve: 'constant'   }, // ③ a:aBehind→aTop (behind → over the top)
     crest:   { length: 3.5, curve: 'decelerate' }, // ④ a:aTop→1      (top → front = reveal)
     fadeLength:   0.85,
     revealLength: 0.90,
@@ -71,7 +71,7 @@ const DEFAULT_CONFIG = {
   lamp: { color: '#ffb86b' },
   vol:  { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
   dark: true,
-  music: { startAt: 'SUNRISE' },
+  music: { offset: -0.15 },   // music onStart vs first-light (seconds). negative = a beat BEFORE the sunrise.
   signReveal: 'at_reveal',
   signRevealDelay: 1.0,   // seconds AFTER the scene reveals before the wall sign stutters in
 };
@@ -287,9 +287,13 @@ export class Intro {
       onUpdate: () => this._applyBars() }, 0.1);
     if (this.overlay) tl.call(() => this.overlay.classList.add('is-lit'), null, 0.2);
 
-    // POWER — the CRT button flickers on; music starts only AFTER it catches + leadIn.
+    // POWER — the CRT button flickers on. Music starts relative to first-light via config.music.offset
+    // (negative = a beat BEFORE the sunrise so the track's light intro carries the whole colour phase,
+    // and its big drop is timed to land at the reveal). Clamped to >= 0 so it never precedes the timeline.
     this._addButtonFlicker(tl, POWER);
-    tl.call(() => { if (this.onStart) this.onStart(); }, null, firstLight);
+    const musicOffset = (this.config.music && typeof this.config.music.offset === 'number') ? this.config.music.offset : 0;
+    const musicAt = Math.max(0, firstLight + musicOffset);
+    tl.call(() => { if (this.onStart) this.onStart(); }, null, musicAt);
 
     // ② SUNRISE leg — exposure brightens + lamp moves a:0→aBehind (still behind, glowing up).
     tl.fromTo(this.renderer, { toneMappingExposure: 0.42 },

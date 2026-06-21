@@ -339,15 +339,14 @@ export function createIntroControlPanel({ config, intro, tv }) {
   });
   panel.appendChild(row('go dark before menu', darkToggle));
 
-  const musicSelect = makeSelect(
-    [['SUNRISE','at-sunrise'],['at-button-catch','at-button-catch'],['at-reveal','at-reveal']],
-    config.music.startAt,
-    (v) => {
-      config.music.startAt = v;
-      intro.rebuild();
-    }
-  );
-  panel.appendChild(row('music start', musicSelect));
+  // Music start, in seconds RELATIVE to first-light (the sunrise). Negative = before the sunrise.
+  // Slide toward + to delay it (toward the reveal) so the track's drop lands where you want.
+  if (config.music.offset == null) config.music.offset = -0.15;
+  const { wrap: musicOffsetWrap } = makeSlider(-3, 12, config.music.offset, 0.05, (v) => {
+    config.music.offset = v;
+    intro.rebuild();
+  });
+  panel.appendChild(row('music vs sunrise (s)', musicOffsetWrap));
 
   const { wrap: signDelayWrap } = makeSlider(
     0, 3, config.signRevealDelay != null ? config.signRevealDelay : 1.0, 0.1,
