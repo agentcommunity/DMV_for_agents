@@ -1181,6 +1181,12 @@ if (runIntro) {
   });
   intro.onStart = startIntroAudio;
   intro.onSoundRequest = startIntroAudio;
+  // Safari/iOS block autoplay outright (Chrome allows it on engaged/localhost sites — hence the
+  // difference). If the timeline's onStart play() was blocked, unlock on the FIRST user gesture
+  // ANYWHERE — including the ?tune panel, not just a stage click — so any interaction starts the music.
+  const unlockAudioOnce = () => { if (!soundOn) startIntroAudio(); };
+  window.addEventListener('pointerdown', unlockAudioOnce, { once: true, capture: true });
+  window.addEventListener('keydown', unlockAudioOnce, { once: true, capture: true });
   intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
   if (introParams.has('tune')) { import('./intro-control-panel.js?v=8').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
