@@ -31,6 +31,7 @@ All flows are **pre-registration** (not registration). Pre-registration records 
 **Module graph:**
 ```
 app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canvas as Three.js texture)
+        ├─► Intro.js ──► volumetric-pass.js   (cinematic click-to-enter intro: god-ray lamp + music sync)
         ├─► HoloCard.js ──► card-draw.js ──► qr-encode.js
         ├─► WallSign.js                (wall sign above TV, fluorescent flicker animation)
         └─► AboutPoster.js             (about panel)
@@ -42,6 +43,7 @@ app.js ─┬─► TV.js ──► CRTTerminal.js   (TV owns CRT, uses its canv
 - `HoloCard.js` — Self-contained holographic card module. Custom ShaderMaterial (GLSL) with rainbow iridescence, foil lines, glare, fresnel, sparkle. Front + back faces with Canvas2D content. Rarity system, identicon, scannable QR code (real encoder). Bob + tilt animation. See [CARD.md](CARD.md).
 - `WallSign.js` — Wall sign above the TV. PlaneGeometry + CanvasTexture with "DEPT. OF MACHINE VERIFICATION" title and "SELF-SERVE KIOSK" subtitle. Fluorescent tube flicker-on animation (GSAP timeline) fires ~1.2s after page load (not scroll-linked). Ambient flicker loop (random subtle opacity dips every 4-7s) runs after startup. Theme-aware via CSS custom properties. Self-contained with `dispose()` cleanup.
 - `AboutPoster.js` — PlaneGeometry + CanvasTexture. UI-style about text, toggle show/hide.
+- `Intro.js` / `volumetric-pass.js` — Cinematic "video mode" intro: a **click-to-enter** gate (one tap starts intro + music together, so audio is in sync in every browser incl. Safari), a real shadow-aware **volumetric god-ray "lamp"** that arcs behind→over→front (silhouette → beams → front-lit reveal), the fade-to-black handoff to the normal scene, and **music synced so the track's drop lands on the reveal**. Tunable via `?tune` (`js/intro-control-panel.js`, DEV-TUNE-gated). See [INTRO.md](INTRO.md).
 
 **External deps (all CDN, no npm):**
 - Three.js 0.152.2 via importmap
