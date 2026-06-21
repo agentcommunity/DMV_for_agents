@@ -319,12 +319,23 @@ export function createIntroControlPanel({ config, intro, tv }) {
   // ── Lamp timing ──────────────────────────────────────────────────────
   panel.appendChild(header('Lamp timing'));
 
-  // Ensure timing block exists (guard against stale localStorage blobs).
+  // Ensure timing block and nested leg objects exist (guard against stale localStorage blobs).
   if (!config.timing) config.timing = {};
-  if (config.timing.sunriseLength == null) config.timing.sunriseLength = 6.5;
-  if (config.timing.sunriseCurve  == null) config.timing.sunriseCurve  = 'decelerate';
-  if (config.timing.arcLength     == null) config.timing.arcLength     = 6.6;
-  if (config.timing.arcCurve      == null) config.timing.arcCurve      = 'smooth';
+  if (config.timing.leadIn  == null) config.timing.leadIn  = 0.4;
+  if (config.timing.aBehind == null) config.timing.aBehind = 0.30;
+  if (config.timing.aTop    == null) config.timing.aTop    = 0.65;
+  if (!config.timing.sunrise || typeof config.timing.sunrise !== 'object')
+    config.timing.sunrise = { length: 2.5, curve: 'decelerate' };
+  if (config.timing.sunrise.length == null) config.timing.sunrise.length = 2.5;
+  if (config.timing.sunrise.curve  == null) config.timing.sunrise.curve  = 'decelerate';
+  if (!config.timing.rise || typeof config.timing.rise !== 'object')
+    config.timing.rise = { length: 3.5, curve: 'constant' };
+  if (config.timing.rise.length == null) config.timing.rise.length = 3.5;
+  if (config.timing.rise.curve  == null) config.timing.rise.curve  = 'constant';
+  if (!config.timing.crest || typeof config.timing.crest !== 'object')
+    config.timing.crest = { length: 3.5, curve: 'decelerate' };
+  if (config.timing.crest.length == null) config.timing.crest.length = 3.5;
+  if (config.timing.crest.curve  == null) config.timing.crest.curve  = 'decelerate';
 
   const CURVE_OPTIONS = [
     ['constant',   'constant'],
@@ -333,29 +344,51 @@ export function createIntroControlPanel({ config, intro, tv }) {
     ['smooth',     'smooth'],
   ];
 
-  const { wrap: sunriseLenWrap } = makeSlider(0.5, 12, config.timing.sunriseLength, 0.1, (v) => {
-    config.timing.sunriseLength = v;
+  // ① Lead-in
+  const { wrap: leadInWrap } = makeSlider(0, 3, config.timing.leadIn, 0.05, (v) => {
+    config.timing.leadIn = v;
+    intro.rebuild();
+  });
+  panel.appendChild(row('lead-in (s)', leadInWrap));
+
+  // ② Sunrise leg
+  const { wrap: sunriseLenWrap } = makeSlider(0.3, 10, config.timing.sunrise.length, 0.1, (v) => {
+    config.timing.sunrise.length = v;
     intro.rebuild();
   });
   panel.appendChild(row('sunrise length', sunriseLenWrap));
 
-  const sunriseCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.sunriseCurve, (v) => {
-    config.timing.sunriseCurve = v;
+  const sunriseCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.sunrise.curve, (v) => {
+    config.timing.sunrise.curve = v;
     intro.rebuild();
   });
   panel.appendChild(row('sunrise curve', sunriseCurveSelect));
 
-  const { wrap: arcLenWrap } = makeSlider(1, 14, config.timing.arcLength, 0.1, (v) => {
-    config.timing.arcLength = v;
+  // ③ Rise leg
+  const { wrap: riseLenWrap } = makeSlider(0.3, 10, config.timing.rise.length, 0.1, (v) => {
+    config.timing.rise.length = v;
     intro.rebuild();
   });
-  panel.appendChild(row('arc length', arcLenWrap));
+  panel.appendChild(row('rise length', riseLenWrap));
 
-  const arcCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.arcCurve, (v) => {
-    config.timing.arcCurve = v;
+  const riseCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.rise.curve, (v) => {
+    config.timing.rise.curve = v;
     intro.rebuild();
   });
-  panel.appendChild(row('arc curve', arcCurveSelect));
+  panel.appendChild(row('rise curve', riseCurveSelect));
+
+  // ④ Crest leg
+  const { wrap: crestLenWrap } = makeSlider(0.3, 10, config.timing.crest.length, 0.1, (v) => {
+    config.timing.crest.length = v;
+    intro.rebuild();
+  });
+  panel.appendChild(row('crest length', crestLenWrap));
+
+  const crestCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.crest.curve, (v) => {
+    config.timing.crest.curve = v;
+    intro.rebuild();
+  });
+  panel.appendChild(row('crest curve', crestCurveSelect));
 
   // ── Utility ─────────────────────────────────────────────────────────
   panel.appendChild(header('Utility'));

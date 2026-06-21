@@ -3,7 +3,7 @@ import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=4';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=62';
+import { Intro } from './Intro.js?v=63';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -243,14 +243,14 @@ const introConfig = {
   lamp:  { color: '#ffb86b', initialIntensity: 0.52, midIntensity: 1.56, finalIntensity: 2.60 }, // warm Edison amber; fed to driveArc each frame
   vol:   { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
   timing: {
-    sunriseStart:  1.80,        // when the glow-up + music begin (absolute, after the flicker)
-    sunriseLength: 6.5,         // exposure-ramp DURATION — "how long the emergence takes"
-    sunriseCurve:  'decelerate',// fast→slow (maps to power2.out)
-    arcStart:      3.55,        // when the lamp begins its sweep (absolute)
-    arcLength:     6.6,         // sweep DURATION (a:0→1) — "how long the sweep takes"
-    arcCurve:      'smooth',    // slow→fast→slow (maps to sine.inOut)
-    fadeLength:    0.85,
-    revealLength:  0.90,
+    leadIn:  0.4,               // ① seconds of dark AFTER the button catches, before first light
+    aBehind: 0.30,              // a-value where leg ② (sunrise/behind) ends and leg ③ (rise) begins
+    aTop:    0.65,              // a-value where leg ③ (rise) ends and leg ④ (crest) begins
+    sunrise: { length: 2.5, curve: 'decelerate' }, // ② a:0→aBehind + exposure brighten
+    rise:    { length: 3.5, curve: 'constant'   }, // ③ a:aBehind→aTop (behind → over the top)
+    crest:   { length: 3.5, curve: 'decelerate' }, // ④ a:aTop→1      (top → front = reveal)
+    fadeLength:   0.85,
+    revealLength: 0.90,
   },
   dark:  true,
   music: { startAt: 'SUNRISE' },      // only 'SUNRISE' is supported for now
@@ -1183,7 +1183,7 @@ if (runIntro) {
   intro.onSoundRequest = startIntroAudio;
   intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
-  if (introParams.has('tune')) { import('./intro-control-panel.js?v=5').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=6').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
 
   // Esc / Space / Enter skip the intro.
   const onIntroKey = (e) => {

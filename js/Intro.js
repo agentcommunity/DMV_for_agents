@@ -59,14 +59,14 @@ const DEFAULT_CONFIG = {
     END: 12.25,
   },
   timing: {
-    sunriseStart:  1.80,        // when the glow-up + music begin (absolute, after the flicker)
-    sunriseLength: 6.5,         // exposure-ramp DURATION — "how long the emergence takes"
-    sunriseCurve:  'decelerate',// fast→slow (maps to power2.out)
-    arcStart:      3.55,        // when the lamp begins its sweep (absolute)
-    arcLength:     6.6,         // sweep DURATION (a:0→1) — "how long the sweep takes"
-    arcCurve:      'smooth',    // slow→fast→slow (maps to sine.inOut)
-    fadeLength:    0.85,
-    revealLength:  0.90,
+    leadIn:  0.4,               // ① seconds of dark AFTER the button catches, before first light
+    aBehind: 0.30,              // a-value where leg ② (sunrise/behind) ends and leg ③ (rise) begins
+    aTop:    0.65,              // a-value where leg ③ (rise) ends and leg ④ (crest) begins
+    sunrise: { length: 2.5, curve: 'decelerate' }, // ② a:0→aBehind + exposure brighten
+    rise:    { length: 3.5, curve: 'constant'   }, // ③ a:aBehind→aTop (behind → over the top)
+    crest:   { length: 3.5, curve: 'decelerate' }, // ④ a:aTop→1      (top → front = reveal)
+    fadeLength:   0.85,
+    revealLength: 0.90,
   },
   lamp: { color: '#ffb86b' },
   vol:  { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
@@ -243,25 +243,31 @@ export class Intro {
   _buildTimeline() {
     const S = this._S;
     const BEAT = this.config.beats;
-    // config.timing owns the phase lengths and speed curves. Fall back to beats
-    // values for backwards-compat if timing is absent (stale localStorage blobs).
+    const POWER = BEAT.POWER;
+    // config.timing owns the four-leg lamp sequence. Fall back to safe defaults for
+    // stale localStorage blobs that pre-date the 4-leg model.
     const T = this.config.timing || {};
-    const sunriseStart  = T.sunriseStart  != null ? T.sunriseStart  : BEAT.SUNRISE;
-    const sunriseLength = T.sunriseLength != null ? T.sunriseLength : 6.5;
-    const sunriseCurve  = EASE[T.sunriseCurve]    || 'power2.out';
-    const arcStart      = T.arcStart      != null ? T.arcStart      : BEAT.ARC_START;
-    const arcLength     = T.arcLength     != null ? T.arcLength     : BEAT.ARC_DUR;
-    const arcCurve      = EASE[T.arcCurve]        || 'sine.inOut';
-    const fadeLength    = T.fadeLength    != null ? T.fadeLength    : BEAT.FADE_DUR;
-    const revealLength  = T.revealLength  != null ? T.revealLength  : BEAT.REVEAL_DUR;
+    const leadIn    = T.leadIn    != null ? T.leadIn    : 0.4;
+    const aBehind   = T.aBehind   != null ? T.aBehind   : 0.30;
+    const aTop      = T.aTop      != null ? T.aTop      : 0.65;
+    const sunrise   = T.sunrise   || { length: 2.5, curve: 'decelerate' };
+    const rise      = T.rise      || { length: 3.5, curve: 'constant'   };
+    const crest     = T.crest     || { length: 3.5, curve: 'decelerate' };
+    const fadeLength   = T.fadeLength   != null ? T.fadeLength   : 0.85;
+    const revealLength = T.revealLength != null ? T.revealLength : 0.90;
 
-    // The fade/black/end are DERIVED from the arc end + durations so that changing arcLength
-    // (or arcStart) stretches the WHOLE timeline. If they were fixed absolute positions, a
-    // longer arc would just be truncated by a fade that still fires at the same second.
-    // Defaults reproduce the old absolutes exactly: 3.55+6.60=10.15 → FADE 10.35 → BLACK 11.20 → END 12.25.
-    const ARC_END     = arcStart + arcLength;
-    const FADE_START  = ARC_END + 0.20;             // brief hold at full arc, then fade
-    const BLACK       = FADE_START + fadeLength;
+    const sunriseCurve = EASE[sunrise.curve] || 'power2.out';
+    const riseCurve    = EASE[rise.curve]    || 'none';
+    const crestCurve   = EASE[crest.curve]   || 'power2.out';
+
+    // ① Lead-in: button catches at POWER + catchAt, then dark silence for leadIn seconds.
+    const firstLight = POWER + (this.config.flicker.catchAt ?? 1.12) + leadIn;
+
+    // The fade/black/end are DERIVED from the arc end + durations so that changing leg
+    // lengths stretches the WHOLE timeline.
+    const ARC_END    = firstLight + sunrise.length + rise.length + crest.length;
+    const FADE_START = ARC_END + 0.20;             // brief hold at full arc, then fade
+    const BLACK      = FADE_START + fadeLength;
     const REVEAL_DONE = BLACK + 0.05 + revealLength;
     // Wall sign stutters in a beat AFTER the scene has settled, not during the reveal.
     const SIGN_DELAY  = this.config.signRevealDelay != null ? this.config.signRevealDelay : 1.0;
@@ -277,21 +283,22 @@ export class Intro {
       onUpdate: () => this._applyBars() }, 0.1);
     if (this.overlay) tl.call(() => this.overlay.classList.add('is-lit'), null, 0.2);
 
-    // POWER — the CRT button flickers on; music starts only AFTER it catches.
-    this._addButtonFlicker(tl, BEAT.POWER);
-    tl.call(() => { if (this.onStart) this.onStart(); }, null, sunriseStart);
+    // POWER — the CRT button flickers on; music starts only AFTER it catches + leadIn.
+    this._addButtonFlicker(tl, POWER);
+    tl.call(() => { if (this.onStart) this.onStart(); }, null, firstLight);
 
-    // SUNRISE — the warm lamp glows up from behind, stationary (a stays 0). The
-    // lamp brightness + volumetric density are now owned by driveArc(a); here we
-    // only ramp pass-1 exposure to lift the scene out of black.
+    // ② SUNRISE leg — exposure brightens + lamp moves a:0→aBehind (still behind, glowing up).
     tl.fromTo(this.renderer, { toneMappingExposure: 0.42 },
-      { toneMappingExposure: 3.0, duration: sunriseLength, ease: sunriseCurve }, sunriseStart);
+      { toneMappingExposure: 3.0, duration: sunrise.length, ease: sunriseCurve }, firstLight);
+    tl.to(S, { a: aBehind, duration: sunrise.length, ease: sunriseCurve }, firstLight);
 
-    // ARC — the lamp starts MOVING (visible from the borders) and keeps
-    // strengthening: behind → over the top → high in front. driveArc(a) reads
-    // this tween every frame in _tick, so it drives both the lamp arc AND the
-    // volumetric beam strength.
-    tl.to(S, { a: 1, duration: arcLength, ease: arcCurve }, arcStart);
+    // ③ RISE leg — lamp moves a:aBehind→aTop (behind → over the top).
+    tl.to(S, { a: aTop, duration: rise.length, ease: riseCurve },
+      firstLight + sunrise.length);
+
+    // ④ CREST leg — lamp moves a:aTop→1 (top → front = reveal).
+    tl.to(S, { a: 1, duration: crest.length, ease: crestCurve },
+      firstLight + sunrise.length + rise.length);
 
     // FADE TO BLACK — the DOM black layer covers; we do NOT tween exposure here
     // (it would race the exposure restore in _restoreScene and could leave the
