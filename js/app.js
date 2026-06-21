@@ -1,8 +1,9 @@
-import { TV } from './TV.js?v=37';
+import { TV } from './TV.js?v=41';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
-import { WallSign } from './WallSign.js?v=2';
+import { WallSign } from './WallSign.js?v=4';
 import { WallNumber } from './WallNumber.js?v=1';
+import { Intro } from './Intro.js?v=69';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -206,6 +207,66 @@ function resetTurnstile() {
 }
 
 const tv = new TV(container, label);
+
+// ─── Shared intro config (Task 5) ─────────────────────────────────
+// Single mutable object that owns every intro tunable. Passed into Intro so
+// a dev control panel (Task 6) can edit values here and call intro.rebuild()
+// to replay with the new settings. Defaults reproduce the prototype-approved look.
+const introConfig = {
+  flicker: {
+    type: 'struggle',
+    // Each entry: [t, brightness] or [t, brightness, duration]. Duration defaults
+    // to 0.06s inside _addButtonFlicker when omitted (3rd element absent).
+    keyframes: [
+      [0.00, 0.0, 0.01],
+      [0.12, 0.30],
+      [0.24, 0.0],
+      [0.50, 0.60],
+      [0.62, 0.04],
+      [0.86, 1.00],
+      [0.96, 0.10],
+    ],
+    catchAt: 1.12,   // time offset (from BEAT.POWER) when the button catches and holds
+    catchDur: 0.32,  // duration of the final catch tween
+  },
+  beats: { POWER: 0.30 },  // when the CRT button flicker begins (s). The old SUNRISE/ARC/FADE/BLACK/END beats are dead — the 4-leg `timing` model below derives all of those now.
+  lamp:  { color: '#ffb86b', initialIntensity: 0.52, midIntensity: 1.56, finalIntensity: 2.60 }, // warm Edison amber; fed to driveArc each frame
+  vol:   { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
+  timing: {
+    leadIn:  0.95,              // ① seconds of dark AFTER the button catches, before first light
+    aBehind: 0.30,              // a-value where leg ② (sunrise/behind) ends and leg ③ (rise) begins
+    aTop:    0.65,              // a-value where leg ③ (rise) ends and leg ④ (crest) begins
+    sunrise: { length: 5.7, curve: 'smooth'     }, // ② a:0→aBehind + exposure brighten
+    rise:    { length: 4.8, curve: 'constant'   }, // ③ a:aBehind→aTop (behind → over the top)
+    crest:   { length: 3.5, curve: 'decelerate' }, // ④ a:aTop→1      (top → front = reveal)
+    fadeLength:   0.85,
+    revealLength: 0.90,
+  },
+  dark:  true,
+  // Music is SYNCED to the reveal, not to the sunrise. The track's loud drop is at `dropAt` seconds
+  // (measured 14.85s); Intro.js starts the music so that drop lands on the default-scene reveal (when
+  // the white light floods in), offset by `dropVsReveal` (0 = exactly on the reveal; + = later). This
+  // auto-tracks any leg retuning, so the drop always hits the reveal. Panel: "drop vs reveal (s)".
+  music: { dropAt: 14.85, dropVsReveal: 0 },
+  signRevealDelay: 1.0,               // seconds AFTER the scene reveals before the wall sign stutters in
+};
+
+// ─── Cinematic intro gate ("video mode") ──────────────────────────
+// The reveal plays on the landing page only. Skipped for permalinks/demo,
+// when the user asks (?skipintro), or when reduced-motion is preferred.
+const introParams = new URLSearchParams(location.search);
+const prefersReducedMotion =
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const runIntro = !permalink
+  && !introParams.has('demo')
+  && !introParams.has('skipintro')
+  && !prefersReducedMotion;
+if (runIntro) {
+  // Go black before the very first frame so there's no flash of the lit scene.
+  document.body.classList.add('intro-active');
+  tv.renderer.setClearColor(0x000000, 1);
+}
+
 // In permalink mode skip the 2.2MB GLB model — user just wants the card.
 // The model will be loaded on demand if the user navigates back to the full experience.
 await tv.init({ skipModel: !!permalink });
@@ -227,10 +288,19 @@ const aboutPoster = new AboutPoster(tv.getScene());
 tv.setAboutMesh(aboutPoster.mesh);
 
 const wallSign = new WallSign(tv.getScene());
-setTimeout(() => wallSign.flickerOn(), 1200);
-
 const wallNumber = new WallNumber(tv.getScene());
-setTimeout(() => { const cta = document.getElementById('centerCta'); if (cta) cta.classList.add('is-visible'); }, 2800);
+
+function showCenterCta() {
+  const cta = document.getElementById('centerCta');
+  if (cta) cta.classList.add('is-visible');
+}
+
+// Without the cinematic intro, the wall sign + CTA come up on their own timers.
+// With it, the intro orchestrates both (flicker at the reveal, CTA on finish).
+if (!runIntro) {
+  setTimeout(() => wallSign.flickerOn(), 1200);
+  setTimeout(showCenterCta, 2800);
+}
 
 function applyOuterUITheme(isNightMode) {
   const dark = Boolean(isNightMode);
@@ -1030,7 +1100,10 @@ if (!permalink && agentToggleLink) {
   });
 }
 
-const audio = new Audio(encodeURI('/audio/pat102 - electro dance.mp3'));
+// The ?v bump = trimmed (no lead silence). NOTE: the trim sets WHERE the drop lands, so it's coupled to
+// introConfig.music.dropAt (14.85s) below — re-trim/re-encode the file and you must re-measure dropAt or the
+// reveal desyncs. Bumping ?v is the forcing function to re-check it.
+const audio = new Audio(encodeURI('/audio/pat102 - electro dance.mp3?v=2'));
 audio.loop = true;
 let soundOn = false;
 const soundToggle = document.getElementById('soundToggle');
@@ -1038,11 +1111,157 @@ soundToggle?.addEventListener('click', () => {
   soundOn = !soundOn;
   soundToggle.classList.toggle('active', soundOn);
   if (soundOn) {
-    audio.play();
+    audio.muted = false;       // the intro may be autoplaying MUTED — unmute it
+    audio.volume = 1;
+    audio.play().catch(() => {});
   } else {
     audio.pause();
   }
 });
+
+// ─── Cinematic intro ("video mode") ───────────────────────────────
+// Black → backlit silhouette → laser+smoke reveal → arrive at the landing.
+// A "click to enter" gate starts the intro + music together from ONE real user gesture, so the audio
+// plays IN SYNC with the visuals in every browser (incl. Safari, which blocks autoplay). Skippable.
+if (runIntro) {
+  function markSoundOn() {
+    if (soundOn) return;
+    soundOn = true;
+    soundToggle?.classList.add('active');
+  }
+  function fadeAudioIn(dur) { audio.volume = 0; gsap.to(audio, { volume: 1, duration: dur, ease: 'sine.out' }); }
+
+  // The enter tap "primes" (unlocks) the audio element INSIDE the gesture: a brief silent play()+pause()
+  // blesses it so the browser allows the real, in-sync play() later at the music beat — even on Safari/iOS.
+  let audioPrimed = false;
+  let audioStarted = false;
+  function primeAudio() {
+    if (audioPrimed) return;
+    audioPrimed = true;
+    audio.muted = false;
+    audio.volume = 0;
+    const p = audio.play();
+    if (p && typeof p.then === 'function') {
+      // Guard the trailing pause: if the real, synced start (startIntroAudio) already fired by the
+      // time this resolves, leave the now-audible playback alone instead of pausing it.
+      p.then(() => { if (!audioStarted) { audio.pause(); try { audio.currentTime = 0; } catch { /* not seekable yet */ } } }).catch(() => {});
+    }
+  }
+
+  // Fired by the timeline at the synced music beat. The element is already primed by the enter tap, so
+  // this audible play() is allowed everywhere; we start at 0 and fade up in lockstep with the visuals.
+  function startIntroAudio() {
+    if (audioStarted) return;
+    audioStarted = true;
+    try { audio.currentTime = 0; } catch { /* not seekable yet */ }
+    audio.muted = false;
+    audio.volume = 0;
+    audio.play().then(() => { markSoundOn(); fadeAudioIn(0.8); }).catch(() => { audioStarted = false; });
+  }
+
+  // DEV-TUNE (block 1 of 2): restore tuned settings from localStorage so reloads preserve values.
+  // Must run before `new Intro(...)` below, so it stays inline rather than in the panel module.
+  if (introParams.has('tune')) {
+    try {
+      const stored = localStorage.getItem('dmv-intro-tune');
+      if (stored) {
+        const saved = JSON.parse(stored);
+        // Deep-merge each known nested section; ignore unknown keys.
+        for (const key of ['flicker', 'beats', 'lamp', 'vol', 'timing']) {
+          if (saved[key] && typeof saved[key] === 'object') {
+            Object.assign(introConfig[key], saved[key]);
+          }
+        }
+        for (const key of ['dark', 'music', 'signRevealDelay']) {
+          if (key in saved) {
+            if (key === 'music' && typeof saved[key] === 'object') {
+              Object.assign(introConfig[key], saved[key]);
+            } else {
+              introConfig[key] = saved[key];
+            }
+          }
+        }
+      }
+    } catch { /* corrupt blob — fall back to defaults */ }
+  } // DEV-TUNE
+
+  const intro = new Intro(tv, {
+    wallSign,
+    overlay: document.getElementById('introOverlay'),
+    config: introConfig,
+  });
+  intro.onStart = startIntroAudio;     // fires at the synced music beat; audio already primed by the enter tap
+  intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
+  // DEV-TUNE: the entire tuning feature lives behind ?tune — the panel module owns the window.__* debug
+  // handles and a dispose(). Nothing here leaks into the production path. Remove = delete this line + the
+  // ?tune localStorage-restore block above + js/intro-control-panel.js.
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=12').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv, audio, startIntroAudio, primeAudio })); } // DEV-TUNE
+
+  // Esc / Space / Enter skip the intro — active only AFTER the user has entered.
+  const onIntroKey = (e) => {
+    if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      intro.skip();
+    }
+  };
+
+  const finishIntro = () => {
+    window.removeEventListener('keydown', onIntroKey, true);
+    document.body.classList.remove('intro-active');
+    showCenterCta();
+  };
+
+  const onIntroError = (err) => {
+    console.error('Intro failed — falling back to normal scene:', err);
+    window.removeEventListener('keydown', onIntroKey, true);
+    // Route the failure through the intro's own teardown so the volumetric pass
+    // is detached (tv.setVolumetricPass(null)), disposed, and its light group
+    // removed — otherwise the pass + sceneRT would leak on the error path.
+    // skip() is idempotent (guards on _done) and funnels through _restoreScene.
+    try { intro.skip(); } catch { /* best-effort */ }
+    tv.introActive = false;
+    tv.setVolumetricPass(null);
+    tv.renderer.setClearColor(tv.fogColor, 1);
+    if (tv.ambientLight) tv.ambientLight.intensity = 0.5;
+    if (tv.pointLight) tv.pointLight.intensity = 0.5;
+    document.body.classList.remove('intro-active');
+    wallSign.flickerOn();
+    showCenterCta();
+  };
+
+  // ── Click-to-enter gate ──────────────────────────────────────────
+  // The scene holds on its dark, static first frame (shutter closed, lamp at the arc start) until the
+  // user taps. The tap primes the audio inside the gesture and starts the timeline, so music + visuals
+  // begin together and stay locked in sync — every browser, Safari included. Enter via tap, Enter, or Space.
+  const introEnterEl = document.getElementById('introEnter');
+  let entered = false;
+  const enterExperience = () => {
+    if (entered) return;
+    entered = true;
+    window.removeEventListener('keydown', onEnterKey, true);
+    if (introEnterEl) {
+      introEnterEl.removeEventListener('pointerdown', onEnterPointer);
+      introEnterEl.classList.add('is-leaving');
+      setTimeout(() => { introEnterEl.hidden = true; }, 600);
+    }
+    primeAudio();                                          // unlock audio inside this gesture
+    window.addEventListener('keydown', onIntroKey, true);  // from here on, Space/Enter/Esc SKIP the intro
+    intro.play().then(finishIntro).catch(onIntroError);
+  };
+  const onEnterPointer = enterExperience;
+  const onEnterKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); enterExperience(); }
+  };
+
+  if (introEnterEl) {
+    introEnterEl.hidden = false;
+    introEnterEl.addEventListener('pointerdown', onEnterPointer);
+    window.addEventListener('keydown', onEnterKey, true);
+  } else {
+    enterExperience();   // no gate element (shouldn't happen) — don't leave the scene stuck on black
+  }
+}
 
 function updateClock() {
   const now = new Date();
@@ -1200,6 +1419,8 @@ window.addEventListener('gesturechange', (e) => { if (shouldSuppressNativeGestur
 window.addEventListener('gestureend', (e) => { if (shouldSuppressNativeGesture()) e.preventDefault(); }, { passive: false });
 
 window.addEventListener('click', (e) => {
+  // While the cinematic intro owns the stage, clicks belong to it (sound/skip).
+  if (document.body.classList.contains('intro-active')) return;
   maybeEnableGyro();
   if (e.target.closest('.card-share-bar')) return;
   if (e.target.closest('.permalink-overlay')) return;

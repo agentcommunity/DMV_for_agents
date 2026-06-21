@@ -26,7 +26,7 @@
   <meta name="dmv-turnstile-site-key" content="0x4AAAAAAC2BwC5T9LSdndaK">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="icon" type="image/x-icon" href="/images/favicon.ico?v=1" id="appFavicon">
-  <link rel="stylesheet" href="/css/styles.css?v=38">
+  <link rel="stylesheet" href="/css/styles.css?v=43">
 </head>
 <body>
   <div id="scroller">
@@ -148,6 +148,23 @@
     </div>
   </div>
 
+  <!-- Cinematic intro ("video mode") — letterbox shutter, grain, vignette -->
+  <div id="introOverlay" class="intro-overlay" hidden aria-hidden="true">
+    <div class="intro-overlay__bar intro-overlay__bar--top"></div>
+    <div class="intro-overlay__bar intro-overlay__bar--bottom"></div>
+    <div class="intro-overlay__vignette"></div>
+    <div class="intro-overlay__grain"></div>
+    <div class="intro-overlay__fade"></div>
+    <button id="introSkip" class="intro-overlay__skip" type="button">Skip intro</button>
+  </div>
+
+  <!-- Click-to-enter gate: the intro + music both start on this tap (a real user gesture), so audio
+       plays in sync with the visuals in EVERY browser (incl. Safari, which blocks autoplay). -->
+  <button id="introEnter" class="intro-enter" type="button" hidden>
+    <span class="intro-enter__ring"></span>
+    <span class="intro-enter__label">click to enter</span>
+  </button>
+
   <!-- Permalink overlay — shown when opening a shared card link -->
   <div id="permalinkOverlay" class="permalink-overlay" style="display:none;">
     <div class="permalink-overlay__card-info">
@@ -218,6 +235,6 @@
   <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/ScrollTrigger.min.js"></script>
   <script defer id="turnstile-api-script" src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>
-  <script type="module" src="/js/app.js?v=52"></script>
+  <script type="module" src="/js/app.js?v=80"></script>
 </body>
 </html>

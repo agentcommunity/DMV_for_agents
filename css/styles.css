@@ -1124,3 +1124,151 @@ body.scrolled .center-cta__cli { pointer-events: none; }
 @media (max-width: 767px) {
   .agent-view { padding-top: 10rem; }
 }
+
+/* === Cinematic intro ("video mode") === */
+/* While it plays, the outer UI is hidden and the page scroll is locked so the
+   reveal owns the whole frame. The class is added before the first paint and
+   removed when the director finishes (UI fades in). */
+.start-header,
+.start-screen__footer { transition: opacity 0.8s ease; }
+
+body.intro-active .start-header,
+body.intro-active .start-screen__footer,
+body.intro-active .center-cta,
+body.intro-active .start-screen__mode-switcher,
+body.intro-active .scroll-hint {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+body.intro-active #scroller { overflow: hidden; }
+
+.intro-overlay {
+  position: fixed; inset: 0;
+  z-index: 9000;
+  pointer-events: none;            /* base layer is click-through... */
+  --intro-bar: 1;                  /* 1 = shutter closed, ~0.28 = letterbox, 0 = open */
+  --intro-fade: 0;                 /* end-of-intro fade-to-black (0..1) */
+}
+
+/* Full-screen black used for the "everything goes black, then the normal scene
+   loads" hand-off. Sits above the cinematic layers but below the buttons. */
+.intro-overlay__fade {
+  position: absolute; inset: 0;
+  background: #000;
+  opacity: var(--intro-fade);
+  z-index: 1;
+}
+.intro-overlay[hidden] { display: none; }
+.intro-overlay.is-playing { pointer-events: auto; } /* ...until it owns the stage */
+
+/* Click-to-enter gate — a full-screen tap target shown over the black pre-intro frame. Tapping it
+   starts the intro + music together from one real user gesture, so audio is in sync in every browser. */
+.intro-enter {
+  position: fixed; inset: 0;
+  z-index: 9500;                 /* above the cinematic overlay (9000) */
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 2.4rem;
+  margin: 0; padding: 0; border: 0;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 35%, rgba(0,0,0,0.5) 100%);
+  color: #f0ead8;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  font-family: var(--floating-ui-font-mono, "PPSupplyMonoRegular", monospace);
+  transition: opacity 0.55s ease;
+}
+.intro-enter[hidden] { display: none; }
+.intro-enter.is-leaving { opacity: 0; pointer-events: none; }
+.intro-enter__ring {
+  width: 5rem; height: 5rem; border-radius: 50%;
+  border: 1px solid rgba(240, 234, 216, 0.5);
+  position: relative;
+  animation: introEnterRing 2.6s ease-out 0.5s infinite;
+}
+.intro-enter__ring::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 0.5rem; height: 0.5rem; border-radius: 50%;
+  background: #f0ead8;
+}
+.intro-enter__label {
+  font-size: 1.5rem; letter-spacing: 0.42em; text-indent: 0.42em;
+  text-transform: uppercase;
+  animation: introEnterPulse 2.6s ease-in-out 0.5s infinite;
+}
+@keyframes introEnterPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.95; } }
+@keyframes introEnterRing {
+  0%   { transform: scale(0.8);  opacity: 0; }
+  40%  { opacity: 0.6; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-enter__ring, .intro-enter__label { animation: none; }
+  .intro-enter__label { opacity: 0.85; }
+}
+
+/* Letterbox shutter — two black bars that crack open from a closed black frame
+   to a cinematic letterbox, then retract fully at the end. */
+.intro-overlay__bar {
+  position: absolute; left: 0; width: 100%;
+  height: 50vh; height: 50dvh;
+  background: #000;
+  transform: scaleY(var(--intro-bar));
+  will-change: transform;
+}
+.intro-overlay__bar--top { top: 0; transform-origin: top; }
+.intro-overlay__bar--bottom { bottom: 0; transform-origin: bottom; }
+
+/* Vignette + film grain — only present while the stage is lit. */
+.intro-overlay__vignette {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  background: radial-gradient(ellipse at center,
+    transparent 38%, rgba(0, 0, 0, 0.55) 100%);
+}
+.intro-overlay__grain {
+  position: absolute; inset: -50%;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  mix-blend-mode: overlay;
+  animation: introGrain 0.5s steps(3) infinite;
+}
+.intro-overlay.is-lit .intro-overlay__vignette { opacity: 1; }
+.intro-overlay.is-lit .intro-overlay__grain { opacity: 0.14; }
+.intro-overlay.is-clearing .intro-overlay__vignette,
+.intro-overlay.is-clearing .intro-overlay__grain { opacity: 0; }
+
+@keyframes introGrain {
+  0%   { transform: translate(0, 0); }
+  33%  { transform: translate(-4%, 3%); }
+  66%  { transform: translate(3%, -2%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* Skip affordance — sits inside the bottom letterbox bar. */
+.intro-overlay__skip {
+  position: absolute; bottom: 3rem; right: 4rem;
+  z-index: 2;
+  pointer-events: auto;
+  font-family: var(--floating-ui-font-mono);
+  font-size: 1.3rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  opacity: 0;
+  transition: opacity 0.5s ease 0.2s, color 0.25s ease;
+}
+.intro-overlay.is-lit .intro-overlay__skip { opacity: 1; }
+.intro-overlay.is-clearing .intro-overlay__skip { opacity: 0; }
+.intro-overlay__skip:hover { color: rgba(255, 255, 255, 0.95); }
+
+@media (max-width: 767px) {
+  .intro-overlay__skip { right: 2.4rem; bottom: 2.2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-overlay__grain { animation: none; }
+}

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<!-- PROTOTYPE — throwaway. True WebGL2 volumetric (shadow-aware raymarch) god-ray
+     lighting on the monitor. Not wired into the app. Delete once validated. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROTOTYPE — volumetric</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:ui-monospace,monospace}
+  #c{display:block;width:100vw;height:100vh}
+  .panel{position:fixed;top:12px;left:12px;z-index:10;background:rgba(0,0,0,.55);color:#ffd9a8;padding:10px 12px;border-radius:8px;font-size:11px;line-height:1.9;backdrop-filter:blur(6px);border:1px solid rgba(255,200,120,.2);max-width:240px;user-select:none}
+  .panel label{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .panel input[type=range]{width:120px;accent-color:#ffb86b}
+  .play{position:fixed;bottom:18px;right:18px;z-index:10;background:rgba(0,0,0,.55);color:#ffd9a8;border:1px solid rgba(255,200,120,.2);padding:8px 12px;border-radius:8px;font-size:12px;cursor:pointer}
+  .err{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#ff8a8a;font-size:13px;background:rgba(0,0,0,.7);padding:14px;border-radius:8px;max-width:60vw;z-index:20;display:none;white-space:pre-wrap}
+</style></head>
+<body>
+  <canvas id="c"></canvas>
+  <div class="panel" id="panel">
+    <div id="state">loading…</div><hr>
+    <label>exposure <input id="exposure" type="range" min="0.15" max="2.5" step="0.05" value="1.0"></label>
+    <label>density <input id="density" type="range" min="0" max="2.5" step="0.02" value="1.8"></label>
+    <label>intensity <input id="intensity" type="range" min="0" max="3" step="0.05" value="2.0"></label>
+    <label>steps <input id="steps" type="range" min="16" max="96" step="8" value="96"></label>
+    <label>light <input id="lightcol" type="color" value="#ffb86b"></label>
+  </div>
+  <div class="play" id="playbtn">⏸ pause &nbsp;·&nbsp; <span id="scrub">arc 0%</span></div>
+  <div class="err" id="err"></div>
+
+  <script type="importmap">
+  { "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/"
+  } }
+  </script>
+  <script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+
+const WARM = 0xffb86b;
+const SUBJECT = new THREE.Vector3(0, 0.3, 0.4);
+const showErr = (e)=>{ const el=document.getElementById('err'); el.style.display='block'; el.textContent=String(e&&e.stack||e); console.error(e); };
+window.addEventListener('error', (e)=>showErr(e.message));
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.CineonToneMapping; renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(0,-0.7,12.5); camera.lookAt(0,0.6,0);
+scene.add(new THREE.AmbientLight(0xffffff, 0.02));
+
+// Hero shadow-casting light (the lamp). Its shadow map breaks the volumetric beams.
+const sun = new THREE.DirectionalLight(WARM, 0);
+sun.castShadow = true; sun.shadow.mapSize.set(2048,2048);
+const sc = sun.shadow.camera; sc.left=-7; sc.right=7; sc.top=7; sc.bottom=-7; sc.near=1; sc.far=120; sc.updateProjectionMatrix();
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
+sun.position.set(2,4,-9); sun.target.position.copy(SUBJECT); scene.add(sun, sun.target);
+
+// Color + depth render target for the scene (depth feeds the raymarch).
+function makeRT(w, h){ const rt = new THREE.WebGLRenderTarget(w, h, { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter });
+  rt.depthTexture = new THREE.DepthTexture(w, h); rt.depthTexture.type = THREE.UnsignedShortType; return rt; }
+let sceneRT = makeRT(Math.max(1,innerWidth), Math.max(1,innerHeight));
+function setSize(w, h){ camera.aspect = w/h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false); const old = sceneRT; sceneRT = makeRT(w, h); old.dispose(); }
+
+// Passthrough display material (swapped for the volumetric material in Task 4).
+const passMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tDiffuse:{value:null}, tDepth:{value:null},
+    uInvProj:{value:new THREE.Matrix4()}, uCamWorld:{value:new THREE.Matrix4()}, uCamPos:{value:new THREE.Vector3()},
+    uMode:{value:1}, // 1 = debug worldpos, 0 = passthrough
+    uShadowMap:{value:null}, uShadowMatrix:{value:new THREE.Matrix4()},
+    uLightColor:{value:new THREE.Color(WARM)}, uDensity:{value:0.8}, uIntensity:{value:1.0}, uMaxDist:{value:60.0},
+    uSteps:{value:56.0}, uLightDir:{value:new THREE.Vector3()}, uG:{value:0.6},
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
+  fragmentShader: `
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform sampler2D tDepth;
+    uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform int uMode;
+    uniform sampler2D uShadowMap; uniform mat4 uShadowMatrix;
+    uniform vec3 uLightColor; uniform float uDensity; uniform float uIntensity; uniform float uMaxDist;
+    uniform float uSteps; uniform vec3 uLightDir; uniform float uG;
+    float bayer4(vec2 p){
+      // 4x4 ordered dither, returns [0,1)
+      int x = int(mod(p.x,4.0)); int y = int(mod(p.y,4.0));
+      int idx = x + y*4;
+      float m[16];
+      m[0]=0.;m[1]=8.;m[2]=2.;m[3]=10.;m[4]=12.;m[5]=4.;m[6]=14.;m[7]=6.;
+      m[8]=3.;m[9]=11.;m[10]=1.;m[11]=9.;m[12]=15.;m[13]=7.;m[14]=13.;m[15]=5.;
+      float v=0.0; for(int i=0;i<16;i++){ if(i==idx) v=m[i]; }
+      return v/16.0;
+    }
+    float hg(float cosT, float g){
+      float g2=g*g; float denom=1.0+g2-2.0*g*cosT;
+      return (1.0-g2)/(4.0*3.14159265*pow(max(denom,1e-3),1.5));
+    }
+    vec3 worldFromDepth(vec2 uv, float rawDepth){
+      // NDC (note three depth texture stores [0,1])
+      vec4 ndc = vec4(uv*2.0-1.0, rawDepth*2.0-1.0, 1.0);
+      vec4 view = uInvProj * ndc; view /= view.w;        // view space
+      vec4 world = uCamWorld * view;                      // world space
+      return world.xyz;
+    }
+    float sampleShadow(vec3 worldPos){
+      vec4 sc = uShadowMatrix * vec4(worldPos, 1.0); sc /= sc.w; // three's matrix → [0,1] uv + depth
+      // VOLUMETRIC beam membership: a directional light scatters in ALL open air, which washes the
+      // whole sky to white. Confine scattering to the light's frustum (the beam) so the silhouette's
+      // shadow shaft reads against a dark sky. Outside the frustum = not in the beam = no scatter.
+      if (sc.x<0.0||sc.x>1.0||sc.y<0.0||sc.y>1.0||sc.z>1.0) return 0.0;
+      float occ = texture2D(uShadowMap, sc.xy).x;                       // stored nearest depth [0,1]
+      float lit = 1.0 - smoothstep(0.0, 0.0015, (sc.z - 0.0015) - occ);  // soft shadow test (de-bands the rays)
+      vec2 e = smoothstep(0.0, 0.18, sc.xy) * smoothstep(0.0, 0.18, 1.0 - sc.xy); // soft beam edges
+      return lit * e.x * e.y;
+    }
+    void main(){
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      float d = texture2D(tDepth, vUv).x;
+
+      // ray from camera through this pixel, out to the scene hit (or uMaxDist for sky)
+      vec3 hit;
+      if (d >= 1.0){ hit = uCamPos + normalize(worldFromDepth(vUv, 0.999) - uCamPos) * uMaxDist; }
+      else { hit = worldFromDepth(vUv, d); }
+      vec3 ro = uCamPos;
+      vec3 rd = hit - ro;
+      float marchLen = min(length(rd), uMaxDist);
+      rd = normalize(rd);
+
+      float fsteps = clamp(uSteps, 8.0, 96.0);
+      float stepSize = marchLen / fsteps;
+      float jitter = bayer4(gl_FragCoord.xy);            // break banding
+      float accum = 0.0;
+      vec3 p = ro + rd * stepSize * jitter;
+      for (int i=0;i<96;i++){
+        if (float(i) >= fsteps) break;
+        float lit = sampleShadow(p);
+        // distance fog falloff so near-camera haze doesn't dominate
+        float fog = exp(-length(p - ro) * 0.02);
+        accum += lit * fog;
+        p += rd * stepSize;
+      }
+      float phase = hg(dot(rd, normalize(uLightDir)), uG); // forward scatter toward the lamp
+      // 0.02 maps the ~35-unit lit-air integral back into a sane [0,1]-ish range so density~1 reads
+      // as a soft beam rather than a blown-white wall.
+      accum *= stepSize * uDensity * 0.02 * (0.4 + 1.6 * phase);
+      vec3 glow = uLightColor * accum * uIntensity;
+      glow = vec3(1.0) - exp(-glow);                       // exposure rolloff: saturate gracefully, never hard-clip
+      // Screen-space source-halo occlusion (the missing camera-side gate). In-scatter from lit haze between
+      // the camera and the monitor screen-projects OVER the near-black silhouette and reads as rays. Sky
+      // pixels (d>=1) keep full glow (the backdrop beams); over solid foreground, fade glow by the underlying
+      // pixel brightness so the dark silhouette + its shadow-shaft stay clean while the lit ledge keeps glow.
+      // Uses col (already has clean baked shadows) — no extra shadow fetch, no acne, camera-distance-agnostic.
+      float occMask = smoothstep(0.02, 0.14, dot(col, vec3(0.299, 0.587, 0.114)));
+      float foreground = step(d, 0.9999);
+      glow *= mix(1.0, occMask, foreground);
+      gl_FragColor = vec4(col + glow, 1.0);
+    }`,
+  depthTest:false, depthWrite:false,
+});
+const fsQuad = new FullScreenQuad(passMat);
+
+let monitorReady = false;
+const draco = new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/libs/draco/');
+const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
+loader.load('/models/tv1.glb', (g)=>{
+  scene.add(g.scene);
+  for (const n of ['Cube','Cube007','Cube006','Rubber','Glass']) { const m=g.scene.getObjectByName(n); if(m){m.castShadow=true;m.receiveShadow=true;} }
+  const glass=g.scene.getObjectByName('Glass'); if(glass) glass.material=new THREE.MeshBasicMaterial({color:0x040404,toneMapped:false});
+  const plane=g.scene.getObjectByName('Plane'); if(plane){plane.receiveShadow=true;renderer.localClippingEnabled=true;plane.material.clippingPlanes=[new THREE.Plane(new THREE.Vector3(0,-1,0),-1.9)];}
+  monitorReady = true; document.getElementById('state').textContent='ready';
+}, undefined, (e)=>showErr('GLB load failed: '+e));
+
+const ctrl = { exposure:exposure, density:density, intensity:intensity, steps:steps };
+function applyControls(){ renderer.toneMappingExposure = +ctrl.exposure.value; }
+Object.values(ctrl).forEach(el=>el.addEventListener('input', applyControls));
+
+// Light color drives BOTH the lamp (scene shading) and the volumetric glow, so the whole light
+// changes together (e.g. warm Edison -> white). Default matches WARM (#ffb86b).
+const lightColor = new THREE.Color(WARM);
+lightcol.addEventListener('input', ()=>{ lightColor.set(lightcol.value); sun.color.set(lightcol.value); });
+
+let arc = 0, playing = true, last = performance.now();
+const smooth=(x,a,b)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);};
+function driveArc(a){
+  // lamp arc: behind-low (silhouette) → over → high front (reveal), always aimed at the monitor
+  const th = THREE.MathUtils.degToRad(202 + (38-202)*a);
+  sun.position.set(SUBJECT.x+1.0, SUBJECT.y + Math.sin(th)*6.5, SUBJECT.z + Math.cos(th)*9);
+  sun.target.position.copy(SUBJECT); sun.target.updateMatrixWorld();
+  // lamp brightness: weak sunrise → strong; modest peak so the reveal never blows out
+  sun.intensity = (0.2 + 0.8*a) * 2.6;
+  // volumetric: glows up for the silhouette, peaks mid-arc (beams), thins for the clean reveal
+  const up = smooth(a, 0.05, 0.3);
+  const front = smooth(a, 0.55, 0.95);
+  passMat.uniforms.uDensity.value   = (+ctrl.density.value)   * up * (1.0 - 0.7*front);
+  passMat.uniforms.uIntensity.value = (+ctrl.intensity.value) * (0.3 + 0.7*up);
+}
+function renderFrame(){
+  // 1) scene → sceneRT (lights + shadows)
+  renderer.setRenderTarget(sceneRT); renderer.clear(); renderer.render(scene, camera);
+  // 2) display sceneRT to screen (passthrough for now)
+  passMat.uniforms.tDiffuse.value = sceneRT.texture;
+  passMat.uniforms.tDepth.value = sceneRT.depthTexture;
+  passMat.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
+  passMat.uniforms.uCamWorld.value.copy(camera.matrixWorld);
+  passMat.uniforms.uCamPos.value.copy(camera.position);
+  if (sun.shadow.map){ passMat.uniforms.uShadowMap.value = sun.shadow.map.texture; }
+  passMat.uniforms.uShadowMatrix.value.copy(sun.shadow.matrix);
+  passMat.uniforms.uLightColor.value.copy(lightColor);
+  passMat.uniforms.uSteps.value = +ctrl.steps.value;
+  passMat.uniforms.uLightDir.value.copy(SUBJECT).sub(sun.position).normalize();
+  renderer.setRenderTarget(null); fsQuad.render(renderer);
+}
+function tick(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if (playing) arc=(arc+dt/9)%1;
+  if (monitorReady){ driveArc(arc); renderFrame(); }
+  document.getElementById('scrub').textContent='arc '+Math.round(arc*100)+'%';
+  requestAnimationFrame(tick);
+}
+addEventListener('keydown',(e)=>{ if(e.key===' '){playing=!playing; document.getElementById('playbtn').firstChild.textContent=playing?'⏸ pause ':'▶ play ';} });
+document.getElementById('playbtn').onclick=()=>{playing=!playing; document.getElementById('playbtn').firstChild.textContent=playing?'⏸ pause ':'▶ play ';};
+addEventListener('resize',()=>{ setSize(Math.max(1,innerWidth), Math.max(1,innerHeight)); });
+
+window.__V = { THREE, renderer, scene, camera, sun, sceneRT:()=>sceneRT, fsQuad, passMat, SUBJECT, get arc(){return arc;}, set arc(v){arc=v;}, set playing(v){playing=v;}, driveArc, renderFrame, setSize }; // TEMP debug handle
+applyControls(); requestAnimationFrame(tick);
+  </script>
+</body></html>

@@ -36,36 +36,52 @@ export class WallSign {
     this.mesh.position.set(0, 3.0, -0.5);
     scene.add(this.mesh);
 
+    // Total duration of the flickerOn() timeline below (~1.78s). Consumers (the intro)
+    // read this to time things to the END of the stutter; keep in sync if the pattern changes.
+    this.flickerDuration = 1.78;
+
     // Draw content (invisible until flickerOn)
     this.draw();
   }
 
-  /** Trigger the fluorescent tube startup sequence. */
-  flickerOn() {
+  /** Trigger the fluorescent tube startup sequence. onDone fires when it finishes catching. */
+  flickerOn(onDone) {
     if (this.isOn) return;
     this.isOn = true;
 
     const mat = this.material;
     const tl = gsap.timeline({
-      onComplete: () => this._startAmbientFlicker(),
+      onComplete: () => { this._startAmbientFlicker(); if (onDone) onDone(); },
     });
 
-    // 1. Quick flash — tube tries to catch
-    tl.to(mat, { opacity: 0.3, duration: 0.08 });
+    // A longer, gappier fluorescent struggle — several catch-attempts separated by
+    // beats of full darkness, so the sign "shows" then drops out before finally holding.
+
+    // 1. First catch-attempt — a flash, then dies
+    tl.to(mat, { opacity: 0.4, duration: 0.06 });
+    tl.to(mat, { opacity: 0, duration: 0.08 });
+
+    // 2. Big dark gap
+    tl.to(mat, { opacity: 0, duration: 0.4 });
+
+    // 3. Second attempt — stutters and dies
+    tl.to(mat, { opacity: 0.6, duration: 0.05 });
+    tl.to(mat, { opacity: 0.05, duration: 0.05 });
+    tl.to(mat, { opacity: 0.45, duration: 0.05 });
     tl.to(mat, { opacity: 0, duration: 0.06 });
 
-    // 2. Pause — darkness
-    tl.to(mat, { opacity: 0, duration: 0.2 });
+    // 4. Big dark gap
+    tl.to(mat, { opacity: 0, duration: 0.32 });
 
-    // 3. Stutter flashes — tube sputtering
-    tl.to(mat, { opacity: 0.5, duration: 0.05 });
-    tl.to(mat, { opacity: 0.1, duration: 0.04 });
-    tl.to(mat, { opacity: 0.6, duration: 0.06 });
-    tl.to(mat, { opacity: 0.15, duration: 0.05 });
-    tl.to(mat, { opacity: 0.7, duration: 0.05 });
+    // 5. Third attempt — rapid sputter cluster
+    tl.to(mat, { opacity: 0.7, duration: 0.04 });
+    tl.to(mat, { opacity: 0.2, duration: 0.04 });
+    tl.to(mat, { opacity: 0.85, duration: 0.05 });
+    tl.to(mat, { opacity: 0.1, duration: 0.05 });
 
-    // 4. Full on — tube catches and holds
-    tl.to(mat, { opacity: 1.0, duration: 0.3, ease: 'power2.out' });
+    // 6. Short gap, then it catches and holds
+    tl.to(mat, { opacity: 0, duration: 0.18 });
+    tl.to(mat, { opacity: 1.0, duration: 0.35, ease: 'power2.out' });
   }
 
   /** Subtle ambient flicker — cheap fluorescent tube feel. */
