@@ -3,7 +3,7 @@ import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=4';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=66';
+import { Intro } from './Intro.js?v=67';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -253,11 +253,11 @@ const introConfig = {
     revealLength: 0.90,
   },
   dark:  true,
-  // music onStart vs first-light (s); negative = before the sunrise. SYNCED: the track's drop is at
-  // 14.85s, the lamp arc (sunrise+rise+crest = 5.7+4.8+3.5 = 14.0s) starts at first-light, so
-  // offset = 14.0 − 14.85 = −0.85 lands the bass drop exactly on the crest-finish reveal (ARC_END).
-  // If you retune the legs, re-derive: offset = (sunrise+rise+crest) − 14.85.
-  music: { offset: -0.85 },
+  // Music is SYNCED to the reveal, not to the sunrise. The track's loud drop is at `dropAt` seconds
+  // (measured 14.85s); Intro.js starts the music so that drop lands on the default-scene reveal (when
+  // the white light floods in), offset by `dropVsReveal` (0 = exactly on the reveal; + = later). This
+  // auto-tracks any leg retuning, so the drop always hits the reveal. Panel: "drop vs reveal (s)".
+  music: { dropAt: 14.85, dropVsReveal: 0 },
   signReveal: 'at_reveal',
   signRevealDelay: 1.0,               // seconds AFTER the scene reveals before the wall sign stutters in
 };
@@ -1129,60 +1129,42 @@ soundToggle?.addEventListener('click', () => {
 
 // ─── Cinematic intro ("video mode") ───────────────────────────────
 // Black → backlit silhouette → laser+smoke reveal → arrive at the landing.
-// Music starts (audibly if allowed, else muted-in-sync) on the light-stab and becomes audible on
-// the first user gesture anywhere — no "tap for sound" prompt. Skippable.
+// A "click to enter" gate starts the intro + music together from ONE real user gesture, so the audio
+// plays IN SYNC with the visuals in every browser (incl. Safari, which blocks autoplay). Skippable.
 if (runIntro) {
-  const introSoundHint = document.getElementById('introSound');
-
   function markSoundOn() {
     if (soundOn) return;
     soundOn = true;
     soundToggle?.classList.add('active');
   }
-  // Audio autoplay is progressive: TRY WITH SOUND first — Chrome/localhost and any engaged browser
-  // allow it, so the music just plays audibly (the behaviour we want). ONLY if that's blocked
-  // (Safari/iOS cold load) do we fall back to MUTED autoplay so the track still runs in sync, then
-  // unmute it on the first user gesture (unlockAudio). No "tap for sound" prompt in any case.
-  //
-  // RACE-PROOFING: `soundOn` (set by markSoundOn) is the SOLE "we are now audible" latch — there is no
-  // separate one-shot. A gesture that cannot actually grant media activation (e.g. a wheel/scroll on
-  // Safari, or any gesture that arrives BEFORE the timeline's onStart) must NOT lock us out: it re-mutes
-  // and leaves soundOn false so the next real tap retries. This kills the "muted forever after an early
-  // scroll" bug. unlockAudio attempts the unmute INSIDE the gesture and only latches on a resolved play().
-  let audioStarted = false;
   function fadeAudioIn(dur) { audio.volume = 0; gsap.to(audio, { volume: 1, duration: dur, ease: 'sine.out' }); }
-  function startIntroAudio() {
-    if (audioStarted || !audio.paused) return;   // !paused guards a toggle-started track (don't restart)
-    audioStarted = true;
-    try { audio.currentTime = 0; } catch { /* not seekable yet */ }
-    audio.muted = false;            // attempt audible playback first
+
+  // The enter tap "primes" (unlocks) the audio element INSIDE the gesture: a brief silent play()+pause()
+  // blesses it so the browser allows the real, in-sync play() later at the music beat — even on Safari/iOS.
+  let audioPrimed = false;
+  function primeAudio() {
+    if (audioPrimed) return;
+    audioPrimed = true;
+    audio.muted = false;
     audio.volume = 0;
     const p = audio.play();
     if (p && typeof p.then === 'function') {
-      p.then(() => {                // autoplay WITH SOUND allowed (Chrome/localhost/engaged, or in-gesture) → audible
-        markSoundOn();
-        introSoundHint?.classList.remove('is-visible');
-        fadeAudioIn(0.8);
-      }).catch(() => {              // blocked (Safari/iOS cold) → muted autoplay, in sync; unmute on a later gesture
-        audio.muted = true;
-        audio.volume = 1;
-        audio.play().catch(() => {});
-      });
-    } else { markSoundOn(); audio.volume = 1; }
+      p.then(() => { audio.pause(); try { audio.currentTime = 0; } catch { /* not seekable yet */ } }).catch(() => {});
+    }
   }
-  function unlockAudio(e) {
-    if (soundOn) return;            // already audible — nothing to do
-    // The sound toggle owns its own click (don't fight it over on/off state).
-    if (e && e.target && typeof e.target.closest === 'function' && e.target.closest('#soundToggle')) return;
-    if (!audioStarted) { startIntroAudio(); return; }  // gesture before onStart: start in-gesture; its .then latches
-    audio.muted = false;           // already playing muted → unmute inside this gesture
-    const p = audio.play();
-    if (p && typeof p.then === 'function') {
-      p.then(() => { markSoundOn(); introSoundHint?.classList.remove('is-visible'); fadeAudioIn(0.4); })
-       .catch(() => { audio.muted = true; if (audio.paused) audio.play().catch(() => {}); }); // not activated → stay muted, retry
-    } else { markSoundOn(); fadeAudioIn(0.4); }
+
+  // Fired by the timeline at the synced music beat. The element is already primed by the enter tap, so
+  // this audible play() is allowed everywhere; we start at 0 and fade up in lockstep with the visuals.
+  let audioStarted = false;
+  function startIntroAudio() {
+    if (audioStarted) return;
+    audioStarted = true;
+    try { audio.currentTime = 0; } catch { /* not seekable yet */ }
+    audio.muted = false;
+    audio.volume = 0;
+    audio.play().then(() => { markSoundOn(); fadeAudioIn(0.8); }).catch(() => { audioStarted = false; });
   }
-  window.__audio = audio; window.__startIntroAudio = startIntroAudio; window.__unlockAudio = unlockAudio; // DEV-TUNE
+  window.__audio = audio; window.__startIntroAudio = startIntroAudio; window.__primeAudio = primeAudio; // DEV-TUNE
 
   // DEV-TUNE: restore tuned settings from localStorage so reloads preserve values.
   if (introParams.has('tune')) {
@@ -1214,19 +1196,12 @@ if (runIntro) {
     overlay: document.getElementById('introOverlay'),
     config: introConfig,
   });
-  intro.onStart = startIntroAudio;
-  intro.onSoundRequest = unlockAudio;   // overlay "I want sound" click → unmute, not re-trigger autoplay
-  // Unmute the (already muted-playing) track on the first ACTIVATION-CAPABLE user gesture anywhere —
-  // a tap/click (pointerdown, incl. touch) or a keypress. We deliberately do NOT listen on wheel:
-  // a scroll grants no media activation on Safari, so it can't unmute and would only thrash the
-  // attempt every scroll frame. The handler retries on each gesture until one actually goes audible.
-  window.addEventListener('pointerdown', unlockAudio, { capture: true });
-  window.addEventListener('keydown', unlockAudio, { capture: true });
+  intro.onStart = startIntroAudio;     // fires at the synced music beat; audio already primed by the enter tap
   intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
-  if (introParams.has('tune')) { import('./intro-control-panel.js?v=9').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=10').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
 
-  // Esc / Space / Enter skip the intro.
+  // Esc / Space / Enter skip the intro — active only AFTER the user has entered.
   const onIntroKey = (e) => {
     if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
@@ -1234,7 +1209,6 @@ if (runIntro) {
       intro.skip();
     }
   };
-  window.addEventListener('keydown', onIntroKey, true);
 
   const finishIntro = () => {
     window.removeEventListener('keydown', onIntroKey, true);
@@ -1242,7 +1216,7 @@ if (runIntro) {
     showCenterCta();
   };
 
-  intro.play().then(finishIntro).catch((err) => {
+  const onIntroError = (err) => {
     console.error('Intro failed — falling back to normal scene:', err);
     window.removeEventListener('keydown', onIntroKey, true);
     // Route the failure through the intro's own teardown so the volumetric pass
@@ -1258,7 +1232,39 @@ if (runIntro) {
     document.body.classList.remove('intro-active');
     wallSign.flickerOn();
     showCenterCta();
-  });
+  };
+
+  // ── Click-to-enter gate ──────────────────────────────────────────
+  // The scene holds on its dark, static first frame (shutter closed, lamp at the arc start) until the
+  // user taps. The tap primes the audio inside the gesture and starts the timeline, so music + visuals
+  // begin together and stay locked in sync — every browser, Safari included. Enter via tap, Enter, or Space.
+  const introEnterEl = document.getElementById('introEnter');
+  let entered = false;
+  const enterExperience = () => {
+    if (entered) return;
+    entered = true;
+    window.removeEventListener('keydown', onEnterKey, true);
+    if (introEnterEl) {
+      introEnterEl.removeEventListener('pointerdown', onEnterPointer);
+      introEnterEl.classList.add('is-leaving');
+      setTimeout(() => { introEnterEl.hidden = true; }, 600);
+    }
+    primeAudio();                                          // unlock audio inside this gesture
+    window.addEventListener('keydown', onIntroKey, true);  // from here on, Space/Enter/Esc SKIP the intro
+    intro.play().then(finishIntro).catch(onIntroError);
+  };
+  const onEnterPointer = () => enterExperience();
+  const onEnterKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); enterExperience(); }
+  };
+
+  if (introEnterEl) {
+    introEnterEl.hidden = false;
+    introEnterEl.addEventListener('pointerdown', onEnterPointer);
+    window.addEventListener('keydown', onEnterKey, true);
+  } else {
+    enterExperience();   // no gate element (shouldn't happen) — don't leave the scene stuck on black
+  }
 }
 
 function updateClock() {

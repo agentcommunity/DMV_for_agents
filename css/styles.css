@@ -1161,6 +1161,51 @@ body.intro-active #scroller { overflow: hidden; }
 .intro-overlay[hidden] { display: none; }
 .intro-overlay.is-playing { pointer-events: auto; } /* ...until it owns the stage */
 
+/* Click-to-enter gate — a full-screen tap target shown over the black pre-intro frame. Tapping it
+   starts the intro + music together from one real user gesture, so audio is in sync in every browser. */
+.intro-enter {
+  position: fixed; inset: 0;
+  z-index: 9500;                 /* above the cinematic overlay (9000) */
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 2.4rem;
+  margin: 0; padding: 0; border: 0;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 35%, rgba(0,0,0,0.5) 100%);
+  color: #f0ead8;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  font-family: var(--floating-ui-font-mono, "PPSupplyMonoRegular", monospace);
+  transition: opacity 0.55s ease;
+}
+.intro-enter[hidden] { display: none; }
+.intro-enter.is-leaving { opacity: 0; pointer-events: none; }
+.intro-enter__ring {
+  width: 5rem; height: 5rem; border-radius: 50%;
+  border: 1px solid rgba(240, 234, 216, 0.5);
+  position: relative;
+  animation: introEnterRing 2.6s ease-out 0.5s infinite;
+}
+.intro-enter__ring::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 0.5rem; height: 0.5rem; border-radius: 50%;
+  background: #f0ead8;
+}
+.intro-enter__label {
+  font-size: 1.5rem; letter-spacing: 0.42em; text-indent: 0.42em;
+  text-transform: uppercase;
+  animation: introEnterPulse 2.6s ease-in-out 0.5s infinite;
+}
+@keyframes introEnterPulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.95; } }
+@keyframes introEnterRing {
+  0%   { transform: scale(0.8);  opacity: 0; }
+  40%  { opacity: 0.6; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-enter__ring, .intro-enter__label { animation: none; }
+  .intro-enter__label { opacity: 0.85; }
+}
+
 /* Letterbox shutter — two black bars that crack open from a closed black frame
    to a cinematic letterbox, then retract fully at the end. */
 .intro-overlay__bar {

@@ -71,7 +71,7 @@ const DEFAULT_CONFIG = {
   lamp: { color: '#ffb86b' },
   vol:  { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
   dark: true,
-  music: { offset: -0.85 },   // music onStart vs first-light (s). SYNC: drop@14.85s, arc=14.0s → offset=14.0−14.85=−0.85 lands the bass drop on the crest-finish reveal.
+  music: { dropAt: 14.85, dropVsReveal: 0 },  // music synced so the track's drop (dropAt s) lands on the reveal; dropVsReveal nudges it (s).
   signReveal: 'at_reveal',
   signRevealDelay: 1.0,   // seconds AFTER the scene reveals before the wall sign stutters in
 };
@@ -287,12 +287,17 @@ export class Intro {
       onUpdate: () => this._applyBars() }, 0.1);
     if (this.overlay) tl.call(() => this.overlay.classList.add('is-lit'), null, 0.2);
 
-    // POWER — the CRT button flickers on. Music starts relative to first-light via config.music.offset
-    // (negative = a beat BEFORE the sunrise so the track's light intro carries the whole colour phase,
-    // and its big drop is timed to land at the reveal). Clamped to >= 0 so it never precedes the timeline.
+    // POWER — the CRT button flickers on, then the music. The music is SYNCED TO THE REVEAL, not the
+    // sunrise: it starts so its loud drop (config.music.dropAt seconds into the track) lands exactly when
+    // the default white light floods in — REVEAL_LIGHT, the instant the black starts lifting to show the
+    // normal scene (= BLACK + 0.05, matching the reveal tween below) — nudged by config.music.dropVsReveal
+    // (0 = on the reveal, + = later). Deriving from REVEAL_LIGHT means the drop auto-tracks any leg retune.
     this._addButtonFlicker(tl, POWER);
-    const musicOffset = (this.config.music && typeof this.config.music.offset === 'number') ? this.config.music.offset : 0;
-    const musicAt = Math.max(0, firstLight + musicOffset);
+    const M = this.config.music || {};
+    const dropAt = typeof M.dropAt === 'number' ? M.dropAt : 14.85;
+    const dropVsReveal = typeof M.dropVsReveal === 'number' ? M.dropVsReveal : 0;
+    const REVEAL_LIGHT = BLACK + 0.05;
+    const musicAt = Math.max(0, REVEAL_LIGHT - dropAt + dropVsReveal);
     tl.call(() => { if (this.onStart) this.onStart(); }, null, musicAt);
 
     // ② SUNRISE leg — exposure brightens + lamp moves a:0→aBehind (still behind, glowing up).
