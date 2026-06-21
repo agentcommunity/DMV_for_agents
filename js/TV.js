@@ -639,6 +639,11 @@ export class TV {
     this._renderCallbacks.push(cb);
   }
 
+  offRender(cb) {
+    const i = this._renderCallbacks.indexOf(cb);
+    if (i !== -1) this._renderCallbacks.splice(i, 1);
+  }
+
   _render() {
     const dt = this._clock.getDelta();
 

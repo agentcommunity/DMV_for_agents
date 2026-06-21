@@ -1,4 +1,4 @@
-import { TV } from './TV.js?v=40';
+import { TV } from './TV.js?v=41';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=4';
@@ -1142,6 +1142,7 @@ if (runIntro) {
   // The enter tap "primes" (unlocks) the audio element INSIDE the gesture: a brief silent play()+pause()
   // blesses it so the browser allows the real, in-sync play() later at the music beat — even on Safari/iOS.
   let audioPrimed = false;
+  let audioStarted = false;
   function primeAudio() {
     if (audioPrimed) return;
     audioPrimed = true;
@@ -1149,13 +1150,14 @@ if (runIntro) {
     audio.volume = 0;
     const p = audio.play();
     if (p && typeof p.then === 'function') {
-      p.then(() => { audio.pause(); try { audio.currentTime = 0; } catch { /* not seekable yet */ } }).catch(() => {});
+      // Guard the trailing pause: if the real, synced start (startIntroAudio) already fired by the
+      // time this resolves, leave the now-audible playback alone instead of pausing it.
+      p.then(() => { if (!audioStarted) { audio.pause(); try { audio.currentTime = 0; } catch { /* not seekable yet */ } } }).catch(() => {});
     }
   }
 
   // Fired by the timeline at the synced music beat. The element is already primed by the enter tap, so
   // this audible play() is allowed everywhere; we start at 0 and fade up in lockstep with the visuals.
-  let audioStarted = false;
   function startIntroAudio() {
     if (audioStarted) return;
     audioStarted = true;
@@ -1164,9 +1166,9 @@ if (runIntro) {
     audio.volume = 0;
     audio.play().then(() => { markSoundOn(); fadeAudioIn(0.8); }).catch(() => { audioStarted = false; });
   }
-  window.__audio = audio; window.__startIntroAudio = startIntroAudio; window.__primeAudio = primeAudio; // DEV-TUNE
 
-  // DEV-TUNE: restore tuned settings from localStorage so reloads preserve values.
+  // DEV-TUNE (block 1 of 2): restore tuned settings from localStorage so reloads preserve values.
+  // Must run before `new Intro(...)` below, so it stays inline rather than in the panel module.
   if (introParams.has('tune')) {
     try {
       const stored = localStorage.getItem('dmv-intro-tune');
@@ -1198,8 +1200,10 @@ if (runIntro) {
   });
   intro.onStart = startIntroAudio;     // fires at the synced music beat; audio already primed by the enter tap
   intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
-  window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
-  if (introParams.has('tune')) { import('./intro-control-panel.js?v=10').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
+  // DEV-TUNE: the entire tuning feature lives behind ?tune — the panel module owns the window.__* debug
+  // handles and a dispose(). Nothing here leaks into the production path. Remove = delete this line + the
+  // ?tune localStorage-restore block above + js/intro-control-panel.js.
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=11').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv, audio, startIntroAudio, primeAudio })); } // DEV-TUNE
 
   // Esc / Space / Enter skip the intro — active only AFTER the user has entered.
   const onIntroKey = (e) => {

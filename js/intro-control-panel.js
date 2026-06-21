@@ -1,7 +1,10 @@
 /**
- * DEV control panel for intro tuning — gated behind ?tune only.
- * Writes to the shared introConfig object; calls intro.rebuild() for structural changes.
- * Delete this file + the single "// DEV-TUNE" line in app.js to remove completely.
+ * DEV control panel for intro tuning — loaded ONLY under ?tune. Self-contained: it owns the
+ * `window.__*` debug handles and a `dispose()` that unhooks everything (so production never
+ * touches it). Writes to the shared introConfig; calls intro.rebuild() for structural changes.
+ *
+ * To remove the whole tuning feature: delete this file + the two grep-tagged `// DEV-TUNE` blocks
+ * in app.js (the ?tune localStorage-restore, and the ?tune dynamic-import line). Nothing else.
  *
  * Persistence: every control change saves config to localStorage ('dmv-intro-tune').
  * Replay reloads the page (restoring saved config), giving a true from-the-top replay.
@@ -203,7 +206,12 @@ function copyTextRobust(text) {
 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
-export function createIntroControlPanel({ config, intro, tv }) {
+export function createIntroControlPanel({ config, intro, tv, audio, startIntroAudio, primeAudio }) {
+  // Debug handles live HERE, not in app.js — the panel only loads under ?tune, so the production
+  // `window` stays clean (no renderer/intro/audio internals exposed to third-party scripts).
+  window.__tv = tv; window.__intro = intro;
+  window.__audio = audio; window.__startIntroAudio = startIntroAudio; window.__primeAudio = primeAudio;
+
   // Ensure lamp intensity fields are present (introConfig.lamp ships them as of v2,
   // but guard against stale localStorage blobs that might be missing them).
   if (config.lamp.initialIntensity == null) config.lamp.initialIntensity = 0.52;
@@ -241,7 +249,7 @@ export function createIntroControlPanel({ config, intro, tv }) {
   closeBtn.textContent = '✕';
   closeBtn.title = 'Close panel (does not remove ?tune)';
   closeBtn.style.cssText = 'background:none;border:none;color:#555;font-size:12px;cursor:pointer;padding:0 2px;';
-  closeBtn.addEventListener('click', () => panel.remove());
+  closeBtn.addEventListener('click', () => dispose());
   titleBar.appendChild(title);
   titleBar.appendChild(closeBtn);
   panel.appendChild(titleBar);
@@ -494,5 +502,15 @@ export function createIntroControlPanel({ config, intro, tv }) {
 
   // Panel appended to body (not intro overlay) so it survives intro completion.
   document.body.appendChild(panel);
-  return panel;
+
+  // dispose() unhooks EVERYTHING the panel added: the per-frame scrub-sync render callback (which
+  // was previously never removed → ran forever), the panel DOM, and the window debug handles. So
+  // closing the panel leaves zero tendrils in the render loop or on `window`.
+  function dispose() {
+    if (tv) tv.offRender(scrubSync);
+    panel.remove();
+    delete window.__tv; delete window.__intro;
+    delete window.__audio; delete window.__startIntroAudio; delete window.__primeAudio;
+  }
+  return dispose;
 }
