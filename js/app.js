@@ -1135,22 +1135,31 @@ if (runIntro) {
     soundOn = true;
     soundToggle?.classList.add('active');
   }
-  // Browsers block audio autoplay WITH SOUND on a cold load (Safari/iOS hard-block; no override).
-  // So we autoplay MUTED (every browser allows that) — the track runs in sync from the light-stab —
-  // and UNMUTE it the instant the user does anything (unlockAudio). No "tap for sound" prompt, and
-  // because it's already playing, unmuting lands mid-track so the music-aligned reveal still holds.
+  // Audio autoplay is progressive: TRY WITH SOUND first — Chrome/localhost and any engaged browser
+  // allow it, so the music just plays audibly (the behaviour we want). ONLY if that's blocked
+  // (Safari/iOS cold load) do we fall back to MUTED autoplay so the track still runs in sync, then
+  // unmute it on the first user gesture (unlockAudio). No "tap for sound" prompt in any case.
   let audioUnlocked = false;
   let audioStarted = false;
+  function fadeAudioIn(dur) { audio.volume = 0; gsap.to(audio, { volume: 1, duration: dur, ease: 'sine.out' }); }
   function startIntroAudio() {
     if (audioStarted) return;
     audioStarted = true;
     try { audio.currentTime = 0; } catch { /* not seekable yet */ }
-    audio.muted = !audioUnlocked;   // muted autoplay until a gesture
-    audio.volume = 1;
+    audio.muted = false;            // attempt audible playback first
+    audio.volume = 0;
     const p = audio.play();
     if (p && typeof p.then === 'function') {
-      p.then(() => { if (audioUnlocked) markSoundOn(); }).catch(() => { audioStarted = false; });
-    } else if (audioUnlocked) { markSoundOn(); }
+      p.then(() => {                // autoplay WITH SOUND allowed (Chrome/localhost/engaged) → audible
+        markSoundOn();
+        introSoundHint?.classList.remove('is-visible');
+        fadeAudioIn(0.8);
+      }).catch(() => {              // blocked (Safari/iOS) → muted autoplay, in sync; unmute on gesture
+        audio.muted = true;
+        audio.volume = 1;
+        audio.play().catch(() => { audioStarted = false; });
+      });
+    } else { markSoundOn(); audio.volume = 1; }
   }
   function unlockAudio(e) {
     if (audioUnlocked) return;
@@ -1158,12 +1167,14 @@ if (runIntro) {
     if (e && e.target && typeof e.target.closest === 'function' && e.target.closest('#soundToggle')) return;
     audioUnlocked = true;
     if (!audioStarted) startIntroAudio();
+    const wasMuted = audio.muted;
     audio.muted = false;
     if (audio.paused) audio.play().catch(() => {});
-    audio.volume = 0; gsap.to(audio, { volume: 1, duration: 0.4, ease: 'sine.out' }); // soft unmute (no-op vol on iOS)
+    if (wasMuted) fadeAudioIn(0.4);  // only fade when we're actually unmuting (don't dip already-audible audio)
     introSoundHint?.classList.remove('is-visible');
     markSoundOn();
   }
+  window.__audio = audio; window.__startIntroAudio = startIntroAudio; window.__unlockAudio = unlockAudio; // DEV-TUNE
 
   // DEV-TUNE: restore tuned settings from localStorage so reloads preserve values.
   if (introParams.has('tune')) {
