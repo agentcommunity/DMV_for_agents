@@ -1249,7 +1249,7 @@ body.intro-active #scroller { overflow: hidden; }
 
 /* Skip affordance — sits inside the bottom letterbox bar. */
 .intro-overlay__skip {
-  position: absolute; bottom: 3rem;
+  position: absolute; bottom: 3rem; right: 4rem;
   z-index: 2;
   pointer-events: auto;
   font-family: var(--floating-ui-font-mono);
@@ -1257,12 +1257,9 @@ body.intro-active #scroller { overflow: hidden; }
   letter-spacing: 0.22em;
   text-transform: uppercase;
   background: transparent;
-  transition: opacity 0.5s ease 0.2s, color 0.25s ease;
-}
-.intro-overlay__skip {
-  right: 4rem;
   color: rgba(255, 255, 255, 0.5);
   opacity: 0;
+  transition: opacity 0.5s ease 0.2s, color 0.25s ease;
 }
 .intro-overlay.is-lit .intro-overlay__skip { opacity: 1; }
 .intro-overlay.is-clearing .intro-overlay__skip { opacity: 0; }

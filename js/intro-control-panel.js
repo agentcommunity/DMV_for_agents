@@ -400,44 +400,17 @@ export function createIntroControlPanel({ config, intro, tv, audio, startIntroAu
   });
   panel.appendChild(row('lead-in (s)', leadInWrap));
 
-  // ② Sunrise leg
-  const { wrap: sunriseLenWrap } = makeSlider(0.3, 10, config.timing.sunrise.length, 0.1, (v) => {
-    config.timing.sunrise.length = v;
-    intro.rebuild();
-  });
-  panel.appendChild(row('sunrise length', sunriseLenWrap));
-
-  const sunriseCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.sunrise.curve, (v) => {
-    config.timing.sunrise.curve = v;
-    intro.rebuild();
-  });
-  panel.appendChild(row('sunrise curve', sunriseCurveSelect));
-
-  // ③ Rise leg
-  const { wrap: riseLenWrap } = makeSlider(0.3, 10, config.timing.rise.length, 0.1, (v) => {
-    config.timing.rise.length = v;
-    intro.rebuild();
-  });
-  panel.appendChild(row('rise length', riseLenWrap));
-
-  const riseCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.rise.curve, (v) => {
-    config.timing.rise.curve = v;
-    intro.rebuild();
-  });
-  panel.appendChild(row('rise curve', riseCurveSelect));
-
-  // ④ Crest leg
-  const { wrap: crestLenWrap } = makeSlider(0.3, 10, config.timing.crest.length, 0.1, (v) => {
-    config.timing.crest.length = v;
-    intro.rebuild();
-  });
-  panel.appendChild(row('crest length', crestLenWrap));
-
-  const crestCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.crest.curve, (v) => {
-    config.timing.crest.curve = v;
-    intro.rebuild();
-  });
-  panel.appendChild(row('crest curve', crestCurveSelect));
+  // ②③④ Arc legs — each is a length slider + a speed-curve select (same shape, three legs).
+  const addLeg = (key, label) => {
+    const leg = config.timing[key];
+    const { wrap } = makeSlider(0.3, 10, leg.length, 0.1, (v) => { leg.length = v; intro.rebuild(); });
+    panel.appendChild(row(`${label} length`, wrap));
+    const sel = makeSelect(CURVE_OPTIONS, leg.curve, (v) => { leg.curve = v; intro.rebuild(); });
+    panel.appendChild(row(`${label} curve`, sel));
+  };
+  addLeg('sunrise', 'sunrise');
+  addLeg('rise', 'rise');
+  addLeg('crest', 'crest');
 
   // ── Utility ─────────────────────────────────────────────────────────
   panel.appendChild(header('Utility'));

@@ -24,6 +24,11 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const WARM = 0xffb86b;
 
+// Lamp-arc angles are fixed — precompute to radians so driveArc() (every frame) doesn't degToRad().
+const _DEG2RAD = Math.PI / 180;
+const _ARC_TH0 = 202 * _DEG2RAD;             // a=0 → behind + low (backlit silhouette)
+const _ARC_TH_SPAN = (38 - 202) * _DEG2RAD;  // a=1 → 38°, high + front (reveal)
+
 export function createVolumetricPass(THREE, opts = {}) {
   const SUBJECT = opts.subject
     ? opts.subject.clone()
@@ -234,7 +239,7 @@ export function createVolumetricPass(THREE, opts = {}) {
     const color     = p.color     != null ? p.color     : WARM;
 
     // lamp arc: behind-low (silhouette) → over → high front (reveal), always aimed at the monitor
-    const th = THREE.MathUtils.degToRad(202 + (38 - 202) * a);
+    const th = _ARC_TH0 + _ARC_TH_SPAN * a;
     sun.position.set(SUBJECT.x + 1.0, SUBJECT.y + Math.sin(th) * 6.5, SUBJECT.z + Math.cos(th) * 9);
     sun.target.position.copy(SUBJECT);
     sun.target.updateMatrixWorld();

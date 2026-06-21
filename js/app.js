@@ -3,7 +3,7 @@ import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=4';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=68';
+import { Intro } from './Intro.js?v=69';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -229,17 +229,7 @@ const introConfig = {
     catchAt: 1.12,   // time offset (from BEAT.POWER) when the button catches and holds
     catchDur: 0.32,  // duration of the final catch tween
   },
-  beats: {
-    POWER:      0.30,  // CRT button starts blinking on/off (~1.4s)
-    SUNRISE:    1.80,  // lamp intensity begins to rise (behind, stationary)
-    ARC_START:  3.55,  // lamp begins to MOVE on its arc (visible from the borders)
-    ARC_DUR:    6.60,  // arc movement: behind → over the top → high in front
-    FADE_START: 10.35, // arc done (front lit) → begin fade to black
-    FADE_DUR:   0.85,
-    BLACK:      11.20, // fully black → restore the normal scene under cover
-    REVEAL_DUR: 0.90,  // lift the black to show the normal scene
-    END:        12.25,
-  },
+  beats: { POWER: 0.30 },  // when the CRT button flicker begins (s). The old SUNRISE/ARC/FADE/BLACK/END beats are dead — the 4-leg `timing` model below derives all of those now.
   lamp:  { color: '#ffb86b', initialIntensity: 0.52, midIntensity: 1.56, finalIntensity: 2.60 }, // warm Edison amber; fed to driveArc each frame
   vol:   { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
   timing: {
@@ -258,7 +248,6 @@ const introConfig = {
   // the white light floods in), offset by `dropVsReveal` (0 = exactly on the reveal; + = later). This
   // auto-tracks any leg retuning, so the drop always hits the reveal. Panel: "drop vs reveal (s)".
   music: { dropAt: 14.85, dropVsReveal: 0 },
-  signReveal: 'at_reveal',
   signRevealDelay: 1.0,               // seconds AFTER the scene reveals before the wall sign stutters in
 };
 
@@ -1111,7 +1100,10 @@ if (!permalink && agentToggleLink) {
   });
 }
 
-const audio = new Audio(encodeURI('/audio/pat102 - electro dance.mp3?v=2')); // ?v bump = trimmed (no lead silence)
+// The ?v bump = trimmed (no lead silence). NOTE: the trim sets WHERE the drop lands, so it's coupled to
+// introConfig.music.dropAt (14.85s) below — re-trim/re-encode the file and you must re-measure dropAt or the
+// reveal desyncs. Bumping ?v is the forcing function to re-check it.
+const audio = new Audio(encodeURI('/audio/pat102 - electro dance.mp3?v=2'));
 audio.loop = true;
 let soundOn = false;
 const soundToggle = document.getElementById('soundToggle');
@@ -1180,7 +1172,7 @@ if (runIntro) {
             Object.assign(introConfig[key], saved[key]);
           }
         }
-        for (const key of ['dark', 'music', 'signReveal', 'signRevealDelay']) {
+        for (const key of ['dark', 'music', 'signRevealDelay']) {
           if (key in saved) {
             if (key === 'music' && typeof saved[key] === 'object') {
               Object.assign(introConfig[key], saved[key]);
@@ -1203,7 +1195,7 @@ if (runIntro) {
   // DEV-TUNE: the entire tuning feature lives behind ?tune — the panel module owns the window.__* debug
   // handles and a dispose(). Nothing here leaks into the production path. Remove = delete this line + the
   // ?tune localStorage-restore block above + js/intro-control-panel.js.
-  if (introParams.has('tune')) { import('./intro-control-panel.js?v=11').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv, audio, startIntroAudio, primeAudio })); } // DEV-TUNE
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=12').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv, audio, startIntroAudio, primeAudio })); } // DEV-TUNE
 
   // Esc / Space / Enter skip the intro — active only AFTER the user has entered.
   const onIntroKey = (e) => {
@@ -1257,7 +1249,7 @@ if (runIntro) {
     window.addEventListener('keydown', onIntroKey, true);  // from here on, Space/Enter/Esc SKIP the intro
     intro.play().then(finishIntro).catch(onIntroError);
   };
-  const onEnterPointer = () => enterExperience();
+  const onEnterPointer = enterExperience;
   const onEnterKey = (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); enterExperience(); }
   };

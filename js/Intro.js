@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createVolumetricPass } from './volumetric-pass.js?v=2';
+import { createVolumetricPass } from './volumetric-pass.js?v=3';
 
 const gsap = window.gsap;
 
@@ -47,17 +47,7 @@ const DEFAULT_CONFIG = {
     catchAt: 1.12,
     catchDur: 0.32,
   },
-  beats: {
-    POWER: 0.30,
-    SUNRISE: 1.80,
-    ARC_START: 3.55,
-    ARC_DUR: 6.60,
-    FADE_START: 10.35,
-    FADE_DUR: 0.85,
-    BLACK: 11.20,
-    REVEAL_DUR: 0.90,
-    END: 12.25,
-  },
+  beats: { POWER: 0.30 },   // when the CRT button flicker begins (s). The old SUNRISE/ARC/FADE/BLACK/END beats are gone — the 4-leg `timing` model below derives all of those now.
   timing: {
     leadIn:  0.95,              // ① seconds of dark AFTER the button catches, before first light
     aBehind: 0.30,              // a-value where leg ② (sunrise/behind) ends and leg ③ (rise) begins
@@ -68,11 +58,10 @@ const DEFAULT_CONFIG = {
     fadeLength:   0.85,
     revealLength: 0.90,
   },
-  lamp: { color: '#ffb86b' },
+  lamp: { color: '#ffb86b', initialIntensity: 0.52, midIntensity: 1.56, finalIntensity: 2.60 },
   vol:  { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
   dark: true,
   music: { dropAt: 14.85, dropVsReveal: 0 },  // music synced so the track's drop (dropAt s) lands on the reveal; dropVsReveal nudges it (s).
-  signReveal: 'at_reveal',
   signRevealDelay: 1.0,   // seconds AFTER the scene reveals before the wall sign stutters in
 };
 
@@ -101,7 +90,6 @@ export class Intro {
     this._done = false;
     this._sceneRestored = false;
     this._tl = null;
-    this._t = 0;
     this._barAmt = 1;
     this._blackAmt = 0;
 
@@ -119,12 +107,9 @@ export class Intro {
     let lookY = 0.5;
     try { lookY = tv._getScrollEndCameraState().lookY; } catch { /* default */ }
     this._endLookY = lookY;
-    this._look = { x: 0, y: lookY, z: 0 };
 
-    this._renderCb = (dt) => this._tick(dt);
+    this._renderCb = () => this._tick();
     this._shadowMeshes = [];
-    this._gv1 = new THREE.Vector3();
-    this._gv2 = new THREE.Vector3();
 
     this._build();
   }
@@ -195,31 +180,31 @@ export class Intro {
 
     if (this.tv.camera) {
       this.tv.camera.position.set(0, -0.5, 20);
-      this.tv.camera.lookAt(this._look.x, this._look.y, this._look.z);
+      this.tv.camera.lookAt(0, this._endLookY, 0);
     }
 
     this._applyBars();
     this._applyFade();
   }
 
-  _smooth(x, e0, e1) {
-    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-    return t * t * (3 - 2 * t);
-  }
-
   // ── Helpers ───────────────────────────────────────────────────────
 
-  // Build the driveArc params object from current config (called each frame +
-  // at build time so live edits to introConfig take effect immediately).
+  // Build the driveArc params from current config (called every frame + at build time, so live
+  // ?tune edits take effect immediately). Reuses ONE object (no per-frame allocation) and forwards
+  // the lamp intensities so the ?tune sliders actually reach driveArc (which otherwise falls back
+  // to these same baked values).
   _volParams() {
     const { vol, lamp } = this.config;
-    return {
-      density: vol.density,
-      intensity: vol.intensity,
-      steps: vol.steps,
-      maxDist: vol.maxDist,
-      color: lamp.color,
-    };
+    const p = this._arcParams || (this._arcParams = {});
+    p.density = vol.density;
+    p.intensity = vol.intensity;
+    p.steps = vol.steps;
+    p.maxDist = vol.maxDist;
+    p.color = lamp.color;
+    p.initialIntensity = lamp.initialIntensity;
+    p.midIntensity = lamp.midIntensity;
+    p.finalIntensity = lamp.finalIntensity;
+    return p;
   }
 
   // ── Playback ──────────────────────────────────────────────────────
@@ -404,9 +389,8 @@ export class Intro {
 
   // ── Per-frame ─────────────────────────────────────────────────────
 
-  _tick(dt) {
+  _tick() {
     if (this._done) return;
-    this._t += dt;
     const a = this._S.a;
 
     // Drive the volumetric lamp arc from the GSAP-tweened arc value. driveArc owns
@@ -415,7 +399,7 @@ export class Intro {
     // branch runs in _render, after the render-callback loop).
     if (this.pass) this.pass.driveArc(a, this._volParams());
 
-    if (this.tv.camera) this.tv.camera.lookAt(this._look.x, this._look.y, this._look.z);
+    if (this.tv.camera) this.tv.camera.lookAt(0, this._endLookY, 0);
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────
@@ -463,11 +447,7 @@ export class Intro {
       this.pass = null;
     }
 
-    const cbs = this.tv._renderCallbacks;
-    if (cbs) {
-      const i = cbs.indexOf(this._renderCb);
-      if (i >= 0) cbs.splice(i, 1);
-    }
+    this.tv.offRender(this._renderCb);
 
     this._disposeRig();
   }
@@ -488,16 +468,10 @@ export class Intro {
 
   _disposeRig() {
     if (!this.rig) return;
-    // (The lamp/DirectionalLight lives in the volumetric pass, torn down in
-    // _restoreScene via this.pass.dispose(). The rig has no children after Task 4.)
+    // The rig is an empty marker Group — nothing is ever added to it (the lamp/DirectionalLight lives
+    // in the volumetric pass, torn down in _restoreScene via this.pass.dispose()). Nothing to
+    // traverse/dispose; just detach it.
     this.scene.remove(this.rig);
-    this.rig.traverse((obj) => {
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) {
-        if (obj.material.map) obj.material.map.dispose();
-        obj.material.dispose();
-      }
-    });
     this.rig = null;
   }
 
