@@ -101,7 +101,7 @@ function makeSlider(min, max, value, step, onInput) {
   s.min = min; s.max = max; s.step = step; s.value = value;
   s.style.cssText = 'flex:1;height:14px;accent-color:#4af;cursor:pointer;';
   const val = document.createElement('span');
-  val.style.cssText = 'font-size:10px;color:#ccc;min-width:34px;text-align:right;';
+  val.style.cssText = 'font-size:10px;color:#ccc;flex:0 0 44px;text-align:right;font-variant-numeric:tabular-nums;';
   val.textContent = Number(value).toFixed(step < 1 ? 2 : 0);
   s.addEventListener('input', () => {
     val.textContent = Number(s.value).toFixed(step < 1 ? 2 : 0);
@@ -220,7 +220,7 @@ export function createIntroControlPanel({ config, intro, tv }) {
   panel.id = 'introTunePanel';
   panel.style.cssText = [
     'position:fixed;top:12px;right:12px;z-index:99999;',
-    'width:300px;max-height:90vh;overflow-y:auto;',
+    'width:344px;max-height:90vh;overflow-y:auto;',
     'background:rgba(10,10,12,0.92);backdrop-filter:blur(8px);',
     '-webkit-backdrop-filter:blur(8px);',
     'border:1px solid #2a2a2e;border-radius:4px;',

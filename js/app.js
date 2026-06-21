@@ -1215,7 +1215,7 @@ if (runIntro) {
   window.addEventListener('wheel', unlockAudio, { capture: true, passive: true });
   intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
-  if (introParams.has('tune')) { import('./intro-control-panel.js?v=8').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=9').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
 
   // Esc / Space / Enter skip the intro.
   const onIntroKey = (e) => {
