@@ -159,6 +159,48 @@ function makeButton(text, onClick) {
   return b;
 }
 
+// Robust "copy this text" — clipboard API, then execCommand, then ALWAYS show a
+// selectable textarea so the user can grab it even when both copy paths are blocked
+// (preview proxies are often not a secure/focused context, so clipboard.writeText fails).
+function copyTextRobust(text) {
+  let copied = false;
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    copied = document.execCommand('copy');
+    document.body.removeChild(ta);
+  } catch { /* fall through */ }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {}).catch(() => {});
+  }
+  // Always present it for manual copy as the guaranteed path.
+  const old = document.getElementById('introTuneJsonOverlay');
+  if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'introTuneJsonOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#111;border:1px solid #333;border-radius:6px;padding:12px;width:min(560px,90vw);font-family:monospace;';
+  const msg = document.createElement('div');
+  msg.style.cssText = 'color:#4af;font-size:11px;margin-bottom:6px;';
+  msg.textContent = (copied ? '✓ Copied to clipboard. ' : '') + 'Select-all + copy below if needed:';
+  const ta2 = document.createElement('textarea');
+  ta2.value = text; ta2.readOnly = true;
+  ta2.style.cssText = 'width:100%;height:300px;background:#0a0a0a;color:#ccc;border:1px solid #333;font-size:11px;resize:vertical;box-sizing:border-box;';
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  close.style.cssText = 'margin-top:8px;background:#222;color:#ccc;border:1px solid #444;padding:4px 10px;cursor:pointer;font-family:monospace;';
+  close.onclick = () => ov.remove();
+  box.appendChild(msg); box.appendChild(ta2); box.appendChild(close);
+  ov.appendChild(box);
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  ta2.focus(); ta2.select();
+}
+
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 export function createIntroControlPanel({ config, intro, tv }) {
@@ -427,26 +469,9 @@ export function createIntroControlPanel({ config, intro, tv }) {
   };
   if (tv) tv.onRender(scrubSync); // DEV-TUNE: frame-sync scrub display
 
-  // Copy JSON button.
-  let copyTimeout = null;
+  // Copy JSON button — robust copy (clipboard → execCommand → always show a selectable textarea).
   const copyBtn = makeButton('Copy JSON', () => {
-    try {
-      navigator.clipboard.writeText(JSON.stringify(config, null, 2)).then(() => {
-        copyBtn.textContent = 'Copied!';
-        copyBtn.style.color = '#4af';
-        if (copyTimeout) clearTimeout(copyTimeout);
-        copyTimeout = setTimeout(() => {
-          copyBtn.textContent = 'Copy JSON';
-          copyBtn.style.color = '';
-        }, 1600);
-      }).catch(() => {
-        copyBtn.textContent = 'Failed';
-        if (copyTimeout) clearTimeout(copyTimeout);
-        copyTimeout = setTimeout(() => { copyBtn.textContent = 'Copy JSON'; }, 1600);
-      });
-    } catch {
-      copyBtn.textContent = 'Failed';
-    }
+    copyTextRobust(JSON.stringify(config, null, 2));
   });
 
   const utilRow = document.createElement('div');
