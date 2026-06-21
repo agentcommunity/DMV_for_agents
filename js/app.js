@@ -1,9 +1,9 @@
 import { TV } from './TV.js?v=40';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
-import { WallSign } from './WallSign.js?v=2';
+import { WallSign } from './WallSign.js?v=3';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=59';
+import { Intro } from './Intro.js?v=60';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -245,6 +245,7 @@ const introConfig = {
   dark:  true,
   music: { startAt: 'SUNRISE' },      // only 'SUNRISE' is supported for now
   signReveal: 'at_reveal',
+  signRevealDelay: 1.0,               // seconds AFTER the scene reveals before the wall sign stutters in
 };
 
 // ─── Cinematic intro gate ("video mode") ──────────────────────────
@@ -1150,7 +1151,7 @@ if (runIntro) {
             Object.assign(introConfig[key], saved[key]);
           }
         }
-        for (const key of ['dark', 'music', 'signReveal']) {
+        for (const key of ['dark', 'music', 'signReveal', 'signRevealDelay']) {
           if (key in saved) {
             if (key === 'music' && typeof saved[key] === 'object') {
               Object.assign(introConfig[key], saved[key]);
@@ -1172,7 +1173,7 @@ if (runIntro) {
   intro.onSoundRequest = startIntroAudio;
   intro.onReveal = () => wallSign.flickerOn();
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
-  if (introParams.has('tune')) { import('./intro-control-panel.js?v=3').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
+  if (introParams.has('tune')) { import('./intro-control-panel.js?v=4').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
 
   // Esc / Space / Enter skip the intro.
   const onIntroKey = (e) => {

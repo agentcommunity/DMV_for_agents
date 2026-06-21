@@ -307,15 +307,14 @@ export function createIntroControlPanel({ config, intro, tv }) {
   );
   panel.appendChild(row('music start', musicSelect));
 
-  const signSelect = makeSelect(
-    [['at_reveal','at-reveal'],['after_delay','after-delay']],
-    config.signReveal,
+  const { wrap: signDelayWrap } = makeSlider(
+    0, 3, config.signRevealDelay != null ? config.signRevealDelay : 1.0, 0.1,
     (v) => {
-      config.signReveal = v;
-      intro.rebuild();
+      config.signRevealDelay = v;
+      intro.rebuild(); // structural: shifts the wall-sign trigger in the timeline
     }
   );
-  panel.appendChild(row('sign reveal', signSelect));
+  panel.appendChild(row('sign delay (s)', signDelayWrap));
 
   // ── Lamp arc speed (beat durations) ─────────────────────────────────
   panel.appendChild(header('Lamp arc speed'));

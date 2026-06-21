@@ -50,22 +50,34 @@ export class WallSign {
       onComplete: () => this._startAmbientFlicker(),
     });
 
-    // 1. Quick flash — tube tries to catch
-    tl.to(mat, { opacity: 0.3, duration: 0.08 });
+    // A longer, gappier fluorescent struggle — several catch-attempts separated by
+    // beats of full darkness, so the sign "shows" then drops out before finally holding.
+
+    // 1. First catch-attempt — a flash, then dies
+    tl.to(mat, { opacity: 0.4, duration: 0.06 });
+    tl.to(mat, { opacity: 0, duration: 0.08 });
+
+    // 2. Big dark gap
+    tl.to(mat, { opacity: 0, duration: 0.4 });
+
+    // 3. Second attempt — stutters and dies
+    tl.to(mat, { opacity: 0.6, duration: 0.05 });
+    tl.to(mat, { opacity: 0.05, duration: 0.05 });
+    tl.to(mat, { opacity: 0.45, duration: 0.05 });
     tl.to(mat, { opacity: 0, duration: 0.06 });
 
-    // 2. Pause — darkness
-    tl.to(mat, { opacity: 0, duration: 0.2 });
+    // 4. Big dark gap
+    tl.to(mat, { opacity: 0, duration: 0.32 });
 
-    // 3. Stutter flashes — tube sputtering
-    tl.to(mat, { opacity: 0.5, duration: 0.05 });
-    tl.to(mat, { opacity: 0.1, duration: 0.04 });
-    tl.to(mat, { opacity: 0.6, duration: 0.06 });
-    tl.to(mat, { opacity: 0.15, duration: 0.05 });
-    tl.to(mat, { opacity: 0.7, duration: 0.05 });
+    // 5. Third attempt — rapid sputter cluster
+    tl.to(mat, { opacity: 0.7, duration: 0.04 });
+    tl.to(mat, { opacity: 0.2, duration: 0.04 });
+    tl.to(mat, { opacity: 0.85, duration: 0.05 });
+    tl.to(mat, { opacity: 0.1, duration: 0.05 });
 
-    // 4. Full on — tube catches and holds
-    tl.to(mat, { opacity: 1.0, duration: 0.3, ease: 'power2.out' });
+    // 6. Short gap, then it catches and holds
+    tl.to(mat, { opacity: 0, duration: 0.18 });
+    tl.to(mat, { opacity: 1.0, duration: 0.35, ease: 'power2.out' });
   }
 
   /** Subtle ambient flicker — cheap fluorescent tube feel. */

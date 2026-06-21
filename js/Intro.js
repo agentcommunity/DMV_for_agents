@@ -55,6 +55,7 @@ const DEFAULT_CONFIG = {
   dark: true,
   music: { startAt: 'SUNRISE' },
   signReveal: 'at_reveal',
+  signRevealDelay: 1.0,   // seconds AFTER the scene reveals before the wall sign stutters in
 };
 
 // The lamp aims here — the monitor centre. Passed to createVolumetricPass as its
@@ -228,10 +229,14 @@ export class Intro {
     // (or ARC_START) stretches the WHOLE timeline. If they were fixed absolute positions, a
     // longer arc would just be truncated by a fade that still fires at the same second.
     // Defaults reproduce the old absolutes exactly: 3.55+6.60=10.15 → FADE 10.35 → BLACK 11.20 → END 12.25.
-    const ARC_END    = BEAT.ARC_START + BEAT.ARC_DUR;
-    const FADE_START = ARC_END + 0.20;             // brief hold at full arc, then fade
-    const BLACK      = FADE_START + BEAT.FADE_DUR;
-    const END        = BLACK + BEAT.REVEAL_DUR + 0.15;
+    const ARC_END     = BEAT.ARC_START + BEAT.ARC_DUR;
+    const FADE_START  = ARC_END + 0.20;             // brief hold at full arc, then fade
+    const BLACK       = FADE_START + BEAT.FADE_DUR;
+    const REVEAL_DONE = BLACK + 0.05 + BEAT.REVEAL_DUR;
+    // Wall sign stutters in a beat AFTER the scene has settled, not during the reveal.
+    const SIGN_DELAY  = this.config.signRevealDelay != null ? this.config.signRevealDelay : 1.0;
+    const SIGN_REVEAL = REVEAL_DONE + SIGN_DELAY;
+    const END         = SIGN_REVEAL + 0.3;
     const tl = gsap.timeline({ onComplete: () => this._finalize() });
 
     // Crack the shutter to letterbox right away so the button flicker is
@@ -263,8 +268,8 @@ export class Intro {
     tl.to(this, { _blackAmt: 1, duration: BEAT.FADE_DUR, ease: 'power2.in',
       onUpdate: () => this._applyFade() }, FADE_START);
 
-    // FULL BLACK — restore the exact normal scene under cover; wall sign in.
-    tl.call(() => { this._restoreScene(); if (this.onReveal) this.onReveal(); }, null, BLACK);
+    // FULL BLACK — restore the exact normal scene under cover (wall sign NOT yet lit).
+    tl.call(() => { this._restoreScene(); }, null, BLACK);
 
     // REVEAL — lift the black; the normal flat-lit scene is underneath.
     tl.to(this, { _blackAmt: 0, duration: BEAT.REVEAL_DUR, ease: 'power2.out',
@@ -273,7 +278,11 @@ export class Intro {
       tl.call(() => this.overlay.classList.add('is-clearing'), null, BLACK);
     }
 
-    tl.to({}, { duration: Math.max(0.1, END - (BLACK + 0.05 + BEAT.REVEAL_DUR)) });
+    // WALL SIGN — stutters in a beat after the scene has settled (its own GSAP flicker).
+    tl.call(() => { if (this.onReveal) { this.onReveal(); this.onReveal = null; } }, null, SIGN_REVEAL);
+
+    // Hold the timeline open to END so onComplete fires after the sign has been triggered.
+    tl.to({}, { duration: 0.01 }, END);
 
     return tl;
   }
