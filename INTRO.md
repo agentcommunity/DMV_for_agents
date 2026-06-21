@@ -106,7 +106,7 @@ Beats are **derived** from `firstLight` + the leg lengths, so changing any leg s
 
 ## 5. Tuning
 
-Open `?tune` for the live control panel ([`js/intro-control-panel.js`](js/intro-control-panel.js), gated + fully removable via `grep -rn DEV-TUNE js/`). Key knobs:
+Open `?tune` for the live control panel ([`js/intro-control-panel.js`](js/intro-control-panel.js)). Key knobs:
 - **Lamp timing** — lead-in, and each leg's **length + speed curve** (constant / accelerate / decelerate / smooth).
 - **drop vs reveal (s)** — shifts the music drop relative to the reveal (`config.music.dropVsReveal`).
 - **Lamp** intensities + colour, **Volumetric** density / steps / max-dist, button flicker.
@@ -114,4 +114,14 @@ Open `?tune` for the live control panel ([`js/intro-control-panel.js`](js/intro-
 
 In `?tune`, saved localStorage values override the baked defaults; **Reset** restores them. Production (no `?tune`) always uses the baked config.
 
-> Verification gotcha: the Claude Preview tab parks `requestAnimationFrame`, so the intro freezes mid-play. To scrub a beat: `window.__intro._S.a = <0..1>; window.__tv._render()`. Audio/timeline state is inspectable via `window.__audio`, `window.__startIntroAudio`, `window.__primeAudio`.
+### Isolation & removal (the DEV-TUNE seam)
+
+The tuning feature is **fully isolated from production** — retained as dormant code, but inert when `?tune` is absent (verified by code review, commit `89ef5e2`):
+
+- It loads **only under `?tune`** (a dynamic `import()`), so production never even fetches the panel module.
+- The panel module **owns** the `window.__*` debug handles (`__tv`, `__intro`, `__audio`, `__startIntroAudio`, `__primeAudio`) — they're set *inside* the panel, so on production the `window` stays clean (no renderer / intro / audio internals exposed to third-party scripts).
+- The panel's **✕ close button** runs a `dispose()` that unhooks *everything* it added: the per-frame `scrubSync` render callback (via `tv.offRender`, added for this so the panel leaves no tendril in the render loop), the panel DOM, and the `window.__*` handles.
+
+**To remove the whole feature:** delete [`js/intro-control-panel.js`](js/intro-control-panel.js) + the **two** grep-tagged `// DEV-TUNE` blocks in [`app.js`](js/app.js) — (1) the `?tune` localStorage-restore (must run *before* `new Intro(...)`, so it stays inline) and (2) the `?tune` dynamic-import line. `grep -rn DEV-TUNE js/` finds them; nothing else references the seam.
+
+> Verification gotcha: the Claude Preview tab parks `requestAnimationFrame`, so the intro freezes mid-play. The `window.__*` handles now exist **only under `?tune`** — load `/?tune` to use them. To scrub a beat: `window.__intro._S.a = <0..1>; window.__tv._render()`. Audio state is inspectable via `window.__audio` / `window.__startIntroAudio` / `window.__primeAudio`.
