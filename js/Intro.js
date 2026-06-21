@@ -151,7 +151,11 @@ export class Intro {
       this.renderer.localClippingEnabled = true;
       this._clipPlaneSaved = this._cyclorama.material.clippingPlanes;
       this._cyclorama.material.clippingPlanes = [
-        new THREE.Plane(new THREE.Vector3(0, -1, 0), -1.9),
+        new THREE.Plane(new THREE.Vector3(0, -1, 0), -1.9),  // remove the high BACK WALL, keep the ledge
+        // remove the FAR/back of the ledge surface (the unlit strip that receded toward the wall and
+        // read as a black gap during the backlit phases) so the warm haze fills that band instead.
+        // Keeps z >= -0.2 (the front ledge under/before the monitor, where the shadow shaft lands).
+        new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.2),
       ];
     }
 

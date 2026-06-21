@@ -3,7 +3,7 @@ import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=4';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=63';
+import { Intro } from './Intro.js?v=64';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
