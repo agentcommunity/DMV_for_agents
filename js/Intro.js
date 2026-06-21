@@ -71,7 +71,7 @@ const DEFAULT_CONFIG = {
   lamp: { color: '#ffb86b' },
   vol:  { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
   dark: true,
-  music: { offset: -0.15 },   // music onStart vs first-light (seconds). negative = a beat BEFORE the sunrise.
+  music: { offset: -0.85 },   // music onStart vs first-light (s). SYNC: drop@14.85s, arc=14.0s → offset=14.0−14.85=−0.85 lands the bass drop on the crest-finish reveal.
   signReveal: 'at_reveal',
   signRevealDelay: 1.0,   // seconds AFTER the scene reveals before the wall sign stutters in
 };

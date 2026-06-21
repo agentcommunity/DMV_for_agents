@@ -3,7 +3,7 @@ import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=4';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=65';
+import { Intro } from './Intro.js?v=66';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -253,7 +253,11 @@ const introConfig = {
     revealLength: 0.90,
   },
   dark:  true,
-  music: { offset: -0.15 },           // music onStart vs first-light (s). negative = a beat BEFORE the sunrise.
+  // music onStart vs first-light (s); negative = before the sunrise. SYNCED: the track's drop is at
+  // 14.85s, the lamp arc (sunrise+rise+crest = 5.7+4.8+3.5 = 14.0s) starts at first-light, so
+  // offset = 14.0 − 14.85 = −0.85 lands the bass drop exactly on the crest-finish reveal (ARC_END).
+  // If you retune the legs, re-derive: offset = (sunrise+rise+crest) − 14.85.
+  music: { offset: -0.85 },
   signReveal: 'at_reveal',
   signRevealDelay: 1.0,               // seconds AFTER the scene reveals before the wall sign stutters in
 };
@@ -1139,40 +1143,44 @@ if (runIntro) {
   // allow it, so the music just plays audibly (the behaviour we want). ONLY if that's blocked
   // (Safari/iOS cold load) do we fall back to MUTED autoplay so the track still runs in sync, then
   // unmute it on the first user gesture (unlockAudio). No "tap for sound" prompt in any case.
-  let audioUnlocked = false;
+  //
+  // RACE-PROOFING: `soundOn` (set by markSoundOn) is the SOLE "we are now audible" latch — there is no
+  // separate one-shot. A gesture that cannot actually grant media activation (e.g. a wheel/scroll on
+  // Safari, or any gesture that arrives BEFORE the timeline's onStart) must NOT lock us out: it re-mutes
+  // and leaves soundOn false so the next real tap retries. This kills the "muted forever after an early
+  // scroll" bug. unlockAudio attempts the unmute INSIDE the gesture and only latches on a resolved play().
   let audioStarted = false;
   function fadeAudioIn(dur) { audio.volume = 0; gsap.to(audio, { volume: 1, duration: dur, ease: 'sine.out' }); }
   function startIntroAudio() {
-    if (audioStarted) return;
+    if (audioStarted || !audio.paused) return;   // !paused guards a toggle-started track (don't restart)
     audioStarted = true;
     try { audio.currentTime = 0; } catch { /* not seekable yet */ }
     audio.muted = false;            // attempt audible playback first
     audio.volume = 0;
     const p = audio.play();
     if (p && typeof p.then === 'function') {
-      p.then(() => {                // autoplay WITH SOUND allowed (Chrome/localhost/engaged) → audible
+      p.then(() => {                // autoplay WITH SOUND allowed (Chrome/localhost/engaged, or in-gesture) → audible
         markSoundOn();
         introSoundHint?.classList.remove('is-visible');
         fadeAudioIn(0.8);
-      }).catch(() => {              // blocked (Safari/iOS) → muted autoplay, in sync; unmute on gesture
+      }).catch(() => {              // blocked (Safari/iOS cold) → muted autoplay, in sync; unmute on a later gesture
         audio.muted = true;
         audio.volume = 1;
-        audio.play().catch(() => { audioStarted = false; });
+        audio.play().catch(() => {});
       });
     } else { markSoundOn(); audio.volume = 1; }
   }
   function unlockAudio(e) {
-    if (audioUnlocked) return;
+    if (soundOn) return;            // already audible — nothing to do
     // The sound toggle owns its own click (don't fight it over on/off state).
     if (e && e.target && typeof e.target.closest === 'function' && e.target.closest('#soundToggle')) return;
-    audioUnlocked = true;
-    if (!audioStarted) startIntroAudio();
-    const wasMuted = audio.muted;
-    audio.muted = false;
-    if (audio.paused) audio.play().catch(() => {});
-    if (wasMuted) fadeAudioIn(0.4);  // only fade when we're actually unmuting (don't dip already-audible audio)
-    introSoundHint?.classList.remove('is-visible');
-    markSoundOn();
+    if (!audioStarted) { startIntroAudio(); return; }  // gesture before onStart: start in-gesture; its .then latches
+    audio.muted = false;           // already playing muted → unmute inside this gesture
+    const p = audio.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => { markSoundOn(); introSoundHint?.classList.remove('is-visible'); fadeAudioIn(0.4); })
+       .catch(() => { audio.muted = true; if (audio.paused) audio.play().catch(() => {}); }); // not activated → stay muted, retry
+    } else { markSoundOn(); fadeAudioIn(0.4); }
   }
   window.__audio = audio; window.__startIntroAudio = startIntroAudio; window.__unlockAudio = unlockAudio; // DEV-TUNE
 
@@ -1208,11 +1216,12 @@ if (runIntro) {
   });
   intro.onStart = startIntroAudio;
   intro.onSoundRequest = unlockAudio;   // overlay "I want sound" click → unmute, not re-trigger autoplay
-  // Unmute the (already muted-playing) track on the FIRST user gesture ANYWHERE — panel, stage,
-  // scroll, or a keypress — so the music becomes audible the instant the user does anything.
+  // Unmute the (already muted-playing) track on the first ACTIVATION-CAPABLE user gesture anywhere —
+  // a tap/click (pointerdown, incl. touch) or a keypress. We deliberately do NOT listen on wheel:
+  // a scroll grants no media activation on Safari, so it can't unmute and would only thrash the
+  // attempt every scroll frame. The handler retries on each gesture until one actually goes audible.
   window.addEventListener('pointerdown', unlockAudio, { capture: true });
   window.addEventListener('keydown', unlockAudio, { capture: true });
-  window.addEventListener('wheel', unlockAudio, { capture: true, passive: true });
   intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
   if (introParams.has('tune')) { import('./intro-control-panel.js?v=9').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
