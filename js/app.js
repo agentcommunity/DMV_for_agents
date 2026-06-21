@@ -1,9 +1,9 @@
 import { TV } from './TV.js?v=40';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
-import { WallSign } from './WallSign.js?v=3';
+import { WallSign } from './WallSign.js?v=4';
 import { WallNumber } from './WallNumber.js?v=1';
-import { Intro } from './Intro.js?v=60';
+import { Intro } from './Intro.js?v=61';
 import { insertRegistration } from './register.js?v=1';
 
 const gsap = window.gsap;
@@ -1171,7 +1171,7 @@ if (runIntro) {
   });
   intro.onStart = startIntroAudio;
   intro.onSoundRequest = startIntroAudio;
-  intro.onReveal = () => wallSign.flickerOn();
+  intro.onReveal = (onDone) => wallSign.flickerOn(onDone);
   window.__tv = tv; window.__intro = intro; // DEV-TUNE debug handles (panel + tuning; removed at cleanup)
   if (introParams.has('tune')) { import('./intro-control-panel.js?v=4').then(m => m.createIntroControlPanel({ config: introConfig, intro, tv })); } // DEV-TUNE
 

@@ -36,18 +36,22 @@ export class WallSign {
     this.mesh.position.set(0, 3.0, -0.5);
     scene.add(this.mesh);
 
+    // Total duration of the flickerOn() timeline below (~1.78s). Consumers (the intro)
+    // read this to time things to the END of the stutter; keep in sync if the pattern changes.
+    this.flickerDuration = 1.78;
+
     // Draw content (invisible until flickerOn)
     this.draw();
   }
 
-  /** Trigger the fluorescent tube startup sequence. */
-  flickerOn() {
+  /** Trigger the fluorescent tube startup sequence. onDone fires when it finishes catching. */
+  flickerOn(onDone) {
     if (this.isOn) return;
     this.isOn = true;
 
     const mat = this.material;
     const tl = gsap.timeline({
-      onComplete: () => this._startAmbientFlicker(),
+      onComplete: () => { this._startAmbientFlicker(); if (onDone) onDone(); },
     });
 
     // A longer, gappier fluorescent struggle — several catch-attempts separated by

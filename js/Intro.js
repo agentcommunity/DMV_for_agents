@@ -236,7 +236,9 @@ export class Intro {
     // Wall sign stutters in a beat AFTER the scene has settled, not during the reveal.
     const SIGN_DELAY  = this.config.signRevealDelay != null ? this.config.signRevealDelay : 1.0;
     const SIGN_REVEAL = REVEAL_DONE + SIGN_DELAY;
-    const END         = SIGN_REVEAL + 0.3;
+    // The letterbox bars hold until the wall-sign stutter FINISHES, then clear.
+    const SIGN_FLICKER = (this.wallSign && this.wallSign.flickerDuration) || 1.8;
+    const END         = SIGN_REVEAL + SIGN_FLICKER + 0.9;  // flicker done → 0.6s letterbox open → buffer
     const tl = gsap.timeline({ onComplete: () => this._finalize() });
 
     // Crack the shutter to letterbox right away so the button flicker is
@@ -271,17 +273,26 @@ export class Intro {
     // FULL BLACK — restore the exact normal scene under cover (wall sign NOT yet lit).
     tl.call(() => { this._restoreScene(); }, null, BLACK);
 
-    // REVEAL — lift the black; the normal flat-lit scene is underneath.
+    // REVEAL — lift the black; the normal flat-lit scene is underneath. The letterbox
+    // bars STAY (we no longer clear the overlay here).
     tl.to(this, { _blackAmt: 0, duration: BEAT.REVEAL_DUR, ease: 'power2.out',
       onUpdate: () => this._applyFade() }, BLACK + 0.05);
-    if (this.overlay) {
-      tl.call(() => this.overlay.classList.add('is-clearing'), null, BLACK);
-    }
 
-    // WALL SIGN — stutters in a beat after the scene has settled (its own GSAP flicker).
-    tl.call(() => { if (this.onReveal) { this.onReveal(); this.onReveal = null; } }, null, SIGN_REVEAL);
+    // WALL SIGN — stutters in a beat after the scene settles (its own GSAP flicker). The
+    // letterbox bars HOLD until that stutter FINISHES, then the letterbox opens smoothly
+    // (driven by the flicker's onDone, since the flicker is its own GSAP timeline).
+    tl.call(() => {
+      if (this.onReveal) {
+        this.onReveal(() => {
+          if (this.overlay) this.overlay.classList.add('is-clearing'); // fade grain/vignette/skip/sound
+          gsap.to(this, { _barAmt: 0, duration: 0.6, ease: 'power2.inOut',
+            onUpdate: () => this._applyBars() });                       // open the letterbox
+        });
+        this.onReveal = null;
+      }
+    }, null, SIGN_REVEAL);
 
-    // Hold the timeline open to END so onComplete fires after the sign has been triggered.
+    // Hold the timeline open to END (after the stutter + bar clear) so onComplete fires last.
     tl.to({}, { duration: 0.01 }, END);
 
     return tl;
