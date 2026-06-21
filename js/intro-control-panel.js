@@ -316,26 +316,46 @@ export function createIntroControlPanel({ config, intro, tv }) {
   );
   panel.appendChild(row('sign delay (s)', signDelayWrap));
 
-  // ── Lamp arc speed (beat durations) ─────────────────────────────────
-  panel.appendChild(header('Lamp arc speed'));
+  // ── Lamp timing ──────────────────────────────────────────────────────
+  panel.appendChild(header('Lamp timing'));
 
-  const { wrap: sunriseWrap } = makeSlider(0.5, 5, config.beats.SUNRISE, 0.1, (v) => {
-    config.beats.SUNRISE = v;
+  // Ensure timing block exists (guard against stale localStorage blobs).
+  if (!config.timing) config.timing = {};
+  if (config.timing.sunriseLength == null) config.timing.sunriseLength = 6.5;
+  if (config.timing.sunriseCurve  == null) config.timing.sunriseCurve  = 'decelerate';
+  if (config.timing.arcLength     == null) config.timing.arcLength     = 6.6;
+  if (config.timing.arcCurve      == null) config.timing.arcCurve      = 'smooth';
+
+  const CURVE_OPTIONS = [
+    ['constant',   'constant'],
+    ['accelerate', 'accelerate'],
+    ['decelerate', 'decelerate'],
+    ['smooth',     'smooth'],
+  ];
+
+  const { wrap: sunriseLenWrap } = makeSlider(0.5, 12, config.timing.sunriseLength, 0.1, (v) => {
+    config.timing.sunriseLength = v;
     intro.rebuild();
   });
-  panel.appendChild(row('sunrise beat', sunriseWrap));
+  panel.appendChild(row('sunrise length', sunriseLenWrap));
 
-  const { wrap: arcStartWrap } = makeSlider(1, 8, config.beats.ARC_START, 0.1, (v) => {
-    config.beats.ARC_START = v;
+  const sunriseCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.sunriseCurve, (v) => {
+    config.timing.sunriseCurve = v;
     intro.rebuild();
   });
-  panel.appendChild(row('arc start beat', arcStartWrap));
+  panel.appendChild(row('sunrise curve', sunriseCurveSelect));
 
-  const { wrap: arcDurWrap } = makeSlider(1, 14, config.beats.ARC_DUR, 0.1, (v) => {
-    config.beats.ARC_DUR = v;
+  const { wrap: arcLenWrap } = makeSlider(1, 14, config.timing.arcLength, 0.1, (v) => {
+    config.timing.arcLength = v;
     intro.rebuild();
   });
-  panel.appendChild(row('arc duration', arcDurWrap));
+  panel.appendChild(row('arc length', arcLenWrap));
+
+  const arcCurveSelect = makeSelect(CURVE_OPTIONS, config.timing.arcCurve, (v) => {
+    config.timing.arcCurve = v;
+    intro.rebuild();
+  });
+  panel.appendChild(row('arc curve', arcCurveSelect));
 
   // ── Utility ─────────────────────────────────────────────────────────
   panel.appendChild(header('Utility'));

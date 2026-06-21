@@ -22,6 +22,14 @@ const gsap = window.gsap;
 // `config: introConfig` in the opts to drive everything from one source; edit
 // introConfig before play() / call rebuild() to change the look live.
 
+// Curve name → GSAP ease map for config.timing.*Curve values.
+const EASE = {
+  constant:    'none',
+  accelerate:  'power2.in',
+  decelerate:  'power2.out',
+  smooth:      'sine.inOut',
+};
+
 // Default config — matches the prototype-approved look exactly.
 // app.js owns the live copy; this default lets Intro work standalone.
 const DEFAULT_CONFIG = {
@@ -49,6 +57,16 @@ const DEFAULT_CONFIG = {
     BLACK: 11.20,
     REVEAL_DUR: 0.90,
     END: 12.25,
+  },
+  timing: {
+    sunriseStart:  1.80,        // when the glow-up + music begin (absolute, after the flicker)
+    sunriseLength: 6.5,         // exposure-ramp DURATION — "how long the emergence takes"
+    sunriseCurve:  'decelerate',// fast→slow (maps to power2.out)
+    arcStart:      3.55,        // when the lamp begins its sweep (absolute)
+    arcLength:     6.6,         // sweep DURATION (a:0→1) — "how long the sweep takes"
+    arcCurve:      'smooth',    // slow→fast→slow (maps to sine.inOut)
+    fadeLength:    0.85,
+    revealLength:  0.90,
   },
   lamp: { color: '#ffb86b' },
   vol:  { density: 1.8, intensity: 2.0, steps: 96, maxDist: 50 },
@@ -225,14 +243,26 @@ export class Intro {
   _buildTimeline() {
     const S = this._S;
     const BEAT = this.config.beats;
-    // The fade/black/end are DERIVED from the arc end + durations so that changing ARC_DUR
-    // (or ARC_START) stretches the WHOLE timeline. If they were fixed absolute positions, a
+    // config.timing owns the phase lengths and speed curves. Fall back to beats
+    // values for backwards-compat if timing is absent (stale localStorage blobs).
+    const T = this.config.timing || {};
+    const sunriseStart  = T.sunriseStart  != null ? T.sunriseStart  : BEAT.SUNRISE;
+    const sunriseLength = T.sunriseLength != null ? T.sunriseLength : 6.5;
+    const sunriseCurve  = EASE[T.sunriseCurve]    || 'power2.out';
+    const arcStart      = T.arcStart      != null ? T.arcStart      : BEAT.ARC_START;
+    const arcLength     = T.arcLength     != null ? T.arcLength     : BEAT.ARC_DUR;
+    const arcCurve      = EASE[T.arcCurve]        || 'sine.inOut';
+    const fadeLength    = T.fadeLength    != null ? T.fadeLength    : BEAT.FADE_DUR;
+    const revealLength  = T.revealLength  != null ? T.revealLength  : BEAT.REVEAL_DUR;
+
+    // The fade/black/end are DERIVED from the arc end + durations so that changing arcLength
+    // (or arcStart) stretches the WHOLE timeline. If they were fixed absolute positions, a
     // longer arc would just be truncated by a fade that still fires at the same second.
     // Defaults reproduce the old absolutes exactly: 3.55+6.60=10.15 → FADE 10.35 → BLACK 11.20 → END 12.25.
-    const ARC_END     = BEAT.ARC_START + BEAT.ARC_DUR;
+    const ARC_END     = arcStart + arcLength;
     const FADE_START  = ARC_END + 0.20;             // brief hold at full arc, then fade
-    const BLACK       = FADE_START + BEAT.FADE_DUR;
-    const REVEAL_DONE = BLACK + 0.05 + BEAT.REVEAL_DUR;
+    const BLACK       = FADE_START + fadeLength;
+    const REVEAL_DONE = BLACK + 0.05 + revealLength;
     // Wall sign stutters in a beat AFTER the scene has settled, not during the reveal.
     const SIGN_DELAY  = this.config.signRevealDelay != null ? this.config.signRevealDelay : 1.0;
     const SIGN_REVEAL = REVEAL_DONE + SIGN_DELAY;
@@ -249,25 +279,25 @@ export class Intro {
 
     // POWER — the CRT button flickers on; music starts only AFTER it catches.
     this._addButtonFlicker(tl, BEAT.POWER);
-    tl.call(() => { if (this.onStart) this.onStart(); }, null, BEAT.SUNRISE);
+    tl.call(() => { if (this.onStart) this.onStart(); }, null, sunriseStart);
 
     // SUNRISE — the warm lamp glows up from behind, stationary (a stays 0). The
     // lamp brightness + volumetric density are now owned by driveArc(a); here we
     // only ramp pass-1 exposure to lift the scene out of black.
     tl.fromTo(this.renderer, { toneMappingExposure: 0.42 },
-      { toneMappingExposure: 3.0, duration: 6.5, ease: 'power2.out' }, BEAT.SUNRISE);
+      { toneMappingExposure: 3.0, duration: sunriseLength, ease: sunriseCurve }, sunriseStart);
 
     // ARC — the lamp starts MOVING (visible from the borders) and keeps
     // strengthening: behind → over the top → high in front. driveArc(a) reads
     // this tween every frame in _tick, so it drives both the lamp arc AND the
     // volumetric beam strength.
-    tl.to(S, { a: 1, duration: BEAT.ARC_DUR, ease: 'sine.inOut' }, BEAT.ARC_START);
+    tl.to(S, { a: 1, duration: arcLength, ease: arcCurve }, arcStart);
 
     // FADE TO BLACK — the DOM black layer covers; we do NOT tween exposure here
     // (it would race the exposure restore in _restoreScene and could leave the
     // revealed scene black). The lamp/beam stay at full and are torn down with
     // the pass under the black.
-    tl.to(this, { _blackAmt: 1, duration: BEAT.FADE_DUR, ease: 'power2.in',
+    tl.to(this, { _blackAmt: 1, duration: fadeLength, ease: 'power2.in',
       onUpdate: () => this._applyFade() }, FADE_START);
 
     // FULL BLACK — restore the exact normal scene under cover (wall sign NOT yet lit).
@@ -275,7 +305,7 @@ export class Intro {
 
     // REVEAL — lift the black; the normal flat-lit scene is underneath. The letterbox
     // bars STAY (we no longer clear the overlay here).
-    tl.to(this, { _blackAmt: 0, duration: BEAT.REVEAL_DUR, ease: 'power2.out',
+    tl.to(this, { _blackAmt: 0, duration: revealLength, ease: 'power2.out',
       onUpdate: () => this._applyFade() }, BLACK + 0.05);
 
     // WALL SIGN — stutters in a beat after the scene settles (its own GSAP flicker). The
