@@ -51,7 +51,7 @@ The 3D scene has **one driving axis** — scroll progress — and **four "deep" 
 
 | State | Driver | Flags | Visible chrome |
 |---|---|---|---|
-| **Landing** | `lastScrollProgress < 0.30` | none | header, footer, center CTA, `#scrollHint`, "DAY/NIGHT" label |
+| **Landing** | `lastScrollProgress < 0.30` | none | header (nav bar), footer (with SCROLL cue), "DAY/NIGHT" label |
 | **CRT booting** | `lastScrollProgress` between 0.30 and 0.75 | `crtBooted=true` at 0.60 | header, footer, CRT visual on TV |
 | **CRT interactive** | `isCRTInteractive() === true` | `tv.crt.bootPhase ≥ 2`, `progress > 0.75` | header, footer (compact on mobile), `#sceneExit` ("HOME" on mobile) |
 | **Card zoom** | `tv.isCardZoomed` | `holoCard.getMesh().visible` | `#cardShareBar` (non-permalink), `#sceneExit` ("BACK") |
@@ -139,6 +139,8 @@ visible = agentViewOpen
 
 **Theming** — `.scene-exit` in `css/styles.css`. Day = green (`#33ff88`), night = orange (`#ffaa33`), driven by `:root.ui-dark`. Position is `top + right` with safe-area insets. z-index 220, above the card share bar (210) and permalink overlay (200).
 
+**Mobile burger nav** — on mobile the inline nav collapses behind a `[ ☰ ]` burger (`#navBurger`) that drops down About / Agents / Sound on a themed panel (`.header-nav__items`, reusing the same elements + handlers — `app.js` just toggles `.header-nav.is-open`). `syncSceneExit()` toggles `body.scene-exit-open` whenever the pill is visible; on mobile that shifts the burger left of the pill (`body.scene-exit-open .header-nav { right: 11rem }`) so the two sit side-by-side instead of overlapping. Desktop is unaffected — the burger is `display:none` and `.header-nav__items` is `display:contents`, so the three items stay inline.
+
 ---
 
 ## Entry affordances
@@ -147,7 +149,7 @@ visible = agentViewOpen
 
 The 300vh `.start-screen-wrapper` with sticky `.start-screen` means scrolling drives the GSAP `ScrollTrigger`, which drives `tv.animateCameraPosition(progress)`. Thresholds:
 
-- `progress > 0.30` — `body.scrolled` class added (fades scroll hint, dims center CTA)
+- `progress > 0.30` — `body.scrolled` class added (footer fades via `--scroll-progress`; its github/byline links stop taking clicks)
 - `progress > 0.60` — `tv.crt.turnOn()` boots the CRT (`TV.js:280`)
 - `progress > 0.72` — mobile UI compacts (`syncMobileUICompact`)
 - `progress > 0.75` — `isCRTInteractive() === true`
@@ -168,11 +170,11 @@ function programmaticZoomToCRT() {
 }
 ```
 
-**Why it's not gated to mobile**: desktop users with trackpads or no scroll-wheel benefit too. The hint text says "SCROLL OR TAP SCREEN."
+**Why it's not gated to mobile**: desktop users with trackpads or no scroll-wheel benefit too.
 
-### `#scrollHint`
+### Footer SCROLL cue (`.footer__scroll`)
 
-Bottom-center pill ("SCROLL OR TAP SCREEN ↓"). Fixed position, bobs via CSS `@keyframes scrollHintBob`. Auto-fades via `body.scrolled .scroll-hint { opacity: 0 }` and `body.scene-focused .scroll-hint { opacity: 0 }`. No JS visibility code — pure CSS.
+The footer's center cell shows a bobbing "SCROLL" (mono, CRT-styled). The whole footer fades on scroll via `opacity: calc(1 - var(--scroll-progress, 0) * 3)`. On mobile it moves to the right column and the clock + GitHub are hidden (GitHub also lives in the About panel). Pure CSS apart from the `--scroll-progress` var. Replaced the earlier `#scrollHint` pill and the desktop footer ▼ arrow.
 
 ### Permalink (`/c/CERT-ID/agent-name`)
 
@@ -206,7 +208,7 @@ Parsed at module load (`parsePermalink()` in `app.js:12`). When present:
 ## Mobile considerations
 
 - **`100dvh` on `.start-screen`** (with `100vh` fallback) prevents iOS Safari address-bar height jumps.
-- **`safe-area-inset-*`** respected on footer, terminal status zone, `#sceneExit`, and `#scrollHint`.
+- **`safe-area-inset-*`** respected on footer, terminal status zone, and `#sceneExit`.
 - **2-finger pinch is repurposed as scroll** in non-zoomed contexts (`app.js:1108`) — multiplied by `PINCH_SCROLL_SPEED = 3`. Outside non-zoomed contexts, the gesture is left alone so iOS accessibility zoom still works.
 - **`gesturestart` preventDefault is conditional** (`shouldSuppressNativeGesture` in `app.js:1155`). Only fires when canvas owns the pinch (any zoom state, About-poster scroll, reading mode, CRT-interactive). Landing page leaves it alone.
 - **Touch-drag in reading mode** scrolls CRT content (`app.js:1128`), 2px deadzone.
@@ -282,9 +284,7 @@ For predictable stacking when adding new overlays:
 | Element | z-index | File |
 |---|---|---|
 | `.start-header` | 100 | `styles.css:197` |
-| `.center-cta` | 100 | `styles.css:284` |
 | `.start-screen__footer` | 100 | `styles.css:352` |
-| `.scroll-hint` | 99 | `styles.css` (new) |
 | `.permalink-overlay` | 200 | `styles.css:440` |
 | `.card-share-bar` | 210 | `styles.css:506` |
 | `.scene-exit` | 220 | `styles.css` (new) |

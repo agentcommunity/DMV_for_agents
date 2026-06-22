@@ -1,7 +1,7 @@
 import { TV } from './TV.js?v=41';
 import { AboutPoster } from './AboutPoster.js?v=16';
 import { HoloCard } from './HoloCard.js?v=24';
-import { WallSign } from './WallSign.js?v=4';
+import { WallSign } from './WallSign.js?v=5';
 import { WallNumber } from './WallNumber.js?v=1';
 import { Intro } from './Intro.js?v=69';
 import { insertRegistration } from './register.js?v=1';
@@ -50,7 +50,6 @@ const cardCopyBtn = document.getElementById('cardCopyBtn');
 const cardSaveBtn = document.getElementById('cardSaveBtn');
 const cardShareTicker = document.getElementById('cardShareTicker');
 const appFavicon = document.getElementById('appFavicon');
-const cliSnippet = document.getElementById('cliSnippet');
 const sceneExit = document.getElementById('sceneExit');
 const sceneExitLabel = document.getElementById('sceneExitLabel');
 const crtAnnouncements = document.getElementById('crtAnnouncements');
@@ -68,7 +67,6 @@ const CANONICAL_ORIGIN = (() => {
 })();
 
 const CLI_REGISTER_COMMAND = cliCommandMeta?.getAttribute('content')?.trim()
-  || cliSnippet?.textContent.trim()
   || 'bunx dmv-agent register';
 const DMV_TURNSTILE_ACTION = 'dmv_register';
 const TURNSTILE_SCRIPT_ID = 'turnstile-api-script';
@@ -290,17 +288,12 @@ tv.setAboutMesh(aboutPoster.mesh);
 const wallSign = new WallSign(tv.getScene());
 const wallNumber = new WallNumber(tv.getScene());
 
-function showCenterCta() {
-  const cta = document.getElementById('centerCta');
-  if (cta) cta.classList.add('is-visible');
-}
-
-// Without the cinematic intro, the wall sign + CTA come up on their own timers.
-// With it, the intro orchestrates both (flicker at the reveal, CTA on finish).
+// Without the cinematic intro, the wall sign comes up on its own timer.
+// With it, the intro orchestrates the flicker at the reveal.
 if (!runIntro) {
   setTimeout(() => wallSign.flickerOn(), 1200);
-  setTimeout(showCenterCta, 2800);
 }
+
 
 function applyOuterUITheme(isNightMode) {
   const dark = Boolean(isNightMode);
@@ -314,23 +307,13 @@ function applyOuterUITheme(isNightMode) {
 
 applyOuterUITheme(tv.isNightMode);
 
-async function copyCliCommand(command = CLI_REGISTER_COMMAND, source = 'cta') {
+async function copyCliCommand(command = CLI_REGISTER_COMMAND) {
   try {
     await navigator.clipboard.writeText(command);
-    if (source === 'cta' && cliSnippet) {
-      cliSnippet.textContent = 'copied — register via cli or mcp';
-      setTimeout(() => { cliSnippet.textContent = CLI_REGISTER_COMMAND; }, 3000);
-    }
     return true;
   } catch {
     return false;
   }
-}
-
-if (cliSnippet) {
-  cliSnippet.addEventListener('click', () => {
-    copyCliCommand();
-  });
 }
 
 let latestCardData = null;
@@ -426,6 +409,7 @@ function syncSceneExit() {
   const isKbOpen = document.body.classList.contains('kb-open');
   const visible = agentViewOpen || isSceneZoom || isReading || isMobileCrt || isKbOpen;
   sceneExit.hidden = !visible;
+  document.body.classList.toggle('scene-exit-open', visible);
   if (sceneExitLabel) {
     let label = 'CLOSE';
     if (isKbOpen) label = 'DONE';
@@ -860,9 +844,7 @@ function openAgentView() {
   // Hide 3D scene and overlays
   container.style.display = 'none';
   const footer = document.querySelector('.start-screen__footer');
-  const centerCta = document.getElementById('centerCta');
   if (footer) footer.style.display = 'none';
-  if (centerCta) centerCta.style.display = 'none';
 
   // Show view immediately
   agentView.hidden = false;
@@ -892,10 +874,8 @@ function closeAgentView() {
   agentView.hidden = true;
   container.style.display = '';
   const footer = document.querySelector('.start-screen__footer');
-  const centerCta = document.getElementById('centerCta');
   // In permalink mode the footer is intentionally hidden — don't restore it.
   if (footer && !permalink) footer.style.display = '';
-  if (centerCta) centerCta.style.display = '';
   agentViewOpen = false;
   setAgentLinkActive(false);
 }
@@ -958,10 +938,10 @@ if (permalink) {
 
   if (aboutToggleLink) {
     aboutToggleLink.textContent = 'Get Yours';
+    aboutToggleLink.setAttribute('aria-label', 'Get Yours');
     aboutToggleLink.classList.add('header-cta');
     aboutToggleLink.classList.remove('is-active');
     aboutToggleLink.removeAttribute('href');
-    aboutToggleLink.style.opacity = '1';
     aboutToggleLink.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1070,7 +1050,7 @@ tv.crt.onShareCert = (certId, data) => {
 
 tv.crt.setAgentRegistrationCommands(CLI_REGISTER_COMMAND, 'bunx dmv-agent');
 tv.crt.onCopyAgentCli = () => {
-  return copyCliCommand(CLI_REGISTER_COMMAND, 'crt').then((copied) => {
+  return copyCliCommand(CLI_REGISTER_COMMAND).then((copied) => {
     announce(copied ? 'CLI command copied to clipboard.' : 'Copy failed. Use the command shown on screen.');
     return copied;
   });
@@ -1110,6 +1090,7 @@ const soundToggle = document.getElementById('soundToggle');
 soundToggle?.addEventListener('click', () => {
   soundOn = !soundOn;
   soundToggle.classList.toggle('active', soundOn);
+  soundToggle.setAttribute('aria-pressed', String(soundOn));
   if (soundOn) {
     audio.muted = false;       // the intro may be autoplaying MUTED — unmute it
     audio.volume = 1;
@@ -1118,6 +1099,37 @@ soundToggle?.addEventListener('click', () => {
     audio.pause();
   }
 });
+
+// ─── Mobile burger menu ───────────────────────────────────────────
+// On mobile the inline nav collapses behind a burger; tapping it drops down
+// About / Agents / Sound. The dropdown reuses the same elements (and their
+// existing click handlers), so there's nothing extra to wire — just open/close.
+const navBurger = document.getElementById('navBurger');
+const headerNav = document.getElementById('headerNav');
+if (navBurger && headerNav) {
+  const setNavMenuOpen = (open) => {
+    headerNav.classList.toggle('is-open', open);
+    navBurger.setAttribute('aria-expanded', String(open));
+  };
+  navBurger.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setNavMenuOpen(!headerNav.classList.contains('is-open'));
+  });
+  // Selecting an item closes the menu.
+  headerNav.querySelectorAll('.header-link, .toggle').forEach((el) => {
+    el.addEventListener('click', () => setNavMenuOpen(false));
+  });
+  // Tap outside or Escape closes it.
+  document.addEventListener('click', (e) => {
+    if (headerNav.classList.contains('is-open') && !headerNav.contains(e.target)) {
+      setNavMenuOpen(false);
+    }
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && headerNav.classList.contains('is-open')) setNavMenuOpen(false);
+  });
+}
 
 // ─── Cinematic intro ("video mode") ───────────────────────────────
 // Black → backlit silhouette → laser+smoke reveal → arrive at the landing.
@@ -1209,7 +1221,6 @@ if (runIntro) {
   const finishIntro = () => {
     window.removeEventListener('keydown', onIntroKey, true);
     document.body.classList.remove('intro-active');
-    showCenterCta();
   };
 
   const onIntroError = (err) => {
@@ -1227,7 +1238,6 @@ if (runIntro) {
     if (tv.pointLight) tv.pointLight.intensity = 0.5;
     document.body.classList.remove('intro-active');
     wallSign.flickerOn();
-    showCenterCta();
   };
 
   // ── Click-to-enter gate ──────────────────────────────────────────
@@ -1607,6 +1617,7 @@ window.addEventListener('keydown', (e) => {
 
 window.addEventListener('resize', () => {
   tv.resize();
+  wallSign.applyResponsiveScale();
   syncMobileUICompact();
   // Re-show the desktop mode label after a resize back across the mobile breakpoint.
   if (label && window.innerWidth >= 768) label.classList.remove('hidden');
