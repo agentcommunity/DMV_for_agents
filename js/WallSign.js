@@ -35,6 +35,7 @@ export class WallSign {
     );
     this.mesh.position.set(0, 3.0, -0.5);
     scene.add(this.mesh);
+    this.applyResponsiveScale();
 
     // Total duration of the flickerOn() timeline below (~1.78s). Consumers (the intro)
     // read this to time things to the END of the stutter; keep in sync if the pattern changes.
@@ -42,6 +43,12 @@ export class WallSign {
 
     // Draw content (invisible until flickerOn)
     this.draw();
+  }
+
+  /** Scale the sign up on small viewports so it reads on mobile. */
+  applyResponsiveScale() {
+    const s = (typeof window !== 'undefined' && window.innerWidth < 768) ? 1.5 : 1.0;
+    this.mesh.scale.set(s, s, 1);
   }
 
   /** Trigger the fluorescent tube startup sequence. onDone fires when it finishes catching. */
