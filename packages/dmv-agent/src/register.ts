@@ -5,9 +5,47 @@ import type {
   SignupSource,
 } from './types.js';
 
-const REGISTER_ENDPOINT =
-  process.env.DMV_API_ENDPOINT?.trim()
-  || 'https://dmv.agentcommunity.org/api/register';
+const configuredRegisterEndpoint = process.env.DMV_API_ENDPOINT?.trim();
+const REGISTER_ENDPOINT = configuredRegisterEndpoint
+  ? configuredRegisterEndpoint
+  : 'https://dmv.agentcommunity.org/api/register';
+const DMV_BASE_URL = 'https://dmv.agentcommunity.org';
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function existingRegistrationResult(
+  json: Record<string, unknown>,
+  data: AgentRegistration,
+): RegistrationResult | null {
+  const certificateId = stringField(json.certificate_id);
+  if (!certificateId) return null;
+
+  const agentName = stringField(json.agent_name) ?? data.agentName;
+  const domain = stringField(json.domain) ?? `${agentName}.agent`;
+  const cert = encodeURIComponent(certificateId);
+  const agent = encodeURIComponent(agentName);
+
+  return {
+    certificateId,
+    agentName,
+    domain,
+    message:
+      stringField(json.message) ??
+      `Pre-registration already recorded for ${domain}.`,
+    permalinkUrl:
+      stringField(json.permalink_url) ??
+      `${DMV_BASE_URL}/c/${cert}/${agent}`,
+    badgeUrl:
+      stringField(json.badge_url) ??
+      `${DMV_BASE_URL}/badge?id=${cert}`,
+    badgeCardUrl:
+      stringField(json.badge_card_url) ??
+      `${DMV_BASE_URL}/badge?id=${cert}&style=card`,
+    queueNumber: typeof json.queue_number === 'number' ? json.queue_number : null,
+  };
+}
 
 /**
  * Register an agent identity at the DMV via the edge function proxy.
@@ -32,8 +70,8 @@ export async function registerAgent(
   const body: Record<string, unknown> = {
     agent_name: data.agentName,
     email: data.email,
-    operator_name: data.operatorName || null,
-    description: data.description || null,
+    operator_name: data.operatorName ?? null,
+    description: data.description ?? null,
     signup_source: source,
     registration_type: 'AGENT',
   };
@@ -85,6 +123,11 @@ export async function registerAgent(
     throw new Error(`Server returned invalid response (HTTP ${res.status}): ${text.slice(0, 200)}`);
   }
 
+  if (res.status === 409) {
+    const existing = existingRegistrationResult(json, data);
+    if (existing) return existing;
+  }
+
   if (!res.ok) {
     throw new Error((json.message as string) || (json.error as string) || `Registration failed (HTTP ${res.status})`);
   }
@@ -94,6 +137,9 @@ export async function registerAgent(
     agentName: json.agent_name as string,
     domain: json.domain as string,
     message: json.message as string,
+    permalinkUrl: typeof json.permalink_url === 'string' ? json.permalink_url : undefined,
+    badgeUrl: typeof json.badge_url === 'string' ? json.badge_url : undefined,
+    badgeCardUrl: typeof json.badge_card_url === 'string' ? json.badge_card_url : undefined,
     queueNumber: typeof json.queue_number === 'number' ? json.queue_number : null,
   };
 }

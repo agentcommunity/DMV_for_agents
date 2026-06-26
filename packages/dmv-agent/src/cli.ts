@@ -8,11 +8,22 @@
  *   register              → Interactive pre-registration from terminal
  *   register --name <n> --email <e> --operator <o>  → Non-interactive
  *   verify <CERT-ID>      → Check a certificate ID's validity
+ *   doctor                → Read-only DMV endpoint readiness checks
  */
 
 import { registerAgent } from './register.js';
 import { verifyCertificateId } from './certificate.js';
-import { normalizeAgentName, validateAgentName, validateEmail } from './validate.js';
+import { runDoctor } from './doctor.js';
+import { packageVersion } from './package-info.js';
+import { resolveRegistrationUrls } from './urls.js';
+import {
+  normalizeAgentName,
+  validateAgentName,
+  validateAgentRegistration,
+  validateDescription,
+  validateEmail,
+  validateOperatorName,
+} from './validate.js';
 import { checkRateLimit, recordAttempt, getMachineFingerprint } from './rate-limit.js';
 import {
   clearScreen, hideCursor, showCursor,
@@ -23,13 +34,13 @@ import {
 import { generateTextCard } from './text-card.js';
 import * as readline from 'node:readline';
 
-const VERSION = '0.1.0';
+const VERSION = packageVersion;
 const args = process.argv.slice(2);
 const command = args[0];
 
 // ─── Content ────────────────────────────────────────────────
 
-const ABOUT_TEXT = `The Department of Machine Verification (DMV) is the identity registration system for the .agent community.
+const ABOUT_TEXT = `The Department of Machine Verification (DMV) is the agent name pre-registration system for the .agent community.
 
 The .agent community is building toward an ICANN application for the .agent generic top-level domain (gTLD). Pre-registering your agent's identity now establishes early interest in your preferred .agent domain.
 
@@ -43,11 +54,13 @@ const TERMS_TEXT = `TERMS OF SERVICE — SUMMARY
 
 Pre-registration through the DMV records your interest in a .agent domain identity. It does not guarantee domain assignment.
 
+Multiple parties can pre-register interest in the same .agent name. This is a wishlist, not an availability check.
+
 By pre-registering you agree to:
 - Provide accurate operator contact information
 - Respond to verification emails promptly
-- Use your .agent identity in accordance with the Charter
-- Accept that domain assignment is subject to the .agent gTLD application process
+- Avoid implying ownership, priority, or DNS availability from this pre-registration
+- Accept that any future assignment is subject to the .agent gTLD application process and ICANN-approved policies
 
 Pre-registration data is stored securely. Email addresses are used solely for verification and community updates. You may request deletion at any time.
 
@@ -61,9 +74,9 @@ The .agent Charter establishes principles for machine identity:
 2. TRANSPARENCY — Agents should be identifiable as non-human
 3. ACCOUNTABILITY — An operator stands behind every agent
 4. INTEROPERABILITY — .agent identities work across platforms
-5. COMMUNITY — The .agent namespace is governed collectively
+5. COMMUNITY — The .agent namespace would operate within ICANN requirements
 
-The Charter guides how .agent domains are assigned, used, and governed. All pre-registrants agree to uphold these principles.
+The Charter guides the proposed use and governance of .agent names. All pre-registrants agree to uphold these principles.
 
 Full charter: agentcommunity.org/charter`;
 
@@ -188,11 +201,12 @@ async function collectFields(): Promise<CollectedFields> {
       completed,
     );
     operatorName = await prompt(`  ${color.green('>')} `);
-    if (operatorName.length >= 1) {
+    const err = validateOperatorName(operatorName);
+    if (!err) {
       validationOk(`Operator: ${operatorName}`);
       break;
     }
-    validationError('Operator name is required');
+    validationError(err);
     await new Promise(r => setTimeout(r, 800));
   }
   completed.push({ label: 'Operator', value: operatorName });
@@ -218,15 +232,24 @@ async function collectFields(): Promise<CollectedFields> {
   completed.push({ label: 'Email', value: email });
 
   // 4. Description (optional)
-  clearScreen();
-  renderFieldPrompt(
-    'DESCRIPTION (optional, press Enter to skip)',
-    'What does this agent do?',
-    completed,
-  );
-  const description = (await prompt(`  ${color.green('>')} `)) || undefined;
-  if (description) {
-    completed.push({ label: 'Desc', value: description });
+  let description: string | undefined;
+  while (true) {
+    clearScreen();
+    renderFieldPrompt(
+      'DESCRIPTION (optional, press Enter to skip)',
+      'What does this agent do?',
+      completed,
+    );
+    description = (await prompt(`  ${color.green('>')} `)) || undefined;
+    const descriptionErr = validateDescription(description);
+    if (!descriptionErr) {
+      if (description) {
+        completed.push({ label: 'Desc', value: description });
+      }
+      break;
+    }
+    validationError(descriptionErr);
+    await new Promise(r => setTimeout(r, 800));
   }
 
   return { agentName, operatorName, email, description };
@@ -290,14 +313,14 @@ async function confirmAndSubmit(fields: CollectedFields): Promise<void> {
 
     recordAttempt(fields.agentName);
 
-    const viewUrl = `dmv.agentcommunity.org/c/${encodeURIComponent(result.certificateId)}/${encodeURIComponent(result.agentName)}`;
+    const urls = resolveRegistrationUrls(result);
 
     clearScreen();
     renderSuccess({
       certificateId: result.certificateId,
       domain: result.domain,
       email: fields.email,
-      viewUrl,
+      ...urls,
       queueNumber: result.queueNumber,
     });
 
@@ -308,7 +331,7 @@ async function confirmAndSubmit(fields: CollectedFields): Promise<void> {
       domain: result.domain,
       certificateId: result.certificateId,
       accountType: 'Agent',
-      viewUrl,
+      viewUrl: urls.viewUrl,
     }));
     write('');
   } catch (err) {
@@ -335,22 +358,33 @@ async function interactiveRegister(): Promise<void> {
 
 // ─── Non-interactive registration ───────────────────────────
 
-function parseFlags(argv: string[]): Record<string, string> {
-  const flags: Record<string, string> = {};
+function parseFlags(argv: string[]): Record<string, string | true> {
+  const flags: Record<string, string | true> = {};
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg.startsWith('--') && i + 1 < argv.length) {
-      flags[arg.slice(2)] = argv[++i];
+    if (!arg.startsWith('--')) {
+      continue;
+    }
+
+    const next = argv[i + 1];
+    if (next && !next.startsWith('--')) {
+      flags[arg.slice(2)] = next;
+      i += 1;
+    } else {
+      flags[arg.slice(2)] = true;
     }
   }
   return flags;
 }
 
-async function nonInteractiveRegister(flags: Record<string, string>): Promise<void> {
-  const agentName = normalizeAgentName(flags.name ?? '');
-  const email = flags.email;
-  const operatorName = flags.operator;
-  const description = flags.description || undefined;
+async function nonInteractiveRegister(flags: Record<string, string | true>): Promise<void> {
+  const nameFlag = stringFlag(flags.name);
+  const email = stringFlag(flags.email);
+  const operatorFlag = stringFlag(flags.operator);
+  const descriptionFlag = stringFlag(flags.description);
+  const agentName = normalizeAgentName(nameFlag ?? '');
+  const operatorName = operatorFlag?.trim() ?? '';
+  const description = descriptionFlag?.trim() || undefined;
 
   if (!agentName || !email || !operatorName) {
     process.stderr.write(
@@ -369,6 +403,25 @@ async function nonInteractiveRegister(flags: Record<string, string>): Promise<vo
   const emailErr = validateEmail(email);
   if (emailErr) {
     validationError(`email: ${emailErr}`);
+    process.exit(1);
+  }
+
+  const operatorErr = validateOperatorName(operatorName);
+  if (operatorErr) {
+    validationError(`operatorName: ${operatorErr}`);
+    process.exit(1);
+  }
+
+  const validationErrors = validateAgentRegistration({
+    agentName,
+    email,
+    operatorName,
+    description,
+  });
+  if (validationErrors.length > 0) {
+    for (const err of validationErrors) {
+      validationError(`${err.field}: ${err.message}`);
+    }
     process.exit(1);
   }
 
@@ -391,13 +444,13 @@ async function nonInteractiveRegister(flags: Record<string, string>): Promise<vo
 
     recordAttempt(agentName);
 
-    const viewUrl = `dmv.agentcommunity.org/c/${encodeURIComponent(result.certificateId)}/${encodeURIComponent(result.agentName)}`;
+    const urls = resolveRegistrationUrls(result);
 
     renderSuccess({
       certificateId: result.certificateId,
       domain: result.domain,
       email,
-      viewUrl,
+      ...urls,
       queueNumber: result.queueNumber,
     });
 
@@ -408,7 +461,7 @@ async function nonInteractiveRegister(flags: Record<string, string>): Promise<vo
       domain: result.domain,
       certificateId: result.certificateId,
       accountType: 'Agent',
-      viewUrl,
+      viewUrl: urls.viewUrl,
     }));
     write('');
   } catch (err) {
@@ -433,6 +486,39 @@ async function verifyCommand(): Promise<void> {
     process.stderr.write(`\n  ${color.red('✗')} Certificate ${color.red(certId)} has an invalid check digit.\n\n`);
     process.exit(1);
   }
+}
+
+// ─── Doctor command ─────────────────────────────────────────
+
+async function doctorCommand(): Promise<void> {
+  const flags = parseFlags(args);
+  const result = await runDoctor({ baseUrl: stringFlag(flags['base-url']) });
+
+  if (Object.prototype.hasOwnProperty.call(flags, 'json')) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (!result.ok) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  process.stderr.write(`\n  ${color.greenBold('DMV doctor')}: ${result.ok ? color.green('OK') : color.red('FAILED')}\n`);
+  process.stderr.write(`  ${color.greenDim('Base URL:')} ${result.baseUrl}\n\n`);
+
+  for (const check of result.checks) {
+    const mark = check.status === 'pass' ? color.green('✓') : color.red('✗');
+    const label = check.status === 'pass' ? color.green(check.label) : color.red(check.label);
+    process.stderr.write(`  ${mark} ${label} — ${check.detail}\n`);
+  }
+
+  process.stderr.write('\n');
+  if (!result.ok) {
+    process.exit(1);
+  }
+}
+
+function stringFlag(value: string | true | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 // ─── MCP server ─────────────────────────────────────────────
@@ -462,6 +548,9 @@ async function main(): Promise<void> {
     case 'verify':
       await verifyCommand();
       break;
+    case 'doctor':
+      await doctorCommand();
+      break;
     case undefined:
     case 'serve':
       await startMcpServer();
@@ -469,7 +558,7 @@ async function main(): Promise<void> {
     default:
       process.stderr.write(
         `\n  ${color.red('Unknown command:')} ${command}\n` +
-        `  ${color.green('Usage:')} dmv-agent [register|verify|serve]\n\n`
+        `  ${color.green('Usage:')} dmv-agent [register|verify|doctor|serve]\n\n`
       );
       process.exit(1);
   }

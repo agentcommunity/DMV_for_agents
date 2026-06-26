@@ -121,10 +121,12 @@ export function clearScreen(): void {
 }
 
 export function hideCursor(): void {
+  if (!process.stderr.isTTY) return;
   process.stderr.write(HIDE_CURSOR);
 }
 
 export function showCursor(): void {
+  if (!process.stderr.isTTY) return;
   process.stderr.write(SHOW_CURSOR);
 }
 
@@ -319,6 +321,10 @@ export function renderSuccess(result: {
   domain: string;
   email: string;
   viewUrl: string;
+  permalinkUrl: string;
+  badgeUrl: string;
+  badgeCardUrl: string;
+  cardImageUrl: string;
   queueNumber?: number | null;
 }): void {
   const lines: string[] = [];
@@ -343,7 +349,7 @@ export function renderSuccess(result: {
   // View certificate — the star
   const bW = INNER_W - 4;
   lines.push(frameLineRaw(color.greenBold('VIEW YOUR CARD')));
-  lines.push(frameLineRaw(color.green('Your holographic identity card is ready.')));
+  lines.push(frameLineRaw(color.green('Your holographic pre-registration card is ready.')));
   lines.push(frameEmpty());
   lines.push(frameLineRaw(color.greenDim('  →  ') + color.green(result.viewUrl)));
 
@@ -352,7 +358,7 @@ export function renderSuccess(result: {
   // Share nudge
   lines.push(frameLineRaw(color.greenBold('SPREAD THE WORD')));
   lines.push(frameLineRaw(color.green('Share with your agent friends & partners.')));
-  lines.push(frameLineRaw(color.green('Every pre-registration strengthens our claim')));
+  lines.push(frameLineRaw(color.green('Every pre-registration strengthens the community bid')));
   lines.push(frameLineRaw(color.green('for .agent — help make agentcommunity loud.')));
   lines.push(frameEmpty());
   lines.push(frameLineRaw(color.greenDim('  invite agents →  ') + color.green('bunx dmv-agent register')));
@@ -362,12 +368,11 @@ export function renderSuccess(result: {
 
   // Badge
   lines.push(frameLineRaw(color.greenBold('ADD A BADGE')));
-  lines.push(frameLineRaw(color.green('Show your .agent identity in your README.')));
+  lines.push(frameLineRaw(color.green('Show your .agent pre-registration in your README.')));
   lines.push(frameEmpty());
-  const badgeUrl = `https://dmv.agentcommunity.org/badge?id=${result.certificateId}`;
-  const permalinkUrl = `https://${result.viewUrl}`;
   lines.push(frameLineRaw(color.greenDim('  markdown →')));
-  lines.push(frameLineRaw(color.green(`  [![${result.domain}](${badgeUrl})](${permalinkUrl})`)));
+  lines.push(frameLineRaw(color.green(`  [![${result.domain}](${result.badgeUrl})](${result.permalinkUrl})`)));
+  lines.push(frameLineRaw(color.greenDim('  card badge →  ') + color.green(result.badgeCardUrl)));
 
   lines.push(frameEmpty());
 
@@ -375,15 +380,13 @@ export function renderSuccess(result: {
   lines.push(frameLineRaw(color.greenBold('SAVE CARD')));
   lines.push(frameLineRaw(color.green('Download your holographic card as a PNG.')));
   lines.push(frameEmpty());
-  const cardImageUrl = `https://dmv.agentcommunity.org/api/card?id=${encodeURIComponent(result.certificateId)}&name=${encodeURIComponent(result.domain.replace('.agent', ''))}`;
-  lines.push(frameLineRaw(color.greenDim('  download →  ') + color.green(cardImageUrl)));
+  lines.push(frameLineRaw(color.greenDim('  download →  ') + color.green(result.cardImageUrl)));
 
   lines.push(frameEmpty());
 
   // Email — still important, just quieter
-  lines.push(frameLineRaw(color.amber(
-    `✉ Check ${result.email} — verify to complete pre-registration.`
-  )));
+  lines.push(frameLineRaw(color.amber('Verify your email to validate this pre-registration.')));
+  lines.push(frameLineRaw(color.amber(`Check: ${result.email}`)));
 
   lines.push(frameEmpty());
   lines.push(frameScanline());

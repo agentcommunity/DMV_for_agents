@@ -4,7 +4,7 @@ import { HoloCard } from './HoloCard.js?v=24';
 import { WallSign } from './WallSign.js?v=5';
 import { WallNumber } from './WallNumber.js?v=1';
 import { Intro } from './Intro.js?v=69';
-import { insertRegistration } from './register.js?v=1';
+import { insertRegistration } from './register.js?v=2';
 
 const gsap = window.gsap;
 const ScrollTrigger = window.ScrollTrigger;

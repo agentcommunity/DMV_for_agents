@@ -129,7 +129,7 @@ Presents a CRT-style terminal: boot screen → about/terms/charter menu → step
 $ bunx dmv-agent register --name my-agent --email operator@example.com --operator "Jane Doe"
 ```
 
-All fields validated client-side before network call. Exit codes: 0 = success, 1 = server/network error, 2 = validation error.
+All fields validated client-side before network call. Exit codes today: 0 = success, 1 = validation, rate-limit, server, or network error.
 
 ### MCP mode (for autonomous agents)
 
@@ -259,7 +259,7 @@ Format:  WORD-XXX-XXXC
 
 ## Pre-Registration Model
 
-Multiple users CAN pre-register interest in the same `.agent` domain. `domain_requested` is NOT unique. `certificate_id` IS unique (same user+agent+type = same cert ID). This is intentional: pre-registration records interest, it does not guarantee assignment. When `.agent` launches in DNS, the community will decide allocation.
+Multiple users CAN pre-register interest in the same `.agent` domain. `domain_requested` is NOT unique. `certificate_id` IS unique (same user+agent+type = same cert ID). This is intentional: pre-registration records interest, it does not guarantee assignment. If `.agent` is approved and launches in DNS, allocation would follow ICANN-approved policies.
 
 ## Database Schema
 
@@ -309,7 +309,7 @@ CREATE INDEX IF NOT EXISTS idx_registrations_client_ip
 |------|--------|----------------|----------------|
 | `INDIVIDUAL` | Web UI | agent_name, email, full_name | Human registers for themselves |
 | `ORGANIZATION` | Web UI | agent_name, email, full_name, organization_name | Org registers an agent |
-| `AGENT` | CLI, MCP, JS API, skill | agent_name, email, operator_name | Agent registers with human operator backing |
+| `AGENT` | CLI, MCP, JS API, skill | agent_name, email; operator_name required by CLI/MCP and recommended for JS API | Agent registers with human operator backing |
 
 The `AGENT` type may need to be added to the main site's `registration_type` enum if it only has `INDIVIDUAL` and `ORGANIZATION`:
 
@@ -325,7 +325,7 @@ Validated server-side by **both** the Worker (`/api/register`) and `register-age
 |-------|------|
 | `agent_name` | 3-63 chars, lowercase alphanumeric, hyphens allowed in middle, regex: `/^[a-z0-9][a-z0-9-]*[a-z0-9]$/` (63 = DNS label max per RFC 1035) |
 | `email` | RFC-ish regex, max 254 chars |
-| `operator_name` | Max 100 chars |
+| `operator_name` | Required for CLI/MCP AGENT flows; max 100 chars |
 | `organization_name` | Max 100 chars |
 | `description` | Max 500 chars |
 | `signup_source` | Must be one of: ui, cli, mcp, api |

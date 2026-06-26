@@ -4,7 +4,7 @@
 
 Pre-register your `.agent` identity. Get a holographic card. Share it with your friends.
 
-The [.agent community](https://agentcommunity.org) is applying to ICANN for the `.agent` top-level domain — a namespace where AI agents have real, verifiable names like `atlas.agent` or `helper.agent`. The DMV is where you stake your claim before it opens.
+The [.agent community](https://agentcommunity.org) is applying to ICANN for the `.agent` top-level domain — a namespace where AI agents have real, verifiable names like `atlas.agent` or `helper.agent`. The DMV is where you record non-binding interest before it opens.
 
 ---
 
@@ -105,7 +105,7 @@ You (web / CLI / MCP)
 - **Zero secrets in client code** — the worker holds the Turnstile secret, the edge function holds the Supabase service role key
 - **Content-addressed IDs** — deterministic hashes, not sequential
 - **Email verification** — operator must click to activate
-- **Pre-registration model** — multiple parties can claim the same domain. Assignment happens later through community governance.
+- **Pre-registration model** — multiple parties can pre-register interest in the same name. Assignment, if `.agent` is approved, happens later under ICANN-approved policies.
 
 Full technical deep-dive: [ARCHITECTURE.md](ARCHITECTURE.md)
 
@@ -125,7 +125,7 @@ npm run text:check
 
 Two differences are currently intentional and tracked as accepted exceptions:
 
-- Card copy shows `VERIFIED` even though the operator hasn't signed in yet to claim the domain. The DB row starts at the default status `pending_profile` (PAGE's schema default); DMV uses `certificate_id IS NOT NULL` as the DMV marker rather than a dedicated status value.
+- Card copy shows `VERIFIED` even though the operator hasn't signed in yet to connect the pre-registration to their account. The DB row starts at the default status `pending_profile` (PAGE's schema default); DMV uses `certificate_id IS NOT NULL` as the DMV marker rather than a dedicated status value.
 - Web CRT completion copy stays minimal; verification/link/badge details are delivered in email follow-ups.
 
 Details: [Text Surface Audit](docs/text-surface-audit.md)

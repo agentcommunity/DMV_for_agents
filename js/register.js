@@ -4,6 +4,41 @@
 // credentials live in client code — the worker is the only entry point.
 
 const REGISTER_ENDPOINT = '/api/register';
+const DMV_BASE_URL = 'https://dmv.agentcommunity.org';
+
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function existingRegistrationData(json, body) {
+  const certificateId = nonEmptyString(json.certificate_id);
+  if (!certificateId) return null;
+
+  const agentName = nonEmptyString(json.agent_name) || body.agent_name;
+  const domain = nonEmptyString(json.domain) || `${agentName}.agent`;
+  const cert = encodeURIComponent(certificateId);
+  const agent = encodeURIComponent(agentName);
+
+  return {
+    ...json,
+    certificate_id: certificateId,
+    agent_name: agentName,
+    domain,
+    registration_type: nonEmptyString(json.registration_type) || body.registration_type,
+    permalink_url:
+      nonEmptyString(json.permalink_url) ||
+      `${DMV_BASE_URL}/c/${cert}/${agent}`,
+    badge_url:
+      nonEmptyString(json.badge_url) ||
+      `${DMV_BASE_URL}/badge?id=${cert}`,
+    badge_card_url:
+      nonEmptyString(json.badge_card_url) ||
+      `${DMV_BASE_URL}/badge?id=${cert}&style=card`,
+    message:
+      nonEmptyString(json.message) ||
+      `Pre-registration already recorded for ${domain}.`,
+  };
+}
 
 /**
  * Submit a registration via the /api/register Worker proxy.
@@ -48,6 +83,13 @@ export async function insertRegistration(formData, signupSource = 'ui', turnstil
       json = await res.json();
     } catch {
       return { data: null, error: { message: `Server returned an unexpected response (HTTP ${res.status})` } };
+    }
+
+    if (res.status === 409) {
+      const existing = existingRegistrationData(json, body);
+      if (existing) {
+        return { data: existing, error: null };
+      }
     }
 
     if (!res.ok) {

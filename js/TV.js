@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { CRTTerminal } from './CRTTerminal.js?v=25';
+import { CRTTerminal } from './CRTTerminal.js?v=26';
 
 const gsap = window.gsap;
 
