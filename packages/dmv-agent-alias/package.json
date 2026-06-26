@@ -1,10 +1,10 @@
 {
   "name": "dmv-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Register .agent identities — alias for @agentcommunity/dmv-agent",
   "type": "module",
-  "bin": { "dmv-agent": "./bin/dmv-agent.js" },
-  "dependencies": { "@agentcommunity/dmv-agent": ">=0.1.0" },
+  "bin": { "dmv-agent": "bin/dmv-agent.js" },
+  "dependencies": { "@agentcommunity/dmv-agent": "^0.2.1" },
   "keywords": ["agent", "dmv", "identity", "mcp"],
   "license": "MIT",
   "files": ["bin/"]
