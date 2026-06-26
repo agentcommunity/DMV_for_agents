@@ -24,6 +24,9 @@ export interface RegistrationResult {
   agentName: string;
   domain: string;
   message: string;
+  permalinkUrl?: string;
+  badgeUrl?: string;
+  badgeCardUrl?: string;
   /** Global position in the pre-registration queue ("now serving" ticket). */
   queueNumber?: number | null;
 }

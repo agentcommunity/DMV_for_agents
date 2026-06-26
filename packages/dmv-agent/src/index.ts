@@ -1,6 +1,7 @@
 // Public API for @agentcommunity/dmv-agent
 
 export { registerAgent } from './register.js';
+export { runDoctor } from './doctor.js';
 export { generateCertificateId, verifyCertificateId, fnv1a } from './certificate.js';
 export { validateAgentName, validateEmail, validateAgentRegistration } from './validate.js';
 export { generateTextCard, generateMarkdownCard } from './text-card.js';
@@ -12,3 +13,4 @@ export type {
   RegistrationType,
   SignupSource,
 } from './types.js';
+export type { DoctorCheck, DoctorResult, RunDoctorOptions } from './doctor.js';

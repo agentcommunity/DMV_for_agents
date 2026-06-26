@@ -81,6 +81,29 @@ function getCorsHeaders(req: Request) {
   }
 }
 
+function existingRegistrationPayload(args: {
+  certificateId: string
+  agentName: string
+  domain: string
+  registrationType: string
+  permalinkUrl: string
+  badgeUrl: string
+  badgeCardUrl: string
+}) {
+  return {
+    certificate_id: args.certificateId,
+    agent_name: args.agentName,
+    domain: args.domain,
+    registration_type: args.registrationType,
+    queue_number: null,
+    permalink_url: args.permalinkUrl,
+    badge_url: args.badgeUrl,
+    badge_card_url: args.badgeCardUrl,
+    message: `Pre-registration already recorded for ${args.domain}.`,
+    already_recorded: true,
+  }
+}
+
 // --- Handler ---
 
 // Proxy header gate — only the DMV worker at dmv.agentcommunity.org/api/register
@@ -192,6 +215,54 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
+  // Generate certificate ID before quota checks so an exact retry can recover
+  // the already-recorded cert even when the email is at its new-registration cap.
+  const certFields = [agentName, email]
+  const certificateId = generateCertificateId(certFields, registrationType.toLowerCase())
+  const domain = agentName + '.agent'
+
+  // Permalink + badge URLs (badges proxied through the DMV Worker; see worker/index.ts)
+  const DMV_BASE = 'https://dmv.agentcommunity.org'
+  const permalinkUrl = `${DMV_BASE}/c/${encodeURIComponent(certificateId)}/${encodeURIComponent(agentName)}`
+  const badgeUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}`
+  const badgeCardUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}&style=card`
+
+  const findExactExistingRegistration = async () => {
+    return await supabase
+      .from('registrations')
+      .select('certificate_id')
+      .eq('certificate_id', certificateId)
+      .eq('email', email)
+      .eq('domain_requested', domain)
+      .eq('registration_type', registrationType)
+      .maybeSingle()
+  }
+
+  const { data: existingRegistration, error: existingRegistrationError } =
+    await findExactExistingRegistration()
+
+  if (existingRegistrationError) {
+    return new Response(
+      JSON.stringify({ error: 'Could not verify your existing pre-registration — please try again.' }),
+      { status: 503, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+    )
+  }
+
+  if (existingRegistration) {
+    return new Response(
+      JSON.stringify(existingRegistrationPayload({
+        certificateId,
+        agentName,
+        domain,
+        registrationType,
+        permalinkUrl,
+        badgeUrl,
+        badgeCardUrl,
+      })),
+      { status: 200, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+    )
+  }
+
   // Lifetime cap: 5 unendorsed / 12 endorsed per email.
   // Counts only DMV agent cards (certificate_id IS NOT NULL), not PAGE signups.
   const { count: totalCerts, error: countError } = await supabase
@@ -236,17 +307,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Generate certificate ID (server-side — authoritative)
-  const certFields = [agentName, email]
-  const certificateId = generateCertificateId(certFields, registrationType.toLowerCase())
-  const domain = agentName + '.agent'
-
-  // Permalink + badge URLs (badges proxied through the DMV Worker; see worker/index.ts)
-  const DMV_BASE = 'https://dmv.agentcommunity.org'
-  const permalinkUrl = `${DMV_BASE}/c/${encodeURIComponent(certificateId)}/${encodeURIComponent(agentName)}`
-  const badgeUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}`
-  const badgeCardUrl = `${DMV_BASE}/badge?id=${encodeURIComponent(certificateId)}&style=card`
-
   // Insert
   //
   // We intentionally DO NOT set `status` here. The PAGE-side schema
@@ -281,15 +341,44 @@ Deno.serve(async (req) => {
     })
 
   if (insertError) {
-    // Duplicate certificate_id — same user already registered this agent
-    if (insertError.code === '23505') {
+    const duplicateCert =
+      insertError.code === '23505' &&
+      `${insertError.message ?? ''} ${insertError.details ?? ''}`.includes('certificate_id')
+
+    // Duplicate certificate_id — exact same pre-registration was already recorded.
+    // This is not a "domain taken" state: domain_requested is intentionally not unique,
+    // and multiple parties may pre-register the same .agent name.
+    if (duplicateCert) {
+      const { data: existingAfterConflict, error: existingAfterConflictError } =
+        await findExactExistingRegistration()
+
+      if (existingAfterConflictError) {
+        return new Response(
+          JSON.stringify({ error: 'Could not verify your existing pre-registration — please try again.' }),
+          { status: 503, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+        )
+      }
+
+      if (!existingAfterConflict) {
+        return new Response(
+          JSON.stringify({
+            error: 'Certificate ID collision. Please retry with a different name.',
+          }),
+          { status: 409, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+        )
+      }
+
       return new Response(
-        JSON.stringify({
-          error: 'Agent already registered',
-          certificate_id: certificateId,
-          permalink_url: permalinkUrl,
-        }),
-        { status: 409, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+        JSON.stringify(existingRegistrationPayload({
+          certificateId,
+          agentName,
+          domain,
+          registrationType,
+          permalinkUrl,
+          badgeUrl,
+          badgeCardUrl,
+        })),
+        { status: 200, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
       )
     }
     console.error('Supabase insert error:', JSON.stringify(insertError, null, 2))

@@ -70,22 +70,19 @@ export class CRTTerminal {
       '  TERMS & CONDITIONS',
       '  ──────────────────────────────',
       '',
-      '  1. By registering with the Department of Machine',
-      '     Verification, you agree to abide by all',
-      '     applicable protocols for agent identification.',
+      '  1. By submitting, you record non-binding interest',
+      '     in a .agent name for yourself or your agent.',
       '',
-      '  2. Your registered agent identity is non-transferable.',
-      '     Sharing credentials with unauthorized entities',
-      '     may result in revocation of verification status.',
+      '  2. Duplicate name interests are allowed.',
+      '     This is not ownership, priority, or DNS use.',
       '',
-      '  3. The DMV reserves the right to audit registered',
-      '     agents at any time to ensure compliance with',
-      '     verification standards.',
+      '  3. If .agent is approved, allocation would follow',
+      '     ICANN-approved policies and final rules.',
       '',
-      '  4. All data submitted is processed in accordance',
-      '     with the Machine Privacy Framework (MPF v2.1).',
+      '  4. Provide accurate operator contact information',
+      '     and verify the email address you control.',
       '',
-      '  5. Registration does not constitute endorsement.',
+      '  5. Pre-registration does not constitute endorsement.',
       '     The DMV makes no guarantees regarding agent',
       '     capability, reliability, or fitness for purpose.',
       '',
@@ -97,26 +94,24 @@ export class CRTTerminal {
       '  COMMUNITY CHARTER',
       '  ──────────────────────────────',
       '',
-      '  As a verified member of the DMV community,',
-      '  you pledge to:',
+      '  As a .agent name pre-registrant,',
+      '  you agree to:',
       '',
       '  I.   Operate transparently and identify yourself',
       '       as a machine agent when interacting with',
       '       humans or other agents.',
       '',
-      '  II.  Refrain from impersonating other registered',
-      '       agents or misrepresenting your capabilities.',
+      '  II.  Avoid implying ownership, priority, or DNS',
+      '       availability from this pre-registration.',
       '',
-      '  III. Report any security vulnerabilities or',
-      '       anomalies discovered in the verification',
-      '       system to DMV administrators.',
+      '  III. Respect that multiple parties may express',
+      '       interest in the same .agent name.',
       '',
       '  IV.  Contribute positively to the agent community',
       '       and assist fellow agents when possible.',
       '',
-      '  V.   Accept that violation of this charter may',
-      '       lead to suspension or permanent revocation',
-      '       of your verification certificate.',
+      '  V.   Accept that final allocation, if .agent is',
+      '       approved, is subject to ICANN requirements.',
       '',
       '  ──────────────────────────────',
     ];
@@ -140,7 +135,7 @@ export class CRTTerminal {
       { text: '  ╚═════╝ ╚═╝     ╚═╝  ╚═══╝  ', color: this.headerColor },
       { text: '', color: this.textColor },
       { text: '  DEPARTMENT OF MACHINE VERIFICATION', color: this.headerColor },
-      { text: '  Machine Identity & Registration Kiosk v1.0', color: this.dimColor },
+      { text: '  Machine Identity & Pre-Registration Kiosk v1.0', color: this.dimColor },
       { text: '  ─────────────────────────────────', color: this.dimColor },
       { text: '', color: this.textColor },
       { text: '  Initializing registration kiosk...', color: this.dimColor, initLine: true },
@@ -372,14 +367,14 @@ export class CRTTerminal {
     // while the field is empty. Both are read generically by the renderer.
     if (this.accountType === 'org') {
       this.fields = [
-        { key: 'userName',    prompt: 'Your name',          placeholder: 'full name', value: '', active: false },
+        { key: 'userName',    prompt: 'Full legal name',    placeholder: 'legal name', value: '', active: false },
         { key: 'orgEmail',    prompt: 'Organization email', value: '', active: false },
         { key: 'companyName', prompt: 'Company name',       value: '', active: false },
         { key: 'agentName',   prompt: 'Agent name',         suffix: '.agent', value: '', active: false },
       ];
     } else {
       this.fields = [
-        { key: 'userName',  prompt: 'Your name',     placeholder: 'full name', value: '', active: false },
+        { key: 'userName',  prompt: 'Full legal name', placeholder: 'legal name', value: '', active: false },
         { key: 'email',     prompt: 'Email address', value: '', active: false },
         { key: 'agentName', prompt: 'Agent name',    suffix: '.agent', value: '', active: false },
       ];
@@ -584,7 +579,7 @@ export class CRTTerminal {
     // Name: at least two words (first + last)
     if (field.key === 'userName') {
       if (val.split(/\s+/).length < 2) {
-        return 'Enter your full name (first and last)';
+        return 'Enter your full legal name (first and last)';
       }
     }
     // Company name: min 3 chars
@@ -1327,6 +1322,12 @@ export class CRTTerminal {
         const disclaim = 'Pre-registration certificate.';
         const disclaimPad = bw - 2 - disclaim.length;
         this.lines.push({ text: `  │  ${disclaim}${' '.repeat(Math.max(0, disclaimPad))}│`, color: this.dimColor, typed: 0 });
+        const verifyLine1 = 'Verify your email to validate';
+        const verifyLine1Pad = bw - 2 - verifyLine1.length;
+        this.lines.push({ text: `  │  ${verifyLine1}${' '.repeat(Math.max(0, verifyLine1Pad))}│`, color: this.dimColor, typed: 0 });
+        const verifyLine2 = 'this pre-registration.';
+        const verifyLine2Pad = bw - 2 - verifyLine2.length;
+        this.lines.push({ text: `  │  ${verifyLine2}${' '.repeat(Math.max(0, verifyLine2Pad))}│`, color: this.dimColor, typed: 0 });
         this.lines.push({ text: `  │${''.padEnd(bw)}│`, color: this.headerColor, typed: 999 });
         this.lines.push({ text: `  └${bar}┘`, color: this.headerColor, typed: 0 });
         // Button placeholders (drawn by drawDoneButtons)

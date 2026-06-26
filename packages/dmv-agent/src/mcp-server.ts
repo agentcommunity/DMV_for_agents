@@ -26,13 +26,16 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { registerAgent } from './register.js';
 import { verifyCertificateId } from './certificate.js';
-import { normalizeAgentName, validateAgentName, validateEmail } from './validate.js';
+import { runDoctor } from './doctor.js';
+import { packageVersion } from './package-info.js';
+import { resolveRegistrationUrls } from './urls.js';
+import { normalizeAgentName, validateOperatorName } from './validate.js';
 import { checkRateLimit, recordAttempt, getMachineFingerprint } from './rate-limit.js';
 
 const server = new Server(
   {
     name: 'dmv-agent',
-    version: '0.1.0',
+    version: packageVersion,
   },
   {
     capabilities: {
@@ -80,6 +83,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'dmv_doctor',
+      description:
+        'Run a read-only DMV readiness check before registration. ' +
+        'Checks the Worker health endpoint, card PNG rendering, badge SVG rendering, ' +
+        'and invalid-payload /api/register validation without submitting a valid registration.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
       name: 'verify_certificate',
       description:
         'Verify that a DMV certificate ID is valid (check digit passes). ' +
@@ -105,10 +119,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (name === 'register_agent') {
     const agentName = normalizeAgentName((args?.agent_name as string) || '');
     const email = (args?.email as string) || '';
-    const operatorName = (args?.operator_name as string) || undefined;
+    const operatorName = (args?.operator_name as string) || '';
     const description = (args?.description as string) || undefined;
 
     try {
+      const operatorErr = validateOperatorName(operatorName);
+      if (operatorErr) {
+        return {
+          content: [{ type: 'text' as const, text: `Registration failed: operator_name: ${operatorErr}` }],
+          isError: true,
+        };
+      }
+
       // Client-side rate limiting (same as CLI)
       const rateStatus = checkRateLimit();
       if (!rateStatus.allowed) {
@@ -127,13 +149,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // Record successful attempt
       recordAttempt(agentName);
+      const urls = resolveRegistrationUrls(result);
 
       return {
         content: [
           {
             type: 'text' as const,
             text: [
-              `✓ Agent registered successfully!`,
+              `✓ Agent pre-registration recorded.`,
               ``,
               `  Agent:       ${result.domain}`,
               `  Certificate: ${result.certificateId}`,
@@ -142,7 +165,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               `  A verification email will be sent to ${email}.`,
               `  Click the link in the email to complete verification.`,
               ``,
-              `  View: dmv.agentcommunity.org/c/${encodeURIComponent(result.certificateId)}/${encodeURIComponent(result.agentName)}`,
+              `  View: ${urls.permalinkUrl}`,
+              `  Badge: ${urls.badgeUrl}`,
+              `  Card badge: ${urls.badgeCardUrl}`,
             ].join('\n'),
           },
         ],
@@ -158,6 +183,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         isError: true,
       };
     }
+  }
+
+  if (name === 'dmv_doctor') {
+    const result = await runDoctor();
+    const lines = [
+      `DMV doctor: ${result.ok ? 'OK' : 'FAILED'}`,
+      `Base URL: ${result.baseUrl}`,
+      ``,
+      ...result.checks.map((check) =>
+        `${check.status === 'pass' ? '✓' : '✗'} ${check.label}: ${check.detail}`,
+      ),
+    ];
+
+    return {
+      content: [{ type: 'text' as const, text: lines.join('\n') }],
+      isError: !result.ok,
+    };
   }
 
   if (name === 'verify_certificate') {

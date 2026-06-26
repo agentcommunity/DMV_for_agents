@@ -116,14 +116,14 @@ export const SURFACES = [
     label: 'Agent CLI runtime UX',
     audience: 'agent',
     flow: 'cli',
-    files: ['packages/dmv-agent/src/cli.ts', 'packages/dmv-agent/src/ui.ts'],
+    files: ['packages/dmv-agent/src/cli.ts', 'packages/dmv-agent/src/ui.ts', 'packages/dmv-agent/src/urls.ts'],
   },
   {
     id: 'mcp_runtime',
     label: 'MCP server tool descriptions',
     audience: 'agent',
     flow: 'mcp',
-    files: ['packages/dmv-agent/src/mcp-server.ts'],
+    files: ['packages/dmv-agent/src/mcp-server.ts', 'packages/dmv-agent/src/urls.ts'],
   },
   {
     id: 'agent_readme',

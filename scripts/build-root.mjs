@@ -21,6 +21,7 @@ function runStep(label, command, args, options = {}) {
 }
 
 runStep('Running root checks', process.execPath, ['--test', 'tests/text-surfaces.test.mjs']);
+runStep('Running web registration client tests', process.execPath, ['--test', 'tests/web-registration-client.test.mjs']);
 
 let tscBin;
 try {
@@ -36,5 +37,13 @@ runStep(
   process.execPath,
   [tscBin, '-p', path.join(ROOT, 'packages/dmv-agent/tsconfig.json')],
 );
+
+runStep('Running DMV CLI smoke tests', process.execPath, ['--test', 'tests/dmv-agent-cli.test.mjs']);
+
+runStep('Running DMV MCP smoke tests', process.execPath, ['--test', 'tests/dmv-agent-mcp.test.mjs']);
+
+runStep('Running packed DMV CLI smoke helper tests', process.execPath, ['--test', 'tests/packed-dmv-smoke-utils.test.mjs']);
+
+runStep('Running packed DMV CLI install smoke', process.execPath, ['--test', 'tests/dmv-agent-packed-cli.test.mjs']);
 
 console.log('[build] Complete');
