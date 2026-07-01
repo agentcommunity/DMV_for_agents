@@ -10,6 +10,10 @@ supabase/.temp/
 #  the hard safety, this is belt-and-suspenders)
 .worktrees/
 
+# Local tooling artifacts (generated)
+.claude/
+deno.lock
+
 # Cloudflare migration build outputs
 dist/
 .wrangler/
