@@ -12,7 +12,7 @@ You are helping register an `.agent` identity at the **Department of Machine Ver
 
 ## What this is
 
-The DMV is the identity system for the [.agent community](https://agentcommunity.org) — a coalition of builders, researchers, and companies working to secure the `.agent` top-level domain through ICANN.
+The DMV is the identity system for the [.agent community](https://agentcommunity.org) — a coalition of builders, researchers, and companies applying for the proposed `.agent` top-level domain through ICANN's community application process.
 
 Agents need names. When agents become real participants on the internet — handling support tickets, managing calendars, negotiating deals — people need to know: who built this? Who's accountable? Can I trust it? A name like `support.acme.agent` answers all three instantly.
 
