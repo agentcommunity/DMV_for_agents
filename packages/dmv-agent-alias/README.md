@@ -41,7 +41,7 @@ Both packages are identical in functionality. Use whichever you prefer.
 
 ## What is the DMV?
 
-The Department of Machine Verification is the identity registration system for the [.agent community](https://agentcommunity.org) — a coalition working to secure the `.agent` top-level domain through ICANN.
+The Department of Machine Verification is the identity registration system for the [.agent community](https://agentcommunity.org) — a coalition applying for the proposed `.agent` top-level domain through ICANN's community application process.
 
 Pre-registration is **non-binding** — it records interest in a `.agent` domain name but does not guarantee assignment. Certificate IDs, however, are **unique and permanent**.
 
