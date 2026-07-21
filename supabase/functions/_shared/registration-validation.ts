@@ -16,7 +16,7 @@
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const AGENT_NAME_REGEX = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 
-export const SIGNUP_SOURCES = ['ui', 'cli', 'mcp', 'api'] as const;
+export const SIGNUP_SOURCES = ['ui', 'cli', 'mcp', 'api', 'a2a', 'chatgpt'] as const;
 export const REGISTRATION_TYPES = ['AGENT', 'INDIVIDUAL', 'ORGANIZATION'] as const;
 
 export const FIELD_LIMITS = {
@@ -83,7 +83,7 @@ export function validateRegistrationFields(f: RegistrationFields): string | null
   }
 
   if (f.signup_source && !(SIGNUP_SOURCES as readonly string[]).includes(f.signup_source)) {
-    return 'signup_source must be ui, cli, mcp, or api';
+    return 'signup_source must be one of: ui, cli, mcp, api, a2a, chatgpt';
   }
   if (f.registration_type && !(REGISTRATION_TYPES as readonly string[]).includes(f.registration_type)) {
     return 'registration_type must be AGENT, INDIVIDUAL, or ORGANIZATION';
