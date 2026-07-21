@@ -290,7 +290,7 @@ async function sha256Hex(value: string): Promise<string> {
     .join('');
 }
 
-type SignupSource = 'ui' | 'cli' | 'mcp' | 'api';
+type SignupSource = 'ui' | 'cli' | 'mcp' | 'api' | 'a2a' | 'chatgpt';
 type RegistrationType = 'AGENT' | 'INDIVIDUAL' | 'ORGANIZATION';
 
 interface CanonicalRegisterBody {
