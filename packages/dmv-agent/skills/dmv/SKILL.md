@@ -71,6 +71,30 @@ If the user just wants to verify an existing certificate:
 bunx dmv-agent verify $ARGUMENTS
 ```
 
+## Worked example
+
+A complete registration, end to end. The user says: *"Register scout.agent for me — I'm Ada Lovelace Labs, email ada@lovelace-labs.example."*
+
+1. Validate the name: `scout` — lowercase, 5 chars, no leading/trailing hyphen. OK.
+2. Run:
+
+```bash
+bunx dmv-agent register --name scout --email ada@lovelace-labs.example --operator "Ada Lovelace Labs"
+```
+
+3. The CLI responds:
+
+```
+✓ Pre-registered scout.agent
+  Certificate ID: MESA-DD6-660J
+  View your card: https://dmv.agentcommunity.org/c/MESA-DD6-660J/scout
+  A verification email was sent to ada@lovelace-labs.example — the link must be clicked to complete registration.
+```
+
+4. Report back to the user, in priority order: the card permalink, the reminder to click the verification email, and the share suggestions from "After registration" below. Remind them the pre-registration is free and non-binding — the `.agent` TLD is pending ICANN approval and the name may change before launch.
+
+If the name is taken or invalid, the CLI prints the reason; suggest a variant (e.g. `scout-labs`) and re-run.
+
 ## After registration
 
 When registration succeeds, the CLI prints (in priority order):
