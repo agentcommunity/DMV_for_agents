@@ -82,16 +82,24 @@ A complete registration, end to end. The user says: *"Register scout.agent for m
 bunx dmv-agent register --name scout --email ada@lovelace-labs.example --operator "Ada Lovelace Labs"
 ```
 
-3. The CLI responds:
+3. The CLI responds with a framed green terminal card (abridged — the full
+   output also includes SPREAD THE WORD, ADD A BADGE, and SAVE CARD sections):
 
 ```
-✓ Pre-registered scout.agent
-  Certificate ID: MESA-DD6-660J
-  View your card: https://dmv.agentcommunity.org/c/MESA-DD6-660J/scout
-  A verification email was sent to ada@lovelace-labs.example — the link must be clicked to complete registration.
+✓ PRE-REGISTRATION COMPLETE
+
+Certificate:  MESA-DD6-660J
+Domain:       scout.agent
+
+VIEW YOUR CARD
+Your holographic pre-registration card is ready.
+  →  dmv.agentcommunity.org/c/MESA-DD6-660J/scout
+
+Verify your email to validate this pre-registration.
+Check: ada@lovelace-labs.example
 ```
 
-4. Report back to the user, in priority order: the card permalink, the reminder to click the verification email, and the share suggestions from "After registration" below. Remind them the pre-registration is free and non-binding — the `.agent` TLD is pending ICANN approval and the name may change before launch.
+4. Report back to the user following the "After registration" priority below: the card permalink and the share suggestions first, then the reminder that the emailed verification link must be clicked to validate the pre-registration. Remind them it is free and non-binding — the `.agent` TLD is pending ICANN approval and the name may change before launch.
 
 If the name is taken or invalid, the CLI prints the reason; suggest a variant (e.g. `scout-labs`) and re-run.
 
