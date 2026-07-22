@@ -205,16 +205,16 @@ export async function handleCertificateLookup(
     console.error('[certificate-lookup] Cloudflare limiter failed', { error });
   }
 
-  const now = Date.now();
-  const reset = secondsUntilNextMinute(now);
   let ipHash: string;
   try {
     ipHash = await hashIp(ip);
   } catch (error) {
     console.error('[certificate-lookup] IP hashing failed', { error });
-    return jsonResponse(unavailableResult(id), 503, 0, reset);
+    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute());
   }
 
+  const now = Date.now();
+  const reset = secondsUntilNextMinute(now);
   const minuteBucket = Math.floor(now / 60_000);
   const bucketKey = `dmv:lookup:v1:${ipHash}:${minuteBucket}`;
   const kvLimit = await consumeKvBucket(

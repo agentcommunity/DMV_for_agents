@@ -360,6 +360,25 @@ test('maps SHA-256 digest rejection to unavailable before cache or upstream', as
   assertPrivateNoStore(response);
 });
 
+test('selects the wall-clock bucket after a delayed SHA-256 digest', async (t) => {
+  let now = 1_752_537_659_000;
+  const digest = crypto.subtle.digest.bind(crypto.subtle);
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(crypto.subtle, 'digest', async (algorithm, data) => {
+    now += 1_000;
+    return await digest(algorithm, data);
+  });
+  const { env, cooldownKv } = createEnv();
+  const upstream = createFetch([new Response(null, { status: 404 })]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('RateLimit-Reset'), '60');
+  assert.equal(cooldownKv.writes.length, 1);
+  assert.equal(cooldownKv.writes[0].key.endsWith(`:${Math.floor(now / 60_000)}`), true);
+});
+
 test('returns 429 after 30 sequential KV-counted lookups', async (t) => {
   t.mock.method(Date, 'now', () => 1_752_537_600_000);
   const rawIp = '198.51.100.42';
