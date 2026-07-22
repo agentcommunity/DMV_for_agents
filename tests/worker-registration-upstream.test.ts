@@ -35,17 +35,18 @@ test('passes through a normal 201 registration response and strips unsafe header
   assert.equal(response.headers.get('Set-Cookie'), null);
   assert.equal(response.headers.get('Connection'), null);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].init?.redirect, 'error');
+  assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
 });
 
-test('maps a registration upstream redirect response to a safe error', async () => {
+test('fails closed for a registration upstream redirect without following it or forwarding the secret', async () => {
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+  const redirectTarget = 'https://redirect.example.test/collect-secret';
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
     return new Response(null, {
       status: 307,
-      headers: { Location: 'https://redirect.example.test/collect-secret' },
+      headers: { Location: redirectTarget },
     });
   }) as typeof fetch;
 
@@ -65,16 +66,17 @@ test('maps a registration upstream redirect response to a safe error', async () 
     message: 'Registration is temporarily unavailable. Please try again shortly.',
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].init?.redirect, 'error');
+  assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
+  assert.ok(calls.every(({ input }) => input !== redirectTarget));
 });
 
-test('rejects a registration upstream redirect without forwarding the secret again', async (t) => {
+test('maps a registration upstream fetch rejection to unavailable with manual redirect mode', async (t) => {
   t.mock.method(console, 'error', () => undefined);
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
-    throw new TypeError('redirect mode is error');
+    throw new TypeError('network fetch failed');
   }) as typeof fetch;
 
   const response = await fetchRegistrationUpstream(
@@ -96,6 +98,6 @@ test('rejects a registration upstream redirect without forwarding the secret aga
     message: 'Registration is temporarily unavailable. Please try again shortly.',
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].init?.redirect, 'error');
+  assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
 });

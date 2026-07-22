@@ -302,7 +302,7 @@ export async function handleCertificateLookup(
       {
         method: 'GET',
         headers: { 'x-dmv-proxy': secret },
-        redirect: 'error',
+        redirect: 'manual',
         signal: controller.signal,
       },
     );

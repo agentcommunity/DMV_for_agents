@@ -289,13 +289,14 @@ test('rejects a whitespace-only upstream agent name without caching it', async (
   assertPrivateNoStore(response);
 });
 
-test('maps an upstream redirect response to unavailable without forwarding the secret again', async (t) => {
+test('fails closed for an upstream redirect without following it or forwarding the secret', async (t) => {
   t.mock.method(console, 'error', () => undefined);
   const { env, badgeKv } = createEnv();
+  const redirectTarget = 'https://redirect.example.test/collect-secret';
   const upstream = createFetch([
     new Response(null, {
       status: 302,
-      headers: { Location: 'https://redirect.example.test/collect-secret' },
+      headers: { Location: redirectTarget },
     }),
   ]);
 
@@ -304,19 +305,20 @@ test('maps an upstream redirect response to unavailable without forwarding the s
   assert.equal(response.status, 503);
   assert.equal((await readJson(response)).status, 'unavailable');
   assert.equal(upstream.calls.length, 1);
-  assert.equal(upstream.calls[0].init?.redirect, 'error');
+  assert.equal(upstream.calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(upstream.calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
+  assert.ok(upstream.calls.every(({ input }) => input !== redirectTarget));
   assert.equal(badgeKv.writes.length, 0);
   assertPrivateNoStore(response);
 });
 
-test('maps an upstream redirect rejection to unavailable without forwarding the secret again', async (t) => {
+test('maps an upstream fetch rejection to unavailable with manual redirect mode', async (t) => {
   t.mock.method(console, 'error', () => undefined);
   const { env, badgeKv } = createEnv();
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
-    throw new TypeError('redirect mode is error');
+    throw new TypeError('network fetch failed');
   }) as typeof fetch;
 
   const response = await handleCertificateLookup(lookupRequest(), env, fetchImpl);
@@ -324,7 +326,7 @@ test('maps an upstream redirect rejection to unavailable without forwarding the 
   assert.equal(response.status, 503);
   assert.equal((await readJson(response)).status, 'unavailable');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].init?.redirect, 'error');
+  assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
   assert.equal(badgeKv.writes.length, 0);
   assertPrivateNoStore(response);
