@@ -17,9 +17,9 @@ interface LookupEnv {
   DMV_PROXY_SECRET?: string;
 }
 
-type CertificateLookupStatus = 'invalid_format' | 'not_found' | 'issued' | 'unavailable';
+export type CertificateLookupStatus = 'invalid_format' | 'not_found' | 'issued' | 'unavailable';
 
-interface CertificateLookupResult {
+export interface CertificateLookupResult {
   certificate_id: string;
   status: CertificateLookupStatus;
   valid_format: boolean;
@@ -257,6 +257,7 @@ export async function handleCertificateLookup(
       {
         method: 'GET',
         headers: { 'x-dmv-proxy': secret },
+        redirect: 'error',
         signal: controller.signal,
       },
     );
@@ -283,9 +284,9 @@ export async function handleCertificateLookup(
     const upstreamRecord = upstreamBody as Record<string, unknown>;
     if (
       typeof upstreamRecord.certificate_id !== 'string'
-      || upstreamRecord.certificate_id.length === 0
+      || upstreamRecord.certificate_id !== id
       || typeof upstreamRecord.agent_name !== 'string'
-      || upstreamRecord.agent_name.length === 0
+      || upstreamRecord.agent_name.trim().length === 0
     ) {
       return jsonResponse(unavailableResult(id), 503, remaining, reset);
     }

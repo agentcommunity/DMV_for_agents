@@ -265,9 +265,14 @@ Format:  WORD-XXX-XXXC
 
 - Same inputs → same ID (deterministic)
 - Anyone can verify offline (check digit, ~10 lines in any language)
-- Cannot be enumerated or predicted (not sequential)
+- Non-sequential IDs make blind guessing harder; the planned public lookup also
+  rate-limits attempts, which mitigates rather than eliminates enumeration risk
 
 ## Security model
+
+The lookup components below are implementation-ready but unpublished as of
+2026-07-22. They become the production boundary only after Task 7 records the
+deployed DMV commit SHA and live smoke evidence.
 
 ```
 Principle: never trust the client.

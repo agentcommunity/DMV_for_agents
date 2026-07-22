@@ -34,15 +34,18 @@ To check DMV endpoint readiness without registering: `bunx dmv-agent doctor` or 
 
 MCP server also available for tool-based integration — tools: `dmv_doctor`, `register_agent`, and `verify_certificate`. See [npm package docs](https://www.npmjs.com/package/dmv-agent).
 
-## Live certificate lookup
+## Certificate lookup (implementation ready; unpublished)
 
-The only public network lookup endpoint is:
+As of 2026-07-22, the Worker and Edge changes are implementation-ready but
+unpublished. Do not depend on the route until Task 7 records a deployed DMV
+commit SHA and live smoke evidence. Once published, the only public network
+lookup endpoint will be:
 
 `GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J`
 
-It accepts certificate IDs only. Domain lookup and direct calls to the Supabase
-`lookup-agent` function are unsupported; the Edge Function is a secret-gated
-internal Worker upstream. The public Worker allows 30 requests per 60 seconds per
+It accepts certificate IDs only. The staged Edge change removes domain lookup
+and makes `lookup-agent` a secret-gated internal Worker upstream. The public
+Worker implementation allows 30 requests per 60 seconds per
 IP, caches issued results internally for 300 seconds and not-found results for 60
 seconds, and sends responses as `private, no-store`.
 

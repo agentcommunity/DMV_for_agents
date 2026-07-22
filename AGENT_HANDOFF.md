@@ -1,8 +1,8 @@
 # Agent Handoff — DMV API Hardening (updated 2026-07-22)
 
-Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This file is the most recent state snapshot; the rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) are aligned with the world this file describes, including `SECURITY.md`'s public `/api/lookup` route inventory and internal secret-gated `lookup-agent` boundary.
+Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This file is the most recent state snapshot; the rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) distinguish the live registration boundary from the implementation-ready but unpublished certificate lookup work.
 
-## Current production state — everything works
+## Current production state — registration live; lookup unpublished
 
 ```
 DMV worker         https://dmv.agentcommunity.org         /api/register live end-to-end
@@ -17,9 +17,9 @@ DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate acti
 
 npm                @agentcommunity/dmv-agent@0.2.0         published, routes through /api/register
 
-Lookup contract    GET /api/lookup on DMV Worker          only public network lookup; certificate ID only
-                                                           30/60s/IP; issued cache 300s, not-found 60s
-                                                           six public fields; direct Edge access unsupported
+Lookup branch      GET /api/lookup + lookup-agent changes  implementation-ready, not published
+                                                           Task 7 still needs deployed SHA + live smoke evidence
+                                                           do not claim the direct Edge gate is closed yet
 
 DMV main           latest as of this handoff               see `git log` for the current HEAD
 
@@ -31,14 +31,16 @@ PAGE main          shared Supabase project                 hardened independentl
 
 Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentCommunity_PAGE`) → forward to Supabase `register-agent` edge function with the `x-dmv-proxy` header set to the `DMV_PROXY_SECRET` shared secret (the public `v1` constant was retired 2026-05-29). CLI/MCP path: validate JSON → require `machine_fingerprint` → same shared limiters → DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`, key `dmv:register:fingerprint:<sha256>`) → forward. CAPTCHA always runs before shared counters so invalid tokens can't burn quota. Supabase edge function verifies the `x-dmv-proxy` header (rejecting direct-to-Supabase calls with 403 `direct_access_deprecated`), validates input again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set — **crucially, not setting `status`**, because the PAGE schema uses `certificate_id IS NOT NULL` as the DMV-row marker (see the quirks section below).
 
-Live certificate verification follows the same boundary: public clients use only
+The staged certificate-verification implementation follows the same boundary.
+After Task 7 publication, public clients will use only
 `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The Worker validates
 the check digit, enforces 30 requests/60s/IP with `RL_CERT_LOOKUP` plus an
 authoritative hashed-IP KV bucket, caches issued results for 300 seconds and
 not-found results for 60 seconds, and returns only `certificate_id`, `status`,
 `valid_format`, `issued`, `agent_name`, and `certificate_url`. The `lookup-agent`
-Edge Function is an internal `DMV_PROXY_SECRET`-gated upstream; direct calls and
-domain lookup are unsupported. `issued: true` means a matching registration row
+Edge Function change makes it an internal `DMV_PROXY_SECRET`-gated upstream;
+direct calls and domain lookup will be unsupported after deployment.
+`issued: true` means a matching registration row
 exists, not that email verification, `.agent` allocation, or DNS delegation is done.
 
 ## Quirks — things that bit us, don't re-learn the hard way
@@ -91,7 +93,9 @@ documented direct lookup before its public Worker replacement is available.
 
 ### High (bug/incident risk)
 
-Nothing open. Everything critical shipped and verified in production.
+1. **Publish certificate lookup in Task 7.** Record the deployed DMV commit SHA,
+   then capture live smoke evidence for issued/not-found/invalid outcomes and
+   the direct Edge 403 boundary before describing the lookup work as live.
 
 ### Medium (debt / hygiene)
 
@@ -111,7 +115,7 @@ Nothing open. Everything critical shipped and verified in production.
    ```
    If rows exist, delete them. The corresponding `public.registrations` and `auth.users` rows were already cleaned up by the user on 2026-04-09.
 
-4. **Historical `llms.txt` lookup gap (resolved 2026-07-22)** — PR #8 removed a broken `/api/lookup` reference while no Worker route existed. The Worker route now exists and `llms.txt` documents it as the only public lookup. Do not restore direct Edge or domain-query examples.
+4. **Historical `llms.txt` lookup gap (implementation ready, not yet deployed)** — PR #8 removed a broken `/api/lookup` reference while no Worker route existed. This branch restores the Worker route and updates `llms.txt`, but production status remains unresolved until Task 7 deploy evidence exists. Do not restore direct Edge or domain-query examples.
 
 5. **PAGE member count hygiene** — DMV rows land with `status = 'pending_profile'` (the DB default). If PAGE's admin stats or homepage counts treat all `pending_profile` rows as regular members, they'll inflate once DMV sees real traffic. Audit PAGE member count queries and decide whether to exclude unclaimed DMV rows (e.g., `WHERE certificate_id IS NULL OR (user_id IS NOT NULL AND auth_user_email_verified)`).
 

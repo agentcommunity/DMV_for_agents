@@ -33,7 +33,7 @@ bunx dmv-agent register \
 # Verify a certificate ID (offline, no network)
 bunx dmv-agent verify MESA-DD6-660J
 
-# Check whether the certificate was issued (public Worker, certificate ID only)
+# After Task 7 publication, check issuance (public Worker, certificate ID only)
 curl "https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J"
 
 # Check the public DMV surface without submitting a valid registration
@@ -239,8 +239,14 @@ verifyCertificateId('MESA-DD6-660J'); // true
 - **Edge function backstop** — Supabase still validates, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), and enforces the unique-cert-ID constraint.
 - **Pre-registration model** — domain is NOT unique. Multiple parties can pre-register interest in the same name. Certificate ID IS unique (same user + agent + type = same cert).
 - **Email verification** — pre-registration is pending until the operator clicks the verification link.
-- **Content-addressed IDs** — deterministic hashes, not sequential. Cannot be enumerated or predicted.
-- **Worker-only live lookup** — public callers use `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The Supabase `lookup-agent` URL is a `DMV_PROXY_SECRET`-gated internal upstream and direct access is unsupported.
+- **Content-addressed IDs** — deterministic hashes, not sequential. This makes
+  blind guessing harder; the planned lookup rate limit mitigates but does not
+  eliminate enumeration risk.
+- **Worker-only lookup (implementation ready; unpublished)** — after Task 7
+  records a deployed SHA and live smoke evidence, public callers will use
+  `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The staged
+  Supabase `lookup-agent` change makes that URL a `DMV_PROXY_SECRET`-gated
+  internal upstream.
 
 ## API reference
 
@@ -279,7 +285,9 @@ The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP cl
 
 ### GET /api/lookup
 
-The only public network lookup endpoint is:
+**Status (2026-07-22): implementation-ready but unpublished.** Do not depend on
+this route until Task 7 records the deployed DMV commit SHA and live smoke
+evidence. Once published, the only public network lookup endpoint will be:
 
 ```http
 GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J
@@ -304,9 +312,9 @@ seconds per IP before reading its cache. Issued results are cached internally fo
 Those are the only result fields. `issued: true` means a matching DMV
 registration row exists; it does not mean the operator completed email
 verification, the requested `.agent` name was allocated, or DNS delegation
-exists. Domain enumeration is removed. The Supabase `lookup-agent` URL is an
-internal Worker upstream protected by `DMV_PROXY_SECRET`; direct calls are
-unsupported and return 403.
+exists. Domain enumeration is removed from the staged contract. After Task 7,
+the Supabase `lookup-agent` URL will be an internal Worker upstream protected by
+`DMV_PROXY_SECRET`; direct calls will be unsupported and return 403.
 
 | HTTP | Result |
 |------|--------|

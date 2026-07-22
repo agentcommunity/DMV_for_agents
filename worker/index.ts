@@ -23,6 +23,7 @@ import { Container, getContainer } from '@cloudflare/containers';
 import { handleCertificateLookup } from './certificate-lookup';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import { incrementKvCooldown } from './rate-limit-kv';
+import { fetchRegistrationUpstream } from './registration-upstream';
 import { normalizeAgentName, validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
 
 // Cloudflare Containers ship as Durable Objects under the hood.
@@ -925,18 +926,6 @@ const REGISTER_FORWARD_REQUEST_HEADERS = [
   'user-agent',
 ] as const;
 
-const REGISTER_RESPONSE_HEADERS_TO_STRIP = new Set([
-  'set-cookie',
-  'connection',
-  'transfer-encoding',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailers',
-  'upgrade',
-]);
-
 function emitRegisterAnalytics(
   env: Env,
   tier: string,
@@ -1116,19 +1105,13 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
     machine_fingerprint: parsedBody.machine_fingerprint,
   };
 
-  const upstream = await fetch(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
+  const upstream = await fetchRegistrationUpstream(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
     method: 'POST',
     headers: upstreamHeaders,
     body: JSON.stringify(upstreamBody),
   });
 
-  const bodyText = await upstream.text();
-  const responseHeaders = new Headers();
-  upstream.headers.forEach((value, key) => {
-    if (!REGISTER_RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
-      responseHeaders.set(key, value);
-    }
-  });
+  const bodyText = await upstream.clone().text();
 
   emitRegisterAnalytics(
     env,
@@ -1138,10 +1121,7 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
     bodyText.length,
   );
 
-  return new Response(bodyText, {
-    status: upstream.status,
-    headers: responseHeaders,
-  });
+  return upstream;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

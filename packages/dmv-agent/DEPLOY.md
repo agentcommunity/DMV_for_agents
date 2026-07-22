@@ -71,6 +71,10 @@ Three edge functions live in `supabase/functions/`:
 | `lookup-agent` | GET | Internal Worker upstream — secret-gated lookup by certificate ID only |
 | `badge` | GET | SVG badge generator (flat for READMEs, card for websites) |
 
+The certificate-lookup Worker and Edge changes are implementation-ready but
+unpublished as of 2026-07-22. Complete the ordered deployment below and record
+the deployed SHA plus live smoke evidence before describing them as production.
+
 `DMV_PROXY_SECRET` must be the same generated secret on the Cloudflare Worker
 and the Supabase project. Never put its value in `.env.example`, documentation,
 shell history, or client configuration. The Worker also requires
@@ -184,7 +188,7 @@ curl -X POST .../api/register -H 'Content-Type: application/json' \
 ```bash
 BASE=https://dmv.agentcommunity.org
 
-# Only public live lookup: by certificate ID through the Worker → 200 JSON
+# After Task 7 publication: certificate ID through the Worker → 200 JSON
 curl "$BASE/api/lookup?id=MESA-DD6-660J"
 
 # Domain enumeration is removed; do not send requested names to this endpoint.
@@ -332,7 +336,10 @@ These are noted for future work, not needed for go-live:
 - [ ] **Link/visit tracking** — Track permalink visits (`/c/CERT-ID/agent-name`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
 - [x] **Email verification flow** — Magic link sent by agentcommunity.org trigger (on_dmv_registration). New users get magic link + certificate email. Existing users get certificate email only.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
-- **Historical:** domain lookup once existed on `lookup-agent`; it has been removed to prevent enumeration. Public verification is certificate-ID-only through Worker `/api/lookup`.
+- **Staged lookup hardening:** domain lookup is removed from `lookup-agent` to
+  reduce enumeration exposure. After Task 7 publication, public verification
+  will be certificate-ID-only through Worker `/api/lookup`; the 30/60s/IP
+  limits mitigate rather than eliminate enumeration risk.
 - [x] **Badge by cert ID** — `badge` edge function (domain lookup deprecated)
 - [ ] **Real OG images** — server-side card rendering for social media previews (front face of HoloCard as static PNG)
 - [ ] **Python SDK** — thin wrapper that shells out to `bunx` for cross-language support

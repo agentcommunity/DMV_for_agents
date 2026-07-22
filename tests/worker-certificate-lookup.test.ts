@@ -202,6 +202,74 @@ test('returns issued with a canonical permalink for an upstream row', async () =
   assertPrivateNoStore(response);
 });
 
+test('rejects an upstream certificate ID mismatch without caching it', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    Response.json({ certificate_id: 'MESA-DD6-660K', agent_name: 'mesa-agent' }),
+  ]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(badgeKv.writes.length, 0);
+  assertPrivateNoStore(response);
+});
+
+test('rejects a whitespace-only upstream agent name without caching it', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    Response.json({ certificate_id: VALID_ID, agent_name: '   ' }),
+  ]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(badgeKv.writes.length, 0);
+  assertPrivateNoStore(response);
+});
+
+test('maps an upstream redirect response to unavailable without forwarding the secret again', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    new Response(null, {
+      status: 302,
+      headers: { Location: 'https://redirect.example.test/collect-secret' },
+    }),
+  ]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(upstream.calls.length, 1);
+  assert.equal(upstream.calls[0].init?.redirect, 'error');
+  assert.equal(new Headers(upstream.calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
+  assert.equal(badgeKv.writes.length, 0);
+  assertPrivateNoStore(response);
+});
+
+test('maps an upstream redirect rejection to unavailable without forwarding the secret again', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
+  const { env, badgeKv } = createEnv();
+  const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ input, init });
+    throw new TypeError('redirect mode is error');
+  }) as typeof fetch;
+
+  const response = await handleCertificateLookup(lookupRequest(), env, fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init?.redirect, 'error');
+  assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
+  assert.equal(badgeKv.writes.length, 0);
+  assertPrivateNoStore(response);
+});
+
 test('maps upstream 404 to a cached 200 not_found result', async () => {
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([new Response('not found', { status: 404 })]);

@@ -84,7 +84,7 @@ being served.
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
 | `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint for browser, CLI, MCP, and JS API. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (server-side hostname + `dmv_register` action check) → shared CF rate limiters → forward to Supabase. CLI/MCP path: validate JSON → require `machine_fingerprint` → shared CF rate limiters → DMV-local KV fingerprint cooldown → forward. Anti-abuse ordering matches `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4 — CAPTCHA always runs before shared counters |
-| `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | Only public live certificate lookup. Certificate IDs only; domain lookup is removed. Valid requests are limited to 30/60s/IP before a KV cache read. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
+| `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | Implementation-ready, unpublished route. After Task 7 deploy SHA + live smoke evidence, this becomes the only public certificate lookup. Certificate IDs only; domain lookup is removed. Valid requests are limited to 30/60s/IP before a KV cache read. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
 | `/healthz` | Worker | `{ worker, container }` health probe — pings the container too |
@@ -180,7 +180,9 @@ open test-harness/output/index.html
 2. `wrangler deploy` — builds the container image, pushes it to the CF
    registry, and rolls out the Worker.
 
-Lookup rollout order is non-negotiable: configure the same generated
+The lookup changes are implementation-ready but unpublished as of 2026-07-22;
+do not call this boundary live until Task 7 records the deployed SHA and smoke
+evidence. Lookup rollout order is non-negotiable: configure the same generated
 `DMV_PROXY_SECRET` on Cloudflare and Supabase, confirm the Worker bindings
 `RL_CERT_LOOKUP`, `BADGE_CACHE_KV`, and `REGISTER_COOLDOWN_KV`, deploy the
 Worker first, and only then deploy the secret-gated `lookup-agent` Edge
@@ -332,10 +334,12 @@ clients.
   `direct_access_deprecated`. `/api/register` on the worker is the only
   path that reaches validation.
 
-- **Certificate lookup exposure** — *Closed 2026-07-22.* The only public
-  lookup is Worker `GET /api/lookup?id=CERT-ID`. The `lookup-agent` Edge
-  Function uses the same `DMV_PROXY_SECRET` gate, rejects direct calls before
-  database client creation, and no longer accepts domain queries.
+- **Certificate lookup exposure** — *Implementation ready; unresolved in
+  production.* The planned public lookup is Worker
+  `GET /api/lookup?id=CERT-ID`. The staged `lookup-agent` Edge change uses the
+  same `DMV_PROXY_SECRET` gate, rejects direct calls before database client
+  creation, and removes domain queries. This gap is not closed until Task 7
+  records a deployed SHA and live smoke evidence.
 
 - **DMV-branded OTP email flow** — custom branding via
   `admin.generateLink()` + Resend direct send is future work. See
