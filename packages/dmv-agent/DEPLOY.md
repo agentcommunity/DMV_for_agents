@@ -96,18 +96,19 @@ Docker-capable environment.
 
 Deploy in this order:
 
-1. Record the merged `main` SHA, the currently deployed Worker version, and the
-   target Worker version in the launch notes. In the Cloudflare account, confirm
-   that native rate-limit namespace `1002` is allocated to `RL_CERT_LOOKUP` and
-   does not collide with another account-wide binding. Confirm `BADGE_CACHE_KV`,
-   `CERT_LOOKUP_LIMITER`, the v1/v2 Durable Object migrations, and the shared
-   `DMV_PROXY_SECRET` are configured without printing the secret.
-2. Merge to `main` and use the Cloudflare Git integration's automatic build as
-   the single authoritative Worker deploy path. Watch that build and capture its
-   deployed commit SHA/version. If no automatic build starts, first confirm in
-   the dashboard that an automatic build/deploy is neither active nor already
-   started, then use `pnpm cf:deploy` once as the fallback. Never run the
-   automatic and manual paths concurrently.
+1. Before merging, record the target feature-branch SHA and the currently
+   deployed production Worker SHA/version in the launch notes. In the
+   Cloudflare account, confirm that native rate-limit namespace `1002` is
+   allocated to `RL_CERT_LOOKUP` and does not collide with another account-wide
+   binding. Confirm `BADGE_CACHE_KV`, `CERT_LOOKUP_LIMITER`, the v1/v2 Durable
+   Object migrations, and the shared `DMV_PROXY_SECRET` are configured without
+   printing the secret.
+2. Merge to `main`, record the resulting merged `main` SHA, and use the Cloudflare
+   Git integration's automatic build as the single authoritative Worker deploy
+   path. Watch that build and capture its deployed commit SHA/version. If no
+   automatic build starts, first confirm in the dashboard that an automatic
+   build/deploy is neither active nor already started, then use `pnpm cf:deploy`
+   once as the fallback. Never run the automatic and manual paths concurrently.
 3. Before changing Supabase, smoke `/healthz`, an existing card and badge,
    validation-only registration, invalid lookup (`400`), and a known valid-format
    lookup. The valid-format lookup is expected to be a brief `503 unavailable`

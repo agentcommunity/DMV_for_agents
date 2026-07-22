@@ -209,9 +209,14 @@ curl -X POST https://dmv.agentcommunity.org/api/register \
 # or 400 agent_name must be at least 3 characters (at validation stage)
 ```
 
-**Deploy the DMV worker manually if CF git integration isn't triggering:**
+**Manual Worker fallback only if the Cloudflare Git build did not trigger:**
+
+First prove in the Cloudflare dashboard that an automatic build/deployment is
+neither active nor already started. Then use the canonical fallback exactly
+once; never run it concurrently with an automatic build:
+
 ```bash
-pnpm cf:build && pnpm exec wrangler deploy
+pnpm cf:deploy
 ```
 
 For lookup changes, deploy this Worker step first. Then deploy the internal

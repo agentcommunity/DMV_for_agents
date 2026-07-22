@@ -218,10 +218,21 @@ the Worker's fail-closed 503 in place and roll Edge forward; never reopen legacy
 direct access. Full recovery and evidence steps are in
 `packages/dmv-agent/DEPLOY.md`.
 
-Only after every smoke passes, change `README.md`, `llms.txt`, `index.html`, this
-file, `AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`, and `AGENT_HANDOFF.md` from
-unpublished to live, then commit and push that status/evidence update. Never
-record the secret in this repository or pass it to clients.
+Only after every smoke passes, change every active status surface from
+unpublished to live: `README.md`, `llms.txt`, `index.html`, `CLOUDFLARE.md`,
+`AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`, `AGENT_HANDOFF.md`, `AGENTS.md`,
+`CLAUDE.md`, `ARCHITECTURE.md`, `SECURITY.md`, and
+`packages/dmv-agent/README.md`. Commit and push that evidence-backed status
+update.
+
+Because those public docs/assets are part of the Worker bundle, the status
+commit triggers a second automatic production deployment. Observe the build for
+that exact commit through completion and capture its final commit SHA, Worker
+version/deployment ID, timestamps, and result. Against that final version,
+re-run at minimum one issued or typed-not-found lookup plus `/healthz`, an
+existing card, an existing badge, and validation-only registration. Do not hand
+off or declare the lookup live until this exact deployment and its final smokes
+pass. Never record the secret in this repository or pass it to clients.
 
 ## Operational notes
 
