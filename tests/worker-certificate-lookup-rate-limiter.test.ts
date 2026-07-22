@@ -64,11 +64,9 @@ async function loadRateLimiterClass(): Promise<new (state: DurableObjectState) =
   }
 }
 
-function decisionRequest(now: number): Request {
+function decisionRequest(): Request {
   return new Request('https://certificate-lookup-rate-limiter.internal/consume', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ now }),
   });
 }
 
@@ -76,13 +74,14 @@ async function readDecision(response: Response): Promise<Record<string, unknown>
   return await response.json() as Record<string, unknown>;
 }
 
-test('calls 1-30 are allowed with exact decreasing remaining and call 31 is denied', async () => {
+test('calls 1-30 are allowed with exact decreasing remaining and call 31 is denied', async (t) => {
+  t.mock.method(Date, 'now', () => 1_752_537_600_000);
   const RateLimiter = await loadRateLimiterClass();
   const storage = new FakeStorage();
   const limiter = new RateLimiter(createState(storage));
 
   for (let call = 1; call <= LIMIT; call += 1) {
-    const response = await limiter.fetch(decisionRequest(1_752_537_600_000));
+    const response = await limiter.fetch(decisionRequest());
     assert.equal(response.status, 200);
     assert.deepEqual(await readDecision(response), {
       allowed: true,
@@ -91,18 +90,21 @@ test('calls 1-30 are allowed with exact decreasing remaining and call 31 is deni
     });
   }
 
-  const denied = await limiter.fetch(decisionRequest(1_752_537_600_000));
+  const denied = await limiter.fetch(decisionRequest());
   assert.equal(denied.status, 200);
   assert.deepEqual(await readDecision(denied), { allowed: false, remaining: 0, reset: 60 });
 });
 
-test('a new wall-clock minute resets the counter', async () => {
+test('a new wall-clock minute resets the counter', async (t) => {
+  let now = 1_752_537_659_999;
+  t.mock.method(Date, 'now', () => now);
   const RateLimiter = await loadRateLimiterClass();
   const storage = new FakeStorage();
   const limiter = new RateLimiter(createState(storage));
 
-  await limiter.fetch(decisionRequest(1_752_537_659_999));
-  const response = await limiter.fetch(decisionRequest(1_752_537_660_000));
+  await limiter.fetch(decisionRequest());
+  now = 1_752_537_660_000;
+  const response = await limiter.fetch(decisionRequest());
 
   assert.deepEqual(await readDecision(response), { allowed: true, remaining: 29, reset: 60 });
   assert.deepEqual(storage.values.get(BUCKET_KEY), {
@@ -112,13 +114,14 @@ test('a new wall-clock minute resets the counter', async () => {
   });
 });
 
-test('serialized transactions prevent concurrent calls from losing increments', async () => {
+test('serialized transactions prevent concurrent calls from losing increments', async (t) => {
+  t.mock.method(Date, 'now', () => 1_752_537_600_000);
   const RateLimiter = await loadRateLimiterClass();
   const storage = new FakeStorage();
   const limiter = new RateLimiter(createState(storage));
 
   const responses = await Promise.all(
-    Array.from({ length: 31 }, () => limiter.fetch(decisionRequest(1_752_537_600_000))),
+    Array.from({ length: 31 }, () => limiter.fetch(decisionRequest())),
   );
   const decisions = await Promise.all(responses.map(readDecision));
 
@@ -127,7 +130,7 @@ test('serialized transactions prevent concurrent calls from losing increments', 
   assert.equal((storage.values.get(BUCKET_KEY) as StoredBucket).count, 30);
 });
 
-test('malformed method or body returns 400 without changing state', async () => {
+test('malformed method or any caller-supplied body returns 400 without changing state', async () => {
   const RateLimiter = await loadRateLimiterClass();
 
   for (const request of [
@@ -157,7 +160,37 @@ test('storage transaction failure rejects the internal request', async () => {
   storage.failTransactions = true;
   const limiter = new RateLimiter(createState(storage));
 
-  await assert.rejects(limiter.fetch(decisionRequest(1_752_537_600_000)), /transaction unavailable/);
+  await assert.rejects(limiter.fetch(decisionRequest()), /transaction unavailable/);
+});
+
+test('a delayed old request is charged to processing time and cannot reopen a full new-minute budget', async (t) => {
+  let now = 1_752_537_600_000;
+  t.mock.method(Date, 'now', () => now);
+  const RateLimiter = await loadRateLimiterClass();
+  const storage = new FakeStorage();
+  const limiter = new RateLimiter(createState(storage));
+
+  await limiter.fetch(decisionRequest());
+  const delayedOldRequest = decisionRequest();
+  assert.equal(delayedOldRequest.body, null);
+
+  now += MINUTE;
+  for (let call = 1; call <= LIMIT; call += 1) {
+    const response = await limiter.fetch(decisionRequest());
+    assert.deepEqual(await readDecision(response), {
+      allowed: true,
+      remaining: LIMIT - call,
+      reset: 60,
+    });
+  }
+
+  const denied = await limiter.fetch(delayedOldRequest);
+  assert.deepEqual(await readDecision(denied), { allowed: false, remaining: 0, reset: 60 });
+  assert.deepEqual(storage.values.get(BUCKET_KEY), {
+    minute: Math.floor(now / MINUTE),
+    count: LIMIT,
+    resetAt: now + MINUTE,
+  });
 });
 
 test('alarm deletes expired state but preserves and rearms a fresh rollover bucket', async (t) => {
@@ -167,13 +200,13 @@ test('alarm deletes expired state but preserves and rearms a fresh rollover buck
   const storage = new FakeStorage();
   const limiter = new RateLimiter(createState(storage));
 
-  await limiter.fetch(decisionRequest(now));
+  await limiter.fetch(decisionRequest());
   now += MINUTE;
   await limiter.alarm();
   assert.equal(storage.values.has(BUCKET_KEY), false);
   assert.equal(storage.alarmAt, null);
 
-  await limiter.fetch(decisionRequest(now));
+  await limiter.fetch(decisionRequest());
   const freshBucket = storage.values.get(BUCKET_KEY);
   await limiter.alarm();
 

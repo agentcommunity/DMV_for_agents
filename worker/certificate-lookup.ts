@@ -168,7 +168,6 @@ function isIssuedEnvelope(record: Record<string, unknown>, requestedId: string):
 async function consumeExactRateLimit(
   namespace: DurableObjectNamespace,
   ipHash: string,
-  now: number,
 ): Promise<CertificateLookupRateLimitDecision | null> {
   try {
     const objectId = namespace.idFromName(ipHash);
@@ -176,8 +175,6 @@ async function consumeExactRateLimit(
     const response = await stub.fetch(
       new Request('https://certificate-lookup-rate-limiter.internal/consume', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ now }),
       }),
     );
     if (response.status !== 200) return null;
@@ -264,11 +261,10 @@ export async function handleCertificateLookup(
     console.error('[certificate-lookup] Cloudflare limiter failed', { error });
   }
 
-  const now = Date.now();
-  const exactLimit = await consumeExactRateLimit(env.CERT_LOOKUP_LIMITER, ipHash, now);
+  const exactLimit = await consumeExactRateLimit(env.CERT_LOOKUP_LIMITER, ipHash);
 
   if (!exactLimit) {
-    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute(now));
+    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute());
   }
   if (!exactLimit.allowed) {
     return jsonResponse(

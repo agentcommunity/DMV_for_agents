@@ -40,28 +40,12 @@ export class CertificateLookupRateLimiter {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
-    if (request.method !== 'POST') return badRequest();
+    if (request.method !== 'POST' || request.body !== null) return badRequest();
 
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return badRequest();
-    }
-    if (!body || typeof body !== 'object') return badRequest();
-    const record = body as Record<string, unknown>;
-    if (
-      Object.keys(record).length !== 1
-      || !Number.isSafeInteger(record.now)
-      || (record.now as number) < 0
-    ) {
-      return badRequest();
-    }
-
-    const now = record.now as number;
-    const minute = Math.floor(now / CERTIFICATE_LOOKUP_WINDOW_MILLISECONDS);
-    const resetAt = (minute + 1) * CERTIFICATE_LOOKUP_WINDOW_MILLISECONDS;
     const decision = await this.state.storage.transaction(async (transaction) => {
+      const now = Date.now();
+      const minute = Math.floor(now / CERTIFICATE_LOOKUP_WINDOW_MILLISECONDS);
+      const resetAt = (minute + 1) * CERTIFICATE_LOOKUP_WINDOW_MILLISECONDS;
       const stored = await transaction.get<unknown>(BUCKET_KEY);
       if (stored === undefined) {
         const next: StoredBucket = { minute, count: 1, resetAt };

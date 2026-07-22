@@ -393,6 +393,41 @@ test('rejects an unknown typed upstream status without caching it', async () => 
   assert.equal(badgeKv.writes.length, 0);
 });
 
+test('maps malformed HTTP-200 JSON to uncached unavailable', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    new Response('{', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  ]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(badgeKv.writes.length, 0);
+});
+
+test('maps extra-field typed envelopes to uncached unavailable', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    Response.json({ status: 'not_found', certificate_id: VALID_ID, extra: true }),
+    Response.json({
+      status: 'issued',
+      certificate_id: VALID_ID,
+      agent_name: 'mesa-agent',
+      domain: 'mesa-agent.agent',
+      extra: true,
+    }),
+  ]);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+    assert.equal(response.status, 503);
+    assert.equal((await readJson(response)).status, 'unavailable');
+  }
+  assert.equal(upstream.calls.length, 2);
+  assert.equal(badgeKv.writes.length, 0);
+});
+
 test('does not cache an upstream 500 and returns unavailable', async () => {
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([
@@ -519,14 +554,7 @@ test('maps SHA-256 digest rejection to unavailable before cache or upstream', as
   assertPrivateNoStore(response);
 });
 
-test('passes the post-hash wall clock to the exact Durable Object', async (t) => {
-  let now = 1_752_537_659_000;
-  const digest = crypto.subtle.digest.bind(crypto.subtle);
-  t.mock.method(Date, 'now', () => now);
-  t.mock.method(crypto.subtle, 'digest', async (algorithm, data) => {
-    now += 1_000;
-    return await digest(algorithm, data);
-  });
+test('sends a bodyless POST so the Durable Object owns the processing clock', async () => {
   const { env, durableLimiter } = createEnv();
   const upstream = createFetch([
     Response.json({ status: 'not_found', certificate_id: VALID_ID }),
@@ -537,7 +565,9 @@ test('passes the post-hash wall clock to the exact Durable Object', async (t) =>
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('RateLimit-Reset'), '60');
   assert.equal(durableLimiter.requests.length, 1);
-  assert.deepEqual(await durableLimiter.requests[0].json(), { now });
+  assert.equal(durableLimiter.requests[0].method, 'POST');
+  assert.equal(durableLimiter.requests[0].body, null);
+  assert.equal(durableLimiter.requests[0].headers.get('Content-Type'), null);
 });
 
 test('returns 429 after 30 exact Durable Object-counted lookups without exposing raw IP', async (t) => {
