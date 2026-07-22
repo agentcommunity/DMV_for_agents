@@ -165,7 +165,9 @@ The agent (or its operator) receives a **certificate email** (holographic card +
 
 ## Rate Limiting Architecture
 
-The Cloudflare Worker is the single anti-abuse choke point. The Supabase edge function trusts that anything reaching it has already cleared the worker's gates, and enforces that trust with the `x-dmv-proxy` shared-secret gate: it accepts only requests carrying the `DMV_PROXY_SECRET` value the worker sets (constant-time compared, fail-closed if unset). The earlier temporary direct-Supabase bypass for legacy CLI versions was **closed 2026-05-29** — the public `v1` constant is retired and any direct-to-Supabase call now returns 403 `direct_access_deprecated`.
+The Cloudflare Worker is the single public API and anti-abuse boundary. It owns both `POST /api/register` and `GET /api/lookup`; clients must use those Worker routes rather than Supabase function URLs. The `register-agent` and `lookup-agent` Edge Functions are internal Worker upstreams and require the worker-set `x-dmv-proxy` header to match `DMV_PROXY_SECRET` (constant-time compared, fail-closed if unset). Direct Supabase function URLs are unsupported and return 403 `direct_access_deprecated`.
+
+The earlier temporary direct-Supabase bypass for legacy registration clients was **closed 2026-05-29** — the public `v1` constant is retired. Certificate lookup has no direct-client compatibility path: the Worker owns public rate limiting, validation, and response shaping before it calls `lookup-agent`.
 
 Five effective layers on the register path, ordered cheapest-to-most-expensive:
 
@@ -339,6 +341,8 @@ The `register-agent` edge function restricts CORS to:
 
 CLI and MCP are not browser-based and don't send `Origin` headers, so CORS does not affect them. The `Vary: Origin` header prevents CDN cache poisoning.
 
+The `lookup-agent` Edge Function is an internal Worker upstream and does not expose permissive public CORS. Browser and agent clients use the Worker-owned `/api/lookup` route.
+
 ## Hosting & Infrastructure
 
 | Component | Hosted on | Notes |
@@ -346,9 +350,10 @@ CLI and MCP are not browser-based and don't send `Origin` headers, so CORS does 
 | Web UI (static) | Cloudflare Workers Static Assets (`dist/`) | index.html + JS/CSS/fonts/models, no SSR |
 | API routes (`/api/card`, `/api/og`) | Cloudflare Worker → L1 (`caches.default`) → R2 → Cloudflare Container | Both served by the same Skia renderer (`@napi-rs/canvas`); container only invoked on first miss |
 | Registration anti-abuse (`/api/register`) | Cloudflare Worker (`handleRegister`) | Turnstile + shared CF rate limits + DMV-local KV cooldown. Forwards to Supabase. |
+| Certificate verification (`/api/lookup`) | Cloudflare Worker (`handleCertificateLookup`) | Public lookup boundary with format validation, rate limiting, caching, and minimized responses. Forwards certificate IDs only to Supabase. |
 | Permalink crawler OG | Cloudflare Worker HTMLRewriter | `worker/index.ts handlePermalink` — streams index.html and injects per-card `og:*` / `twitter:*` tags for crawler UAs |
 | `/badge/*` | Cloudflare Worker proxy → Supabase Edge Function | `handleBadge` forwards with header hygiene + path-traversal defense |
-| Edge functions (register, lookup, badge) | Supabase Edge Functions (Deno) | Holds service role key. `register-agent` is now strictly an upstream from the worker (validation + cert ID + INSERT, no rate limiting). |
+| Edge functions (register, lookup, badge) | Supabase Edge Functions (Deno) | Holds service role key. `register-agent` and `lookup-agent` are internal Worker upstreams gated by `DMV_PROXY_SECRET`; direct function calls return 403. |
 | Database | Supabase PostgreSQL | RLS denies anon, service key bypasses |
 | Rate limiting (DMV) | Cloudflare Workers Rate Limiting API + Workers KV | `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` shared with `agentCommunity_PAGE` at the CF account level, `REGISTER_COOLDOWN_KV` is DMV-local. Upstash removed. |
 | NPM package | npm registry | `@agentcommunity/dmv-agent` + `dmv-agent` alias |
@@ -361,20 +366,21 @@ Principle: never trust the client.
 Client code:     validates → POST JSON → reads response
                  (no secrets, no DB access, just fetch())
 
-Worker:          validates → CAPTCHA (browser) or fingerprint (CLI/MCP)
-                 → shared CF rate limits → DMV-local KV cooldown
-                 → forward to Supabase
-                 (holds TURNSTILE_SECRET_KEY, owns anti-abuse)
+Worker:          validates → CAPTCHA/fingerprint for registration
+                 → rate limits registration and certificate lookup
+                 → forwards with x-dmv-proxy secret
+                 (holds TURNSTILE_SECRET_KEY, owns public API policy)
 
-Edge function:   validates again → lifetime cap → generates cert → INSERTs
-                 (holds service role key, validates upstream, no
-                  rate limiting — that's the worker's job now)
+Edge functions:  verify DMV_PROXY_SECRET before client creation
+                 → register: validate, cap, generate cert, INSERT
+                 → lookup: select certificate ID + domain only
+                 (hold service role key; not public API routes)
 
 Database:        RLS denies all anon access
                  (only reachable through edge function with service key)
 ```
 
-No database credentials exist in any client code — web, CLI, MCP, or JS API. The only public-facing URL for registration is `https://dmv.agentcommunity.org/api/register` on the worker. The Supabase edge function URL is also still public (legacy bypass for older CLI versions); closing it is tracked under "Known gaps" in `CLOUDFLARE.md`.
+No database credentials exist in any client code — web, CLI, MCP, or JS API. The public-facing URLs are `https://dmv.agentcommunity.org/api/register` for registration and `https://dmv.agentcommunity.org/api/lookup` for certificate verification. Direct `register-agent` and `lookup-agent` Supabase URLs are unsupported and return 403 unless the request carries the Worker's shared secret.
 
 ---
 
@@ -385,12 +391,13 @@ Everything below is shipped in this repo and ready to deploy:
 | Feature | Status | Where |
 |---------|--------|-------|
 | Worker `/api/register` proxy | Done | `worker/index.ts` `handleRegister` |
+| Worker `/api/lookup` certificate verification boundary | Done | `worker/index.ts`, `worker/certificate-lookup.ts` |
 | Cloudflare Turnstile (browser) | Done | `worker/index.ts` `verifyTurnstileToken`, `index.html` widget mount |
 | Shared CF rate limits with PAGE | Done | `wrangler.jsonc` `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` (ns 4005/4007) |
 | DMV-local KV fingerprint cooldown | Done | `worker/rate-limit-kv.ts`, `REGISTER_COOLDOWN_KV` binding |
 | Upstash Redis REMOVED from edge fn | Done | `supabase/functions/register-agent/index.ts` (-90 lines) |
 | Lifetime cap (5/12 per email) | Done | `supabase/functions/register-agent/index.ts` |
-| `x-dmv-proxy` shared-secret gate on `register-agent` (direct-access block) | Done | `supabase/functions/register-agent/index.ts` — requires the worker-set `DMV_PROXY_SECRET` header value (constant-time compared) on every non-OPTIONS request; the public `v1` constant was retired 2026-05-29 |
+| `x-dmv-proxy` shared-secret gate on `register-agent` and `lookup-agent` | Done | Both Edge Functions require the worker-set `DMV_PROXY_SECRET` value (constant-time compared, fail-closed); direct function URLs return 403 |
 | DMV uses DB default for `status` (no `provisional_dmv`) | Done | `supabase/functions/register-agent/index.ts` — commit `8d73924` removed the stale status line |
 | CORS restricted to known origins | Done | Same file |
 | Input length validation (all fields) | Done | Same file |
