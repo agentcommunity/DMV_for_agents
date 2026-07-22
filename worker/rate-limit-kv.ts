@@ -31,3 +31,31 @@ export async function incrementKvCooldown(
     return null
   }
 }
+
+export interface KvBucketResult {
+  allowed: boolean;
+  remaining: number;
+}
+
+/**
+ * Workers KV increments are race-tolerant rather than atomic; the binding remains
+ * the burst backstop while this limits sustained sequential abuse. Each write
+ * refreshes TTL, so fixed-window callers must include a wall-clock bucket in key.
+ */
+export async function consumeKvBucket(
+  kv: KVNamespace,
+  key: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<KvBucketResult | null> {
+  try {
+    const current = Number.parseInt((await kv.get(key)) ?? '0', 10);
+    if (current >= limit) return { allowed: false, remaining: 0 };
+    const next = current + 1;
+    await kv.put(key, String(next), { expirationTtl: windowSeconds });
+    return { allowed: true, remaining: Math.max(0, limit - next) };
+  } catch (error) {
+    console.error('[rate-limit-kv] consumeKvBucket failed', { key, error });
+    return null;
+  }
+}
