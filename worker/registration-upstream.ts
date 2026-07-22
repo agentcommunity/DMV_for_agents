@@ -26,7 +26,7 @@ export async function fetchRegistrationUpstream(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   try {
-    const upstream = await fetchImpl(input, { ...init, redirect: 'error' });
+    const upstream = await fetchImpl(input, { ...init, redirect: 'manual' });
     if (upstream.status >= 300 && upstream.status < 400) {
       return unavailableResponse();
     }
