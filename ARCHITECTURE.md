@@ -272,14 +272,19 @@ Format:  WORD-XXX-XXXC
 
 - Same inputs → same ID (deterministic)
 - Anyone can verify offline (check digit, ~10 lines in any language)
-- Non-sequential IDs make blind guessing harder; the planned public lookup also
+- Non-sequential IDs make blind guessing harder; the live public lookup also
   rate-limits attempts, which mitigates rather than eliminates enumeration risk
 
 ## Security model
 
-The lookup components below are implementation-ready but unpublished as of
-2026-07-22. They become the production boundary only after Task 8 records the
-deployed DMV commit SHA and live smoke evidence.
+The lookup components are the live production boundary as of 2026-07-22:
+merged `main` `fabafe6` (PR #20) deployed as Worker version
+`d9755e66-3883-4970-be84-a59307011f14` at `2026-07-22T12:01:52.501Z`.
+Smokes recorded issued `REEF-068-BD0Q`, not-found `ZZZZ-FFF-FFFD`, invalid
+`400`, exact 31st-call `429`, next-minute recovery, and secretless direct Edge
+`403 direct_access_deprecated`. No Supabase registration or member rows were
+deleted or mutated; the limiter/cache smokes intentionally wrote Durable
+Object/KV operational state.
 
 ```
 Principle: never trust the client.

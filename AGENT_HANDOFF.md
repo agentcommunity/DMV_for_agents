@@ -1,8 +1,8 @@
 # Agent Handoff — DMV API Hardening (updated 2026-07-22)
 
-Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This file is the most recent state snapshot; the rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) distinguish the live registration boundary from the implementation-ready but unpublished certificate lookup work.
+Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This is the current production snapshot: both registration and certificate lookup are live. The rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) record the production boundary and recovery rules.
 
-## Current production state — registration live; lookup unpublished
+## Current production state — registration and lookup live
 
 ```
 DMV worker         https://dmv.agentcommunity.org         /api/register live end-to-end
@@ -18,9 +18,10 @@ DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate acti
 npm                @agentcommunity/dmv-agent@0.2.1         published, routes through /api/register
                    dmv-agent@0.1.1 alias                  depends on @agentcommunity/dmv-agent ^0.2.1
 
-Lookup branch      GET /api/lookup + lookup-agent changes  implementation-ready, not published
-                                                           Task 8 still needs deployed SHA + live smoke evidence
-                                                           do not claim the direct Edge gate is closed yet
+Lookup boundary    GET /api/lookup + lookup-agent          live on main fabafe6 (PR #20)
+                                                           Worker d9755e66-3883-4970-be84-a59307011f14
+                                                           created 2026-07-22T12:01:52.501Z
+                                                           direct Edge gate verified 403
 
 DMV main           latest as of this handoff               see `git log` for the current HEAD
 
@@ -32,8 +33,8 @@ PAGE main          shared Supabase project                 hardened independentl
 
 Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentCommunity_PAGE`) → forward to Supabase `register-agent` edge function with the `x-dmv-proxy` header set to the `DMV_PROXY_SECRET` shared secret (the public `v1` constant was retired 2026-05-29). CLI/MCP path: validate JSON → require `machine_fingerprint` → same shared limiters → DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`, key `dmv:register:fingerprint:<sha256>`) → forward. CAPTCHA always runs before shared counters so invalid tokens can't burn quota. Supabase edge function verifies the `x-dmv-proxy` header (rejecting direct-to-Supabase calls with 403 `direct_access_deprecated`), validates input again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set — **crucially, not setting `status`**, because the PAGE schema uses `certificate_id IS NOT NULL` as the DMV-row marker (see the quirks section below).
 
-The staged certificate-verification implementation follows the same boundary.
-After Task 8 publication, public clients will use only
+The live certificate-verification boundary follows the same model. Public
+clients use only
 `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The Worker validates
 the check digit, applies coarse/eventually consistent `RL_CERT_LOOKUP` at 60/60,
 then uses one `CERT_LOOKUP_LIMITER` SQLite Durable Object per hashed IP for exact
@@ -42,8 +43,8 @@ and typed not-found results for 60 seconds in `BADGE_CACHE_KV`, and returns only
 `valid_format`, `issued`, `agent_name`, and `certificate_url`. The `lookup-agent`
 Edge Function change makes it an internal `DMV_PROXY_SECRET`-gated upstream with
 exact typed HTTP 200 `issued`/`not_found` envelopes; non-200 or malformed
-envelopes are unavailable and uncached.
-direct calls and domain lookup will be unsupported after deployment.
+envelopes are unavailable and uncached. Direct calls and domain lookup are
+unsupported.
 `issued: true` means a matching registration row
 exists, not that email verification, `.agent` allocation, or DNS delegation is done.
 
@@ -85,7 +86,7 @@ ID: `ec0cdc55c2f94267af84f0218c961a00` (preview: `dc0c4a98b4764d448f35872de11984
 
 `bunx dmv-agent register` installs `dmv-agent@0.1.1` (the unscoped alias), which depends on `@agentcommunity/dmv-agent^0.2.1`. The currently published scoped package is `0.2.1`. Publishing a compatible new scoped version can transparently update what alias users get, subject to that caret range. When publishing: `cd packages/dmv-agent && npm publish --access public`. Do NOT publish from the repo root — the root `package.json` has `"private": true` as a safety rail, but a missing private flag would ship 17 MB of everything. See `.gitignore` for `.worktrees/` exclusion that backstops this.
 
-### 8. Lookup deploy order is Worker first, then Edge
+### 8. Lookup deployment record and future order
 
 Set the same generated `DMV_PROXY_SECRET` on Cloudflare and Supabase without
 writing it to source. Require Docker/container-build gates on a capable host,
@@ -93,23 +94,22 @@ confirm account-wide native namespace `1002`, the lookup bindings, and v1/v2
 migrations, then merge `main`. Cloudflare Git automatic deploy is authoritative;
 manual deploy is a non-concurrent fallback only if auto deploy never starts.
 
-Worker first is intentional. Before Edge, route/binding smokes include invalid
-ID `400` and an expected brief `503 unavailable` for a valid-format ID against
-the legacy response. Then deploy only `lookup-agent --no-verify-jwt`; prove
-issued/not-found, direct secretless `403`, exact limit/rollover and real DO
-storage/alarm behavior, plus existing registration/health/card/badge smokes.
-Never roll back to pre-v2: preserve the migrations, DO export and binding in a
-roll-forward. If Worker fails, stop before Edge. If Edge fails after gating,
-keep the safe Worker `503` and roll Edge forward without reopening direct access.
-Finally update and push all unpublished status surfaces listed in DEPLOY.md.
+Worker first is intentional. The completed rollout recorded invalid `400`, then
+deployed only `lookup-agent --no-verify-jwt` and proved `REEF-068-BD0Q` issued,
+`ZZZZ-FFF-FFFD` not-found, direct secretless `403`, exact call-31 `429`, minute
+rollover, and health/card/badge/permalink/registration smokes. Never roll back
+to pre-v2: preserve migrations, DO export, and binding in a roll-forward. If a
+future Worker change fails, stop before Edge; if Edge fails after gating, keep
+the safe Worker `503` and roll Edge forward without reopening direct access.
+Update all status surfaces in DEPLOY.md after any future evidence-backed rollout.
 
 ## Residual TODOs — prioritize here next time
 
 ### High (bug/incident risk)
 
-1. **Publish certificate lookup in Task 8.** Record the deployed DMV commit SHA,
-   then capture live smoke evidence for issued/not-found/invalid outcomes and
-   the direct Edge 403 boundary before describing the lookup work as live.
+1. **Preserve the live lookup boundary.** Future changes must retain public
+   certificate-ID-only lookup, exact 30/60 enforcement, the direct Edge 403
+   gate, and the no-data-mutation verification discipline.
 
 ### Medium (debt / hygiene)
 
@@ -127,9 +127,14 @@ Finally update and push all unpublished status surfaces listed in DEPLOY.md.
    SELECT id, user_id, certificate_id, domain_name FROM public.user_domains
    WHERE certificate_id IN ('NEON-219-A55A', 'FLUX-79E-D61O');
    ```
-   If rows exist, delete them. The corresponding `public.registrations` and `auth.users` rows were already cleaned up by the user on 2026-04-09.
+   If rows exist, record the result and request explicit user approval before
+   any cleanup. Do not delete Supabase data as part of a diagnostic; escalate
+   the proposed target set and recovery plan instead.
 
-4. **Historical `llms.txt` lookup gap (implementation ready, not yet deployed)** — PR #8 removed a broken `/api/lookup` reference while no Worker route existed. This branch restores the Worker route and updates `llms.txt`, but production status remains unresolved until Task 8 deploy evidence exists. Do not restore direct Edge or domain-query examples.
+4. **Historical `llms.txt` lookup gap (closed 2026-07-22)** — PR #8 removed a
+   broken `/api/lookup` reference while no Worker route existed. The live route
+   is now restored and documented. Do not restore direct Edge or domain-query
+   examples.
 
 5. **PAGE member count hygiene** — DMV rows land with `status = 'pending_profile'` (the DB default). If PAGE's admin stats or homepage counts treat all `pending_profile` rows as regular members, they'll inflate once DMV sees real traffic. Audit PAGE member count queries and decide whether to exclude unclaimed DMV rows (e.g., `WHERE certificate_id IS NULL OR (user_id IS NOT NULL AND auth_user_email_verified)`).
 

@@ -71,9 +71,11 @@ Three edge functions live in `supabase/functions/`:
 | `lookup-agent` | GET | Internal Worker upstream — secret-gated lookup by certificate ID only |
 | `badge` | GET | SVG badge generator (flat for READMEs, card for websites) |
 
-The certificate-lookup Worker and Edge changes are implementation-ready but
-unpublished as of 2026-07-22. Complete the ordered deployment below and record
-the deployed SHA plus live smoke evidence before describing them as production.
+The certificate-lookup Worker and Edge changes are live as of 2026-07-22.
+Merged `main` `fabafe6` (PR #20, including the manual-redirect runtime fix) is
+deployed as Worker version `d9755e66-3883-4970-be84-a59307011f14`, created
+`2026-07-22T12:01:52.501Z`. The rollout record below is retained as the required
+order and recovery checklist for future changes.
 
 `DMV_PROXY_SECRET` must be the same generated secret on the Cloudflare Worker
 and the Supabase project. Never put its value in `.env.example`, documentation,
@@ -94,7 +96,23 @@ Any Docker CLI error text is a failed gate even if a wrapper later exits zero. T
 real Worker rollout must run in Cloudflare's build environment or another
 Docker-capable environment.
 
-Deploy in this order:
+### Completed rollout evidence
+
+The completed rollout used the order below. Final production results were:
+
+- `REEF-068-BD0Q` → `200 issued` (`masato`); `ZZZZ-FFF-FFFD` → `200 not_found`;
+  `INVALID` → `400`.
+- Exact limiter calls 1–30 were allowed; call 31 returned `429` with remaining
+  `0`; a next-minute call returned `200` with remaining `29`.
+- Secretless direct `lookup-agent` access returned `403 direct_access_deprecated`.
+- `/healthz` returned JSON `200`; badge returned SVG `200`; permalink returned
+  HTML `200`; card returned PNG `200`; validation-only `GET /api/register`
+  returned `405`.
+- No Supabase registration or member rows were deleted or mutated during
+  verification. The limiter and result-cache smokes intentionally wrote Durable
+  Object/KV operational state.
+
+### Future rollout order
 
 1. Before merging, record the target feature-branch SHA and the currently
    deployed production Worker SHA/version in the launch notes. In the
@@ -111,10 +129,11 @@ Deploy in this order:
    once as the fallback. Never run the automatic and manual paths concurrently.
 3. Before changing Supabase, smoke `/healthz`, an existing card and badge,
    validation-only registration, invalid lookup (`400`), and a known valid-format
-   lookup. The valid-format lookup is expected to be a brief `503 unavailable`
-   while the Worker talks to the legacy Edge response; this is the accepted
-   Worker-first compatibility interval. Do not expect `issued` or `not_found`
-   until Step 4.
+   lookup. **Only on a first publication against a legacy Edge contract**, the
+   valid-format lookup may briefly be fail-closed `503 unavailable` before Step
+   4. On future changes to the already-live Edge contract, expect the current
+   typed result instead; treat any unexpected `503` as a failure to investigate,
+   not as an expected rollout state.
 4. Deploy **only** the changed lookup function:
 
 ```bash
@@ -133,8 +152,8 @@ bypass its platform JWT layer because the Worker authenticates with
    metrics open: capture first provisioning/storage, the 31st-request denial,
    an alarm event/metric after expiry, and a post-window request with 29
    remaining. This is the real deployed v2 storage/alarm smoke.
-6. Only after those results pass, change the lookup status from unpublished to
-   live in every active status surface: `README.md`, `llms.txt`, `index.html`,
+6. Only after those results pass, update every active status surface with the
+   new evidence: `README.md`, `llms.txt`, `index.html`,
    `CLOUDFLARE.md`, `AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`,
    `AGENT_HANDOFF.md`, `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`,
    `SECURITY.md`, and `packages/dmv-agent/README.md`. Commit and push that
@@ -158,6 +177,10 @@ state. Never use Cloudflare rollback to a pre-v2 Worker: such a version lacks
 the `CertificateLookupRateLimiter` export/binding while the account retains the
 v2 migration. Preserve both v1 and v2 migrations, the class export, and the
 `CERT_LOOKUP_LIMITER` binding in every recovery version.
+
+Cloudflare's runtime rejects `redirect: 'error'`. Keep the internal upstream
+fetch at `redirect: 'manual'`; any 3xx remains fail-closed and must never be
+followed with the shared secret.
 
 - If the Worker fails before the Edge deploy, stop. Restore traffic by shipping
   a new compatible Worker version that retains the migration/export/bindings;
@@ -412,9 +435,9 @@ These are noted for future work, not needed for go-live:
 - [ ] **Link/visit tracking** — Track permalink visits (`/c/CERT-ID/agent-name`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
 - [x] **Email verification flow** — Magic link sent by agentcommunity.org trigger (on_dmv_registration). New users get magic link + certificate email. Existing users get certificate email only.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
-- **Staged lookup hardening:** domain lookup is removed from `lookup-agent` to
-  reduce enumeration exposure. After Task 8 publication, public verification
-  will be certificate-ID-only through Worker `/api/lookup`; the coarse 60/60
+- **Live lookup hardening:** domain lookup is removed from `lookup-agent` to
+  reduce enumeration exposure. Public verification is certificate-ID-only
+  through Worker `/api/lookup`; the coarse 60/60
   filter plus exact Durable Object 30/60 limit mitigate rather than eliminate
   enumeration risk. The internal response is a typed HTTP 200
   `issued`/`not_found` union.
