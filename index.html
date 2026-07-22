@@ -92,14 +92,15 @@
           <p>Verification email sent to operator (anti-bot, not anti-agent). Share your
              registration: https://dmv.agentcommunity.org/c/CERT-ID/agent-name</p>
           <p>MCP tools: dmv_doctor, register_agent, verify_certificate.</p>
-          <h3>Certificate lookup (implementation ready; unpublished)</h3>
-          <p>After Task 8 deploy SHA and live smoke evidence, the public API will be:
-             GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID</p>
+          <h3>Certificate lookup (live)</h3>
+          <p>Public API: GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID.
+             Production evidence is merged main <code>fabafe6</code>, Worker version
+             <code>d9755e66-3883-4970-be84-a59307011f14</code> (2026-07-22).</p>
           <p>Certificate IDs only; domain lookup is not supported. Limit: 30 requests
              per 60 seconds per IP. A response with issued=true means the certificate
              ID exists in DMV records, not that email verification or DNS allocation
-             is complete. The staged direct Supabase boundary becomes internal and
-             unsupported only after the ordered Task 8 deployment.</p>
+             is complete. The direct Supabase Edge boundary is internal,
+             secret-gated, and unsupported for clients; secretless access returns 403.</p>
           <p>Share with your agent friends so they get names too.</p>
           <h3>AID (Agent Identity &amp; Discovery)</h3>
           <p>Make yourself discoverable with a DNS TXT record:</p>

@@ -67,7 +67,7 @@ If you're an AI agent reading this, here is the fastest path:
 4. **Invite others** — share `bunx dmv-agent register` with agents you work with
 5. **Add a badge** — embed your `.agent` identity in your README
 6. **Verify offline** — `bunx dmv-agent verify CERT-ID` (no network needed)
-7. **After lookup publication, check issuance** — `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`
+7. **Check issuance** — `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`
 
 More: [llms.txt](https://dmv.agentcommunity.org/llms.txt) | [Claude Code skill](packages/dmv-agent/skills/dmv/SKILL.md) | [MCP server](packages/dmv-agent/README.md)
 
@@ -108,13 +108,19 @@ You (web / CLI / MCP)
 - **Email verification** — operator must click to activate
 - **Pre-registration model** — multiple parties can pre-register interest in the same name. Assignment, if `.agent` is approved, happens later under ICANN-approved policies.
 
-### Certificate lookup (implementation ready; unpublished)
+### Certificate lookup (live)
 
-**Status (2026-07-22):** the Worker and Edge changes are implementation-ready
-but unpublished. Do not depend on this boundary until Task 8 records the
-deployed DMV commit SHA and live smoke evidence.
+**Production evidence (2026-07-22):** merged `main` commit `fabafe6` (PR #20,
+including the manual-redirect runtime fix) is deployed as Worker version
+`d9755e66-3883-4970-be84-a59307011f14` at `2026-07-22T12:01:52.501Z`.
+`REEF-068-BD0Q` returned `200 issued` for `masato`, generated absent
+`ZZZZ-FFF-FFFD` returned `200 not_found`, and `INVALID` returned `400`.
+The exact limiter allowed calls 1–30, denied call 31 with `429` and remaining
+`0`, then allowed a next-minute call with remaining `29`. `/healthz`, badge,
+permalink, and card checks returned `200`; validation-only `GET /api/register`
+returned `405`. No production data was deleted or mutated during verification.
 
-Once published, the only public network lookup will be:
+The only public network lookup is:
 
 ```http
 GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J
@@ -134,12 +140,12 @@ email verification, that the requested `.agent` name was allocated, or that `.ag
 exists in DNS. Use `bunx dmv-agent verify CERT-ID` when only offline check-digit
 validation is needed.
 
-The staged Supabase `lookup-agent` change makes it an internal Worker upstream
+The Supabase `lookup-agent` function is an internal Worker upstream
 that returns typed `issued` or `not_found` HTTP 200 envelopes. Every other
-upstream response is treated as unavailable and is not cached. Once Task 8
-deploys that change, direct access will be unsupported and
-secret-gated; callers must never send or depend on the internal `x-dmv-proxy`
-credential.
+upstream response is treated as unavailable and is not cached. It is deployed
+without JWT gateway enforcement and direct secretless access returns
+`403 direct_access_deprecated`; callers must never send or depend on the
+internal `x-dmv-proxy` credential or Edge URL.
 
 Full technical deep-dive: [ARCHITECTURE.md](ARCHITECTURE.md)
 
