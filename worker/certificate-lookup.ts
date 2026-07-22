@@ -167,6 +167,15 @@ function isIssuedEnvelope(record: Record<string, unknown>, requestedId: string):
     && record.domain.trim().length > 0;
 }
 
+function upstreamFailureClass(error: unknown): string {
+  if (error instanceof TypeError) return 'TypeError';
+  if (error instanceof DOMException) {
+    return error.name === 'AbortError' ? 'AbortError' : 'DOMException';
+  }
+  if (error instanceof Error) return 'Error';
+  return typeof error;
+}
+
 async function consumeExactRateLimit(
   namespace: DurableObjectNamespace,
   ipHash: string,
@@ -299,6 +308,9 @@ export async function handleCertificateLookup(
     );
 
     if (upstream.status !== 200) {
+      console.error('[certificate-lookup] upstream returned non-200', {
+        upstream_status: upstream.status,
+      });
       return jsonResponse(unavailableResult(id), 503, { remaining, reset });
     }
 
@@ -326,7 +338,9 @@ export async function handleCertificateLookup(
     await cacheResult(env.BADGE_CACHE_KV, cacheKey, result, LOOKUP_POSITIVE_TTL_SECONDS);
     return jsonResponse(result, 200, { remaining, reset });
   } catch (error) {
-    console.error('[certificate-lookup] upstream lookup failed', { error });
+    console.error('[certificate-lookup] upstream fetch failed', {
+      error_name: upstreamFailureClass(error),
+    });
     return jsonResponse(unavailableResult(id), 503, { remaining, reset });
   } finally {
     clearTimeout(timeout);
