@@ -226,9 +226,12 @@ cd packages/dmv-agent && pnpm build
 node dist/cli.js register
 
 # Production rollout is Worker first, then the secret-gated Edge upstream.
-# See packages/dmv-agent/DEPLOY.md; do not expose or call Supabase function URLs.
+# Merge to main and observe the Cloudflare Git integration's automatic Worker build.
+# Manual fallback only after confirming an automatic build is neither active nor started:
 pnpm cf:deploy
-supabase functions deploy lookup-agent --no-verify-jwt
+# Never run automatic and manual deploys concurrently.
+# See packages/dmv-agent/DEPLOY.md for the canonical Edge command (including project ref),
+# status-commit deployment, smoke evidence, and recovery steps.
 ```
 
 Docs: [ARCHITECTURE.md](ARCHITECTURE.md) | [NAVIGATION.md](NAVIGATION.md) | [CARD.md](CARD.md) | [CLI & API](packages/dmv-agent/README.md) | [Deploy](packages/dmv-agent/DEPLOY.md) | [Text Surface Audit](docs/text-surface-audit.md)

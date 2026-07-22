@@ -105,8 +105,9 @@ Deploy in this order:
 2. Merge to `main` and use the Cloudflare Git integration's automatic build as
    the single authoritative Worker deploy path. Watch that build and capture its
    deployed commit SHA/version. If no automatic build starts, first confirm in
-   the dashboard that no build/deploy is active, then use `pnpm cf:deploy` once
-   as the fallback. Never run the automatic and manual paths concurrently.
+   the dashboard that an automatic build/deploy is neither active nor already
+   started, then use `pnpm cf:deploy` once as the fallback. Never run the
+   automatic and manual paths concurrently.
 3. Before changing Supabase, smoke `/healthz`, an existing card and badge,
    validation-only registration, invalid lookup (`400`), and a known valid-format
    lookup. The valid-format lookup is expected to be a brief `503 unavailable`
@@ -132,9 +133,22 @@ bypass its platform JWT layer because the Worker authenticates with
    an alarm event/metric after expiry, and a post-window request with 29
    remaining. This is the real deployed v2 storage/alarm smoke.
 6. Only after those results pass, change the lookup status from unpublished to
-   live in `README.md`, `llms.txt`, `index.html`, `CLOUDFLARE.md`,
-   `AUTH_DMV.md`, this file, and `AGENT_HANDOFF.md`. Commit and push that
-   evidence-backed status update before declaring launch complete.
+   live in every active status surface: `README.md`, `llms.txt`, `index.html`,
+   `CLOUDFLARE.md`, `AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`,
+   `AGENT_HANDOFF.md`, `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`,
+   `SECURITY.md`, and `packages/dmv-agent/README.md`. Commit and push that
+   evidence-backed status update. Do not declare launch complete yet.
+7. Public docs/assets are included in the Worker bundle, so the live-status
+   commit triggers a second automatic production deployment. Watch the build for
+   that exact status commit start and finish. Capture its commit SHA, final Worker
+   version/deployment ID, timestamps, and result. If no automatic build starts,
+   first confirm that an automatic build/deploy is neither active nor already
+   started. Only then use `pnpm cf:deploy` once as fallback; never run the two
+   paths concurrently.
+8. Against that final status-commit deployment, re-run at minimum one issued or
+   typed-not-found lookup plus `/healthz`, an existing card, an existing badge,
+   and validation-only registration. Record their statuses/results. Only after
+   these final smokes pass may the rollout be handed off or declared live.
 
 ### v2-safe recovery
 
@@ -379,7 +393,7 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `Network error: could not reach DMV registration service` | Worker not deployed, Cloudflare DNS issue, or Supabase down | `pnpm cf:deploy` from repo root, then check `pnpm cf:tail` |
+| `Network error: could not reach DMV registration service` | Worker not deployed, Cloudflare DNS issue, or Supabase down | Check the authoritative Cloudflare Git build and `pnpm cf:tail`. Use `pnpm cf:deploy` only after confirming an automatic build/deploy is neither active nor already started; never run them concurrently. |
 | `turnstile_failed` (400) on browser | Wrong `TURNSTILE_SECRET_KEY` on the worker, or stale token | Check Cloudflare dashboard → Workers → dmv-agentcommunity → Variables and Secrets → confirm `TURNSTILE_SECRET_KEY` is encrypted Secret type |
 | `machine_fingerprint_required` (400) on CLI | CLI on old version not sending fingerprint | Bump CLI dependency to latest `@agentcommunity/dmv-agent` |
 | `Registration failed (HTTP 500)` | Service role key not set or DB schema mismatch | Check Supabase dashboard → Edge Functions → Logs |
