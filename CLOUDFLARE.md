@@ -29,6 +29,8 @@ into `container/src/card-renderer.js` where it's now canonical.
 │   │ (free, edge-     │  │  /api/card  /api/og         │    │
 │   │  cached)         │  │  /api/register (Turnstile + │    │
 │   │                  │  │     shared CF limits + KV)  │    │
+│   │                  │  │  /api/lookup (30/min/IP +   │    │
+│   │                  │  │     KV result cache)        │    │
 │   │                  │  │  /c/:id/:name (HTMLRewriter)│    │
 │   │                  │  │  /badge/*  (Supabase proxy) │    │
 │   │                  │  │  /healthz                   │    │
@@ -82,6 +84,7 @@ being served.
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
 | `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint for browser, CLI, MCP, and JS API. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (server-side hostname + `dmv_register` action check) → shared CF rate limiters → forward to Supabase. CLI/MCP path: validate JSON → require `machine_fingerprint` → shared CF rate limiters → DMV-local KV fingerprint cooldown → forward. Anti-abuse ordering matches `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4 — CAPTCHA always runs before shared counters |
+| `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | Implementation-ready, unpublished route. After Task 8 deploy SHA + live smoke evidence, this becomes the only public certificate lookup. Certificate IDs only; domain lookup is removed. `RL_CERT_LOOKUP` is a coarse 60/60 filter; `CERT_LOOKUP_LIMITER` is the exact 30/60 authority before the KV result cache. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
 | `/healthz` | Worker | `{ worker, container }` health probe — pings the container too |
@@ -123,10 +126,12 @@ eyeball the bake-off output (`pnpm cf:test:render` — see below).
 
 | Path | Purpose |
 |---|---|
-| `worker/index.ts` | Worker entry — routes, L1/R2/container cache hierarchy, HTMLRewriter permalink middleware, `/api/register` handler (Turnstile + CF rate limits + Supabase forward), `/badge/*` Supabase proxy, cron prewarm |
-| `worker/rate-limit-kv.ts` | DMV-local KV-backed cooldown helper (`incrementKvCooldown`). Increment-then-hold pattern for the CLI/MCP fingerprint cooldown counter in `REGISTER_COOLDOWN_KV`. |
+| `worker/index.ts` | Worker entry — routes, L1/R2/container cache hierarchy, HTMLRewriter permalink middleware, public `/api/register` and `/api/lookup`, `/badge/*` Supabase proxy, cron prewarm |
+| `worker/certificate-lookup.ts` | Worker-only public lookup policy: certificate-ID validation, coarse-filter/exact-DO ordering, result cache, upstream secret, typed envelope validation, minimal response shaping |
+| `worker/certificate-lookup-rate-limiter.ts` | SQLite Durable Object for atomic fixed-minute 30/60 accounting per SHA-256 hashed IP; v2 migration |
+| `worker/rate-limit-kv.ts` | DMV-local KV helper used only for the CLI/MCP registration fingerprint cooldown in `REGISTER_COOLDOWN_KV` |
 | `worker/container-instance.ts` | **Generated** by `scripts/build-cf.mjs` — content-hash of container sources that doubles as the Durable Object instance ID |
-| `wrangler.jsonc` | Static Assets + Container binding, R2 binding, DO migration, cron trigger, `PREWARM_ORIGIN`, register-path bindings (`REGISTER_COOLDOWN_KV`, shared `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL`) |
+| `wrangler.jsonc` | Static Assets + Container/R2 bindings, unchanged CardRenderer v1 plus CertificateLookupRateLimiter v2 migration, cron, registration bindings, coarse `RL_CERT_LOOKUP`, and result-cache KV |
 | `tsconfig.json` | TypeScript config for the worker |
 | `container/Dockerfile` | Node 20 Alpine + `@napi-rs/canvas` |
 | `container/package.json` | Container runtime deps (Hono + `@napi-rs/canvas`) |
@@ -156,8 +161,16 @@ pnpm wrangler r2 bucket create dmv-card-cache-test-preview
 # Local dev — runs build-cf.mjs then wrangler dev on http://localhost:8787
 pnpm cf:dev
 
-# Deploy to production (dmv-agentcommunity worker, dmv.agentcommunity.org)
-pnpm cf:deploy
+# Mandatory pre-deploy gates on a Docker-capable machine
+docker info
+pnpm cf:container:build
+
+# Merge to main and let Cloudflare Git deploy the Worker. Use pnpm cf:deploy
+# only if no automatic build started, after confirming no deploy is active.
+
+# Only after the Worker-first compatibility smokes, deploy the changed Edge
+# function (not register-agent or badge).
+supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 
 # Visual fidelity spot-check: local vs deployed
 CF_LOCAL_URL=http://localhost:8787 pnpm cf:test:render
@@ -172,6 +185,54 @@ open test-harness/output/index.html
    into `dist/`.
 2. `wrangler deploy` — builds the container image, pushes it to the CF
    registry, and rolls out the Worker.
+
+The lookup changes are implementation-ready but unpublished as of 2026-07-22;
+do not call this boundary live until Task 8 records the deployed SHA/version and
+smoke evidence. The 2026-07-22 implementation host has no Docker runtime, so a
+Docker-capable environment must pass both commands above before rollout; any
+Docker CLI error text is a failed gate regardless of a wrapper's exit code.
+
+Lookup rollout order is non-negotiable. Configure the same generated
+`DMV_PROXY_SECRET` on Cloudflare and Supabase without printing it. Confirm
+account-wide native namespace `1002` is allocated to `RL_CERT_LOOKUP` without a
+collision, plus `CERT_LOOKUP_LIMITER`, `BADGE_CACHE_KV`, and unchanged v1/new v2
+migrations. Merge to `main` and treat the Cloudflare Git automatic build as the
+single authoritative Worker deployment. Record the previous version, merged
+SHA, and deployed version. Use manual `pnpm cf:deploy` only if automatic deploy
+did not start and the dashboard confirms no deploy is active; never run both.
+
+After the Worker deploy, smoke health, card, badge, registration validation,
+invalid lookup, and a valid-format certificate. The last check is expected to
+return a brief fail-closed `503 unavailable` against the legacy Edge contract.
+Only then deploy **only** `lookup-agent`; `issued`/`not_found` are post-Edge
+expectations. Prove secretless direct Edge access is `403`, issued and generated
+valid-but-absent results, exact request 31 denial, minute rollover, and real
+Durable Object provisioning/storage/alarm activity via tail/metrics. Re-run the
+existing health/card/badge/registration smokes.
+
+The v2 SQLite migration is forward-only operational state. Never roll back to a
+pre-v2 Worker. Preserve the v1/v2 migrations, `CertificateLookupRateLimiter`
+export, and binding in a compatible roll-forward. If Worker smokes fail, stop
+before Edge and ship a new compatible Worker. If Edge fails after gating, leave
+the Worker's fail-closed 503 in place and roll Edge forward; never reopen legacy
+direct access. Full recovery and evidence steps are in
+`packages/dmv-agent/DEPLOY.md`.
+
+Only after every smoke passes, change every active status surface from
+unpublished to live: `README.md`, `llms.txt`, `index.html`, `CLOUDFLARE.md`,
+`AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`, `AGENT_HANDOFF.md`, `AGENTS.md`,
+`CLAUDE.md`, `ARCHITECTURE.md`, `SECURITY.md`, and
+`packages/dmv-agent/README.md`. Commit and push that evidence-backed status
+update.
+
+Because those public docs/assets are part of the Worker bundle, the status
+commit triggers a second automatic production deployment. Observe the build for
+that exact commit through completion and capture its final commit SHA, Worker
+version/deployment ID, timestamps, and result. Against that final version,
+re-run at minimum one issued or typed-not-found lookup plus `/healthz`, an
+existing card, an existing badge, and validation-only registration. Do not hand
+off or declare the lookup live until this exact deployment and its final smokes
+pass. Never record the secret in this repository or pass it to clients.
 
 ## Operational notes
 
@@ -214,7 +275,7 @@ open test-harness/output/index.html
   `L1-EXCEPTION`, `container-render-failed`, `inflight-rejected`). Schema
   is documented at the `emitAnalytics()` helper in `worker/index.ts`.
 
-- **Rate limiting**: two distinct surfaces, both via the Workers Rate
+- **Rate limiting**: three distinct surfaces, all via the Workers Rate
   Limiting API.
 
   **Render path** (`/api/card`, `/api/og`): guarded by `API_RATE_LIMITER`
@@ -246,6 +307,16 @@ open test-harness/output/index.html
   future zone-level upgrade to Pro+, layer a WAF Rate Limiting Rule on
   top — WAF runs earlier in the request pipeline and rejected requests
   don't count as Worker invocations.
+
+  **Certificate lookup** (`/api/lookup`): `RL_CERT_LOOKUP` (namespace `1002`)
+  is a permissive/eventually consistent 60/60 emergency filter, not exact
+  accounting. One `CERT_LOOKUP_LIMITER` SQLite Durable Object per hashed IP
+  then transactionally enforces exact 30/60 and supplies remaining/reset
+  headers. A binding, fetch, or response failure fails closed before
+  `BADGE_CACHE_KV` or upstream. Issued results use a 300-second KV TTL; only a
+  typed HTTP 200 `not_found` envelope uses 60 seconds; non-200 and malformed
+  upstream results are unavailable and uncached. All client responses use
+  `Cache-Control: private, no-store`.
 
 - **Turnstile**: `/api/register` browser path requires a valid Turnstile
   token (`cf-turnstile-response` field in the JSON body). The site key
@@ -293,11 +364,12 @@ open test-harness/output/index.html
   Network error: `{ status: 'error', message: <string> }`. Probes can
   safely read `container.status` across all branches.
 
-- **No automated worker tests by design**. The worker code is small enough
-  that adding miniflare/vitest scaffolding would cost more than it returns.
-  Test plan is `test-harness/render-comparison.mjs` (eyeball bake-off) plus
-  manual smoke of `/healthz`, `/api/card`, `/api/og`, `/c/:id/:name`
-  (crawler UA + human UA), and `/badge/*`. Revisit if the worker grows.
+- **Worker tests**: certificate lookup policy and dispatch are covered by
+  `tests/worker-certificate-lookup.test.ts`; atomic transaction and alarm
+  behavior is covered by `tests/worker-certificate-lookup-rate-limiter.test.ts`.
+  Rendering still uses
+  `test-harness/render-comparison.mjs` plus manual smoke of `/healthz`,
+  `/api/card`, `/api/og`, `/c/:id/:name`, and `/badge/*`.
 
 ## Known gaps (separate sprints)
 
@@ -308,6 +380,14 @@ open test-harness/output/index.html
   constant and any direct-to-Supabase call now return 403
   `direct_access_deprecated`. `/api/register` on the worker is the only
   path that reaches validation.
+
+- **Certificate lookup exposure** — *Implementation ready; unresolved in
+  production.* The planned public lookup is Worker
+  `GET /api/lookup?id=CERT-ID`. The staged `lookup-agent` Edge change uses the
+  same `DMV_PROXY_SECRET` gate, rejects direct calls before database client
+  creation, removes domain queries, and returns typed HTTP 200
+  `issued`/`not_found` envelopes. This gap is not closed until Task 8
+  records a deployed SHA and live smoke evidence.
 
 - **DMV-branded OTP email flow** — custom branding via
   `admin.generateLink()` + Resend direct send is future work. See

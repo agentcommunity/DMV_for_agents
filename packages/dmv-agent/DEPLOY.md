@@ -61,24 +61,113 @@ ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
 
 ---
 
-## 2. Edge Function — Deploy
+## 2. Public API and Edge Functions — Deploy
 
 Three edge functions live in `supabase/functions/`:
 
 | Function | Method | Purpose |
 |----------|--------|---------|
 | `register-agent` | POST | Worker upstream — validates, lifetime cap, generates cert, INSERTs. Anti-abuse lives in the worker. |
-| `lookup-agent` | GET | Public read-only lookup by cert ID or domain |
+| `lookup-agent` | GET | Internal Worker upstream — secret-gated lookup by certificate ID only |
 | `badge` | GET | SVG badge generator (flat for READMEs, card for websites) |
 
+The certificate-lookup Worker and Edge changes are implementation-ready but
+unpublished as of 2026-07-22. Complete the ordered deployment below and record
+the deployed SHA plus live smoke evidence before describing them as production.
+
+`DMV_PROXY_SECRET` must be the same generated secret on the Cloudflare Worker
+and the Supabase project. Never put its value in `.env.example`, documentation,
+shell history, or client configuration. The Worker also requires
+`RL_CERT_LOOKUP` (coarse 60/60), `CERT_LOOKUP_LIMITER` (exact SQLite DO 30/60),
+and `BADGE_CACHE_KV` (lookup result cache) as configured in `wrangler.jsonc`.
+`REGISTER_COOLDOWN_KV` remains registration-only.
+
+Before merging, run these container gates on a Docker-capable machine:
+
 ```bash
-# Deploy all three from project root
-supabase functions deploy register-agent
-supabase functions deploy lookup-agent
-supabase functions deploy badge
+docker info
+pnpm cf:container:build
 ```
 
-This automatically injects `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as environment variables — no manual config.
+Any Docker CLI error text is a failed gate even if a wrapper later exits zero. The
+2026-07-22 implementation host has no Docker/Podman runtime, so these gates and the
+real Worker rollout must run in Cloudflare's build environment or another
+Docker-capable environment.
+
+Deploy in this order:
+
+1. Before merging, record the target feature-branch SHA and the currently
+   deployed production Worker SHA/version in the launch notes. In the
+   Cloudflare account, confirm that native rate-limit namespace `1002` is
+   allocated to `RL_CERT_LOOKUP` and does not collide with another account-wide
+   binding. Confirm `BADGE_CACHE_KV`, `CERT_LOOKUP_LIMITER`, the v1/v2 Durable
+   Object migrations, and the shared `DMV_PROXY_SECRET` are configured without
+   printing the secret.
+2. Merge to `main`, record the resulting merged `main` SHA, and use the Cloudflare
+   Git integration's automatic build as the single authoritative Worker deploy
+   path. Watch that build and capture its deployed commit SHA/version. If no
+   automatic build starts, first confirm in the dashboard that an automatic
+   build/deploy is neither active nor already started, then use `pnpm cf:deploy`
+   once as the fallback. Never run the automatic and manual paths concurrently.
+3. Before changing Supabase, smoke `/healthz`, an existing card and badge,
+   validation-only registration, invalid lookup (`400`), and a known valid-format
+   lookup. The valid-format lookup is expected to be a brief `503 unavailable`
+   while the Worker talks to the legacy Edge response; this is the accepted
+   Worker-first compatibility interval. Do not expect `issued` or `not_found`
+   until Step 4.
+4. Deploy **only** the changed lookup function:
+
+```bash
+supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+```
+
+Do not redeploy `register-agent` or `badge` during this rollout. Supabase must
+bypass its platform JWT layer because the Worker authenticates with
+`x-dmv-proxy`. Supabase automatically injects `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`.
+
+5. Prove issued and generated-valid-but-absent results through the Worker, the
+   invalid-format response, exact 30/60 limiting, and a secretless direct
+   `lookup-agent` request returning `403`. Also re-run health, card, badge, and
+   registration smokes. Keep `wrangler tail` or the Cloudflare Durable Object
+   metrics open: capture first provisioning/storage, the 31st-request denial,
+   an alarm event/metric after expiry, and a post-window request with 29
+   remaining. This is the real deployed v2 storage/alarm smoke.
+6. Only after those results pass, change the lookup status from unpublished to
+   live in every active status surface: `README.md`, `llms.txt`, `index.html`,
+   `CLOUDFLARE.md`, `AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`,
+   `AGENT_HANDOFF.md`, `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`,
+   `SECURITY.md`, and `packages/dmv-agent/README.md`. Commit and push that
+   evidence-backed status update. Do not declare launch complete yet.
+7. Public docs/assets are included in the Worker bundle, so the live-status
+   commit triggers a second automatic production deployment. Watch the build for
+   that exact status commit start and finish. Capture its commit SHA, final Worker
+   version/deployment ID, timestamps, and result. If no automatic build starts,
+   first confirm that an automatic build/deploy is neither active nor already
+   started. Only then use `pnpm cf:deploy` once as fallback; never run the two
+   paths concurrently.
+8. Against that final status-commit deployment, re-run at minimum one issued or
+   typed-not-found lookup plus `/healthz`, an existing card, an existing badge,
+   and validation-only registration. Record their statuses/results. Only after
+   these final smokes pass may the rollout be handed off or declared live.
+
+### v2-safe recovery
+
+Cloudflare's v2 SQLite Durable Object migration is forward-only operational
+state. Never use Cloudflare rollback to a pre-v2 Worker: such a version lacks
+the `CertificateLookupRateLimiter` export/binding while the account retains the
+v2 migration. Preserve both v1 and v2 migrations, the class export, and the
+`CERT_LOOKUP_LIMITER` binding in every recovery version.
+
+- If the Worker fails before the Edge deploy, stop. Restore traffic by shipping
+  a new compatible Worker version that retains the migration/export/bindings;
+  prefer roll-forward. Do not deploy the Edge function yet.
+- If the Edge deploy fails after its secret gate is active, the Worker safely
+  returns uncached `503 unavailable`. Roll forward `lookup-agent`; do not restore
+  the legacy Edge contract or direct public access.
+- Record the prior/current deployed versions and the exact failed smoke state
+  before remediation. Do not delete or reverse Durable Object migrations or
+  storage.
 
 ### Verify it's running
 
@@ -112,7 +201,10 @@ Direct-to-Supabase calls no longer work — they return 403 (see the post-deploy
 
 ### Post-deploy verification — secret gate
 
-The `x-dmv-proxy` secret gate is the only defense against the direct-Supabase bypass, and there's no automated test for it. After every `register-agent` deploy, run both curls:
+The `x-dmv-proxy` secret gate closes the direct-Supabase bypass. Unit tests cover
+both internal upstreams. After a deployment, retain the registration negative
+smoke below without ever sending the real secret; do not publish or copy the
+internal lookup URL into client-facing instructions:
 
 ```bash
 # No header → rejected
@@ -124,9 +216,12 @@ curl -i -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-a
 curl -i -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
   -H 'Content-Type: application/json' -H 'x-dmv-proxy: v1' -d '{}'
 # Expect: 403 (the `v1` constant was retired 2026-05-29; only the DMV_PROXY_SECRET shared secret is accepted)
+
 ```
 
-A legit registration must still succeed through the worker at `https://dmv.agentcommunity.org/api/register`, which forwards the real `DMV_PROXY_SECRET`. If either curl above returns anything other than 403, the secret gate is misconfigured (e.g. `DMV_PROXY_SECRET` unset on the Supabase project) — do not consider the deploy complete.
+A legit registration and lookup must still succeed through the Worker at
+`/api/register` and `/api/lookup`. If either direct test above does not return 403,
+the secret gate is misconfigured — do not consider the deploy complete.
 
 ### Test error cases
 
@@ -159,16 +254,19 @@ curl -X POST .../api/register -H 'Content-Type: application/json' \
 ### Verify lookup & badge
 
 ```bash
-BASE=https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1
+BASE=https://dmv.agentcommunity.org
 
-# Lookup by cert ID → 200 JSON
-curl "$BASE/lookup-agent?id=MESA-DD6-660J"
+# After the Edge deploy: issued or not_found through the Worker → 200 JSON
+curl "$BASE/api/lookup?id=MESA-DD6-660J"
 
-# Lookup by domain → 200 JSON (array — multiple pre-registrations possible)
-curl "$BASE/lookup-agent?domain=my-assistant"
+# Direct secretless Edge access must be closed → 403
+curl -i \
+  "https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/lookup-agent?id=MESA-DD6-660J"
+
+# Domain enumeration is removed; do not send requested names to this endpoint.
 
 # Invalid cert → 400
-curl "$BASE/lookup-agent?id=FAKE-000-0000"
+curl "$BASE/api/lookup?id=FAKE-000-0000"
 
 # Flat badge SVG (for GitHub READMEs)
 curl "$BASE/badge?id=MESA-DD6-660J" -o badge.svg
@@ -176,9 +274,19 @@ curl "$BASE/badge?id=MESA-DD6-660J" -o badge.svg
 # Card badge SVG (for websites)
 curl "$BASE/badge?id=MESA-DD6-660J&style=card" -o badge-card.svg
 
-# Badge by domain → 400 (deprecated, ambiguous with multiple pre-registrations)
-curl "$BASE/badge?domain=my-assistant&style=card"
+# Badge lookup is also certificate-ID-only; do not send requested names.
 ```
+
+The lookup Worker applies the permissive/eventually consistent native 60/60
+filter first, then exact atomic 30 requests per 60 seconds per hashed IP through
+`CERT_LOOKUP_LIMITER`. Issued results are
+cached internally for 300 seconds and not-found results for 60 seconds, but client
+responses are `private, no-store`. Results contain only `certificate_id`,
+`status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`.
+`issued: true` means a matching registration row exists; it does not mean email
+verification, name allocation, or DNS delegation completed. Only the internal
+typed HTTP 200 `not_found` envelope is cached as absence; non-200 or malformed
+upstream results are uncached `unavailable`.
 
 ### Badge embed codes
 
@@ -286,7 +394,7 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `Network error: could not reach DMV registration service` | Worker not deployed, Cloudflare DNS issue, or Supabase down | `pnpm cf:deploy` from repo root, then check `pnpm cf:tail` |
+| `Network error: could not reach DMV registration service` | Worker not deployed, Cloudflare DNS issue, or Supabase down | Check the authoritative Cloudflare Git build and `pnpm cf:tail`. Use `pnpm cf:deploy` only after confirming an automatic build/deploy is neither active nor already started; never run them concurrently. |
 | `turnstile_failed` (400) on browser | Wrong `TURNSTILE_SECRET_KEY` on the worker, or stale token | Check Cloudflare dashboard → Workers → dmv-agentcommunity → Variables and Secrets → confirm `TURNSTILE_SECRET_KEY` is encrypted Secret type |
 | `machine_fingerprint_required` (400) on CLI | CLI on old version not sending fingerprint | Bump CLI dependency to latest `@agentcommunity/dmv-agent` |
 | `Registration failed (HTTP 500)` | Service role key not set or DB schema mismatch | Check Supabase dashboard → Edge Functions → Logs |
@@ -304,7 +412,12 @@ These are noted for future work, not needed for go-live:
 - [ ] **Link/visit tracking** — Track permalink visits (`/c/CERT-ID/agent-name`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
 - [x] **Email verification flow** — Magic link sent by agentcommunity.org trigger (on_dmv_registration). New users get magic link + certificate email. Existing users get certificate email only.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
-- [x] **Domain lookup endpoint** — `lookup-agent` edge function (built, deploy with others)
+- **Staged lookup hardening:** domain lookup is removed from `lookup-agent` to
+  reduce enumeration exposure. After Task 8 publication, public verification
+  will be certificate-ID-only through Worker `/api/lookup`; the coarse 60/60
+  filter plus exact Durable Object 30/60 limit mitigate rather than eliminate
+  enumeration risk. The internal response is a typed HTTP 200
+  `issued`/`not_found` union.
 - [x] **Badge by cert ID** — `badge` edge function (domain lookup deprecated)
 - [ ] **Real OG images** — server-side card rendering for social media previews (front face of HoloCard as static PNG)
 - [ ] **Python SDK** — thin wrapper that shells out to `bunx` for cross-language support
@@ -351,15 +464,14 @@ User's machine             Cloudflare Worker                  Supabase cloud
  │ <img src=badge>    │   │ (KV cache + header   │           │ SVG by cert ID only    │
  └───────────────────┘    │  hygiene)            │           └──────────┬───────────┘
                           └─────────────────────┘                        │ reads
- ┌───────────────────┐                                                   │
- │ Any HTTP client    │──────────────────────▶┌────────────▼───────────┐
- │ curl, agents, etc  │                        │ lookup-agent (DMV)      │
- └───────────────────┘                        │ single (by cert ID) or  │
-                                                │ array (by domain)       │
-                                                └───────────────────────┘
+ ┌───────────────────┐    ┌─────────────────────┐           ┌──────────────────────┐
+ │ Any HTTP client    │───▶│ /api/lookup Worker  │──secret──▶│ lookup-agent (DMV)   │
+ │ curl, agents, etc  │    │ 30/min/IP + cache   │           │ cert ID only         │
+ └───────────────────┘    │ six public fields   │           │ direct access 403    │
+                          └─────────────────────┘           └──────────────────────┘
 ```
 
 **Zero secrets in client code. The Cloudflare Worker holds the Turnstile secret;**
 **Supabase holds the service role key. The worker is the public anti-abuse choke**
-**point for `/api/register`; the edge function is strictly an upstream that**
-**validates, applies the lifetime cap, and INSERTs.**
+**point for `/api/register` and `/api/lookup`; the Edge Functions are**
+**secret-gated internal upstreams.**

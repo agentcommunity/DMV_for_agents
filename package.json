@@ -13,6 +13,8 @@
     "serve": "node dev-server.mjs",
     "build": "node scripts/build-root.mjs",
     "check": "node --test tests/text-surfaces.test.mjs",
+    "test:worker": "node --import tsx --test tests/worker-*.test.ts",
+    "test": "pnpm check && pnpm test:worker",
     "text:audit": "node scripts/text-surfaces/run-audit.mjs",
     "text:audit:json": "node scripts/text-surfaces/run-audit.mjs --json",
     "text:check": "node --test tests/text-surfaces.test.mjs",
@@ -28,6 +30,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
+    "@types/node": "20.19.39",
+    "tsx": "^4.23.1",
     "typescript": "^5.6.0",
     "wrangler": "^4.0.0"
   },
