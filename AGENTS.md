@@ -2,7 +2,9 @@
 
 Terse docs for agents. File-by-file, function-by-function.
 
-**Deployment:** Cloudflare Workers Static Assets + Cloudflare Container (Skia card renderer). Worker `dmv-agentcommunity` on Taqanu account, instance type `lite`. Deploy: `npx wrangler deploy` from `main`. Full context: `docs/admin/CLOUDFLARE-MIGRATION.md` in `agentcommunity_page` repo.
+**Deployment:** Cloudflare Workers Static Assets + Cloudflare Container (Skia card renderer). Worker `dmv-agentcommunity` on Taqanu account, instance type `lite`. Deploy from `main` in this order: Worker first (`pnpm cf:deploy`), then the secret-gated `lookup-agent` Edge Function (`supabase functions deploy lookup-agent --no-verify-jwt`). Full context: `CLOUDFLARE.md` and `packages/dmv-agent/DEPLOY.md`.
+
+**Certificate lookup contract:** The only public network lookup is `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. Certificate IDs only; domain lookup is removed. The Worker enforces 30 requests/60s/IP, caches issued results for 300s and not-found results for 60s, and returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`. `issued: true` means a matching registration row exists, not that operator email verification, `.agent` allocation, or DNS delegation completed. `supabase/functions/lookup-agent` is a `DMV_PROXY_SECRET`-gated internal Worker upstream; direct access is unsupported.
 
 ---
 
@@ -19,6 +21,8 @@ js/AboutPoster.js   → 3D plane with CanvasTexture. Theme-aware about text, tog
 images/             → Favicon assets (`favicon.ico`, `favicon_dark.ico`)
 fonts/              → PPSupply font files (4 .otf files)
 models/             → 3D models (tv1.glb)
+worker/certificate-lookup.ts → Public Worker-only certificate lookup policy and response shaping
+supabase/functions/lookup-agent/index.ts → Secret-gated internal certificate-ID upstream
 ```
 
 ---

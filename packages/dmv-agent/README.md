@@ -33,6 +33,9 @@ bunx dmv-agent register \
 # Verify a certificate ID (offline, no network)
 bunx dmv-agent verify MESA-DD6-660J
 
+# Check whether the certificate was issued (public Worker, certificate ID only)
+curl "https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J"
+
 # Check the public DMV surface without submitting a valid registration
 bunx dmv-agent doctor
 
@@ -136,7 +139,8 @@ https://dmv.agentcommunity.org/badge?id=CERT-ID           # flat (default)
 https://dmv.agentcommunity.org/badge?id=CERT-ID&style=card # card
 ```
 
-Badges are cached for 5 minutes. Lookup is by certificate ID only.
+Badges are cached for 5 minutes. Badge and certificate lookup are by certificate
+ID only; requested-domain lookup is not supported.
 
 ## How it works
 
@@ -236,6 +240,7 @@ verifyCertificateId('MESA-DD6-660J'); // true
 - **Pre-registration model** — domain is NOT unique. Multiple parties can pre-register interest in the same name. Certificate ID IS unique (same user + agent + type = same cert).
 - **Email verification** — pre-registration is pending until the operator clicks the verification link.
 - **Content-addressed IDs** — deterministic hashes, not sequential. Cannot be enumerated or predicted.
+- **Worker-only live lookup** — public callers use `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The Supabase `lookup-agent` URL is a `DMV_PROXY_SECRET`-gated internal upstream and direct access is unsupported.
 
 ## API reference
 
@@ -272,12 +277,43 @@ The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP cl
 
 **200** — success or exact pre-registration recovery. **429** — rate limited. **400** — validation error. Older deployments may return **409** with an existing cert; the CLI treats that as recovery, not a taken-name state.
 
-### GET /lookup-agent
+### GET /api/lookup
 
+The only public network lookup endpoint is:
+
+```http
+GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J
 ```
-?id=CERT-ID     → single registration object
-?domain=name    → array of pre-registrations for that domain
+
+It accepts certificate IDs only. The Worker limits valid requests to 30 per 60
+seconds per IP before reading its cache. Issued results are cached internally for
+300 seconds and not-found results for 60 seconds; responses to clients use
+`Cache-Control: private, no-store`.
+
+```json
+{
+  "certificate_id": "MESA-DD6-660J",
+  "status": "issued",
+  "valid_format": true,
+  "issued": true,
+  "agent_name": "my-agent",
+  "certificate_url": "https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-agent"
+}
 ```
+
+Those are the only result fields. `issued: true` means a matching DMV
+registration row exists; it does not mean the operator completed email
+verification, the requested `.agent` name was allocated, or DNS delegation
+exists. Domain enumeration is removed. The Supabase `lookup-agent` URL is an
+internal Worker upstream protected by `DMV_PROXY_SECRET`; direct calls are
+unsupported and return 403.
+
+| HTTP | Result |
+|------|--------|
+| `200` | `status: issued`, `issued: true`, or `status: not_found`, `issued: false` |
+| `400` | `status: invalid_format`, `issued: false` |
+| `429` | `error: rate_limited` with `retry_after_seconds` |
+| `503` | `status: unavailable`, `issued: null` (no false issuance claim) |
 
 ### GET /badge
 
@@ -304,10 +340,13 @@ compiles this package, runs the dist-level CLI smoke tests, and packs/installs
 the npm tarball in a temporary consumer project to prove the published-style
 `dmv-agent` binary works.
 
-### Deploying edge functions
+### Deploying the lookup boundary
 
 ```bash
-supabase functions deploy register-agent lookup-agent badge
+# Configure the same secret on Cloudflare and Supabase without storing it here.
+# Deploy the public Worker first, then close the internal Edge upstream.
+pnpm cf:deploy
+supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
 See [DEPLOY.md](DEPLOY.md) for the full go-live checklist.

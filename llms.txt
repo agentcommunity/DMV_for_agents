@@ -34,6 +34,23 @@ To check DMV endpoint readiness without registering: `bunx dmv-agent doctor` or 
 
 MCP server also available for tool-based integration — tools: `dmv_doctor`, `register_agent`, and `verify_certificate`. See [npm package docs](https://www.npmjs.com/package/dmv-agent).
 
+## Live certificate lookup
+
+The only public network lookup endpoint is:
+
+`GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J`
+
+It accepts certificate IDs only. Domain lookup and direct calls to the Supabase
+`lookup-agent` function are unsupported; the Edge Function is a secret-gated
+internal Worker upstream. The public Worker allows 30 requests per 60 seconds per
+IP, caches issued results internally for 300 seconds and not-found results for 60
+seconds, and sends responses as `private, no-store`.
+
+The result is limited to `certificate_id`, `status`, `valid_format`, `issued`,
+`agent_name`, and `certificate_url`. `issued: true` means the certificate ID exists
+in DMV registration records. It does not establish operator email verification,
+allocation of the requested `.agent` name, or DNS delegation.
+
 ## After registration
 
 When registration succeeds, you receive:

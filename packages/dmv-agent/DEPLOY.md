@@ -61,24 +61,41 @@ ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
 
 ---
 
-## 2. Edge Function — Deploy
+## 2. Public API and Edge Functions — Deploy
 
 Three edge functions live in `supabase/functions/`:
 
 | Function | Method | Purpose |
 |----------|--------|---------|
 | `register-agent` | POST | Worker upstream — validates, lifetime cap, generates cert, INSERTs. Anti-abuse lives in the worker. |
-| `lookup-agent` | GET | Public read-only lookup by cert ID or domain |
+| `lookup-agent` | GET | Internal Worker upstream — secret-gated lookup by certificate ID only |
 | `badge` | GET | SVG badge generator (flat for READMEs, card for websites) |
 
+`DMV_PROXY_SECRET` must be the same generated secret on the Cloudflare Worker
+and the Supabase project. Never put its value in `.env.example`, documentation,
+shell history, or client configuration. The Worker also requires
+`RL_CERT_LOOKUP` (30/60s/IP), `BADGE_CACHE_KV` (lookup result cache), and
+`REGISTER_COOLDOWN_KV` (authoritative lookup counter) as configured in
+`wrangler.jsonc`.
+
+Deploy in this order:
+
 ```bash
-# Deploy all three from project root
-supabase functions deploy register-agent
-supabase functions deploy lookup-agent
-supabase functions deploy badge
+# 1. Deploy the public Worker boundary first.
+pnpm cf:deploy
+
+# 2. Then deploy the internal Edge upstreams. They must bypass Supabase's
+# platform JWT layer because the Worker authenticates with x-dmv-proxy.
+supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+
+# 3. Badge remains behind the Worker proxy.
+supabase functions deploy badge --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
-This automatically injects `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as environment variables — no manual config.
+Worker-first is required so the rate-limited `/api/lookup` replacement is live
+before `lookup-agent` begins rejecting the formerly documented direct access.
+Supabase automatically injects `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
 ### Verify it's running
 
@@ -112,7 +129,10 @@ Direct-to-Supabase calls no longer work — they return 403 (see the post-deploy
 
 ### Post-deploy verification — secret gate
 
-The `x-dmv-proxy` secret gate is the only defense against the direct-Supabase bypass, and there's no automated test for it. After every `register-agent` deploy, run both curls:
+The `x-dmv-proxy` secret gate closes the direct-Supabase bypass. Unit tests cover
+both internal upstreams. After a deployment, retain the registration negative
+smoke below without ever sending the real secret; do not publish or copy the
+internal lookup URL into client-facing instructions:
 
 ```bash
 # No header → rejected
@@ -124,9 +144,12 @@ curl -i -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-a
 curl -i -X POST https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/register-agent \
   -H 'Content-Type: application/json' -H 'x-dmv-proxy: v1' -d '{}'
 # Expect: 403 (the `v1` constant was retired 2026-05-29; only the DMV_PROXY_SECRET shared secret is accepted)
+
 ```
 
-A legit registration must still succeed through the worker at `https://dmv.agentcommunity.org/api/register`, which forwards the real `DMV_PROXY_SECRET`. If either curl above returns anything other than 403, the secret gate is misconfigured (e.g. `DMV_PROXY_SECRET` unset on the Supabase project) — do not consider the deploy complete.
+A legit registration and lookup must still succeed through the Worker at
+`/api/register` and `/api/lookup`. If either direct test above does not return 403,
+the secret gate is misconfigured — do not consider the deploy complete.
 
 ### Test error cases
 
@@ -159,16 +182,15 @@ curl -X POST .../api/register -H 'Content-Type: application/json' \
 ### Verify lookup & badge
 
 ```bash
-BASE=https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1
+BASE=https://dmv.agentcommunity.org
 
-# Lookup by cert ID → 200 JSON
-curl "$BASE/lookup-agent?id=MESA-DD6-660J"
+# Only public live lookup: by certificate ID through the Worker → 200 JSON
+curl "$BASE/api/lookup?id=MESA-DD6-660J"
 
-# Lookup by domain → 200 JSON (array — multiple pre-registrations possible)
-curl "$BASE/lookup-agent?domain=my-assistant"
+# Domain enumeration is removed; do not send requested names to this endpoint.
 
 # Invalid cert → 400
-curl "$BASE/lookup-agent?id=FAKE-000-0000"
+curl "$BASE/api/lookup?id=FAKE-000-0000"
 
 # Flat badge SVG (for GitHub READMEs)
 curl "$BASE/badge?id=MESA-DD6-660J" -o badge.svg
@@ -176,9 +198,15 @@ curl "$BASE/badge?id=MESA-DD6-660J" -o badge.svg
 # Card badge SVG (for websites)
 curl "$BASE/badge?id=MESA-DD6-660J&style=card" -o badge-card.svg
 
-# Badge by domain → 400 (deprecated, ambiguous with multiple pre-registrations)
-curl "$BASE/badge?domain=my-assistant&style=card"
+# Badge lookup is also certificate-ID-only; do not send requested names.
 ```
+
+The lookup Worker limit is 30 requests per 60 seconds per IP. Issued results are
+cached internally for 300 seconds and not-found results for 60 seconds, but client
+responses are `private, no-store`. Results contain only `certificate_id`,
+`status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`.
+`issued: true` means a matching registration row exists; it does not mean email
+verification, name allocation, or DNS delegation completed.
 
 ### Badge embed codes
 
@@ -304,7 +332,7 @@ These are noted for future work, not needed for go-live:
 - [ ] **Link/visit tracking** — Track permalink visits (`/c/CERT-ID/agent-name`) to measure sharing virality. Needs: a `card_views` table (cert_id, viewer_ip_hash, referrer, user_agent, timestamp), a lightweight edge function or analytics endpoint, and client-side fire-and-forget POST on permalink load. This is critical for understanding card sharing conversion (view → "Get Yours" click → registration).
 - [x] **Email verification flow** — Magic link sent by agentcommunity.org trigger (on_dmv_registration). New users get magic link + certificate email. Existing users get certificate email only.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
-- [x] **Domain lookup endpoint** — `lookup-agent` edge function (built, deploy with others)
+- **Historical:** domain lookup once existed on `lookup-agent`; it has been removed to prevent enumeration. Public verification is certificate-ID-only through Worker `/api/lookup`.
 - [x] **Badge by cert ID** — `badge` edge function (domain lookup deprecated)
 - [ ] **Real OG images** — server-side card rendering for social media previews (front face of HoloCard as static PNG)
 - [ ] **Python SDK** — thin wrapper that shells out to `bunx` for cross-language support
@@ -351,15 +379,14 @@ User's machine             Cloudflare Worker                  Supabase cloud
  │ <img src=badge>    │   │ (KV cache + header   │           │ SVG by cert ID only    │
  └───────────────────┘    │  hygiene)            │           └──────────┬───────────┘
                           └─────────────────────┘                        │ reads
- ┌───────────────────┐                                                   │
- │ Any HTTP client    │──────────────────────▶┌────────────▼───────────┐
- │ curl, agents, etc  │                        │ lookup-agent (DMV)      │
- └───────────────────┘                        │ single (by cert ID) or  │
-                                                │ array (by domain)       │
-                                                └───────────────────────┘
+ ┌───────────────────┐    ┌─────────────────────┐           ┌──────────────────────┐
+ │ Any HTTP client    │───▶│ /api/lookup Worker  │──secret──▶│ lookup-agent (DMV)   │
+ │ curl, agents, etc  │    │ 30/min/IP + cache   │           │ cert ID only         │
+ └───────────────────┘    │ six public fields   │           │ direct access 403    │
+                          └─────────────────────┘           └──────────────────────┘
 ```
 
 **Zero secrets in client code. The Cloudflare Worker holds the Turnstile secret;**
 **Supabase holds the service role key. The worker is the public anti-abuse choke**
-**point for `/api/register`; the edge function is strictly an upstream that**
-**validates, applies the lifetime cap, and INSERTs.**
+**point for `/api/register` and `/api/lookup`; the Edge Functions are**
+**secret-gated internal upstreams.**

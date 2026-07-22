@@ -169,6 +169,32 @@ The Cloudflare Worker is the single public API and anti-abuse boundary. It owns 
 
 The earlier temporary direct-Supabase bypass for legacy registration clients was **closed 2026-05-29** — the public `v1` constant is retired. Certificate lookup has no direct-client compatibility path: the Worker owns public rate limiting, validation, and response shaping before it calls `lookup-agent`.
 
+### Live certificate lookup policy
+
+`GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID` is the only public
+network lookup. Requested-domain lookup and domain enumeration are not supported.
+The Worker validates the certificate check digit before quota, then enforces 30
+requests per 60 seconds per IP through `RL_CERT_LOOKUP` plus an authoritative
+hashed-IP bucket in `REGISTER_COOLDOWN_KV`. Valid requests consume quota before
+the `BADGE_CACHE_KV` result cache is read. Issued results use a 300-second TTL,
+not-found results use 60 seconds, and unavailable results are not cached. Client
+responses are always `Cache-Control: private, no-store`.
+
+The response is minimized to `certificate_id`, `status`, `valid_format`,
+`issued`, `agent_name`, and `certificate_url`. `issued: true` means the database
+contains a registration row with that certificate ID. It does **not** mean the
+operator completed email verification, the requested `.agent` name was allocated,
+or `.agent` exists in DNS. `issued: null` with `status: unavailable` means the
+service could not determine issuance and deliberately does not claim false.
+
+| HTTP | `status` / body | Meaning |
+|------|-----------------|---------|
+| 200 | `issued`, `issued: true` | Matching registration row exists |
+| 200 | `not_found`, `issued: false` | Format is valid, but no matching row exists |
+| 400 | `invalid_format`, `issued: false` | Missing or invalid certificate ID |
+| 429 | `{ error: 'rate_limited', retry_after_seconds }` | Per-IP minute budget exhausted |
+| 503 | `unavailable`, `issued: null` | Secret, limiter, hash, upstream, or response validation was unavailable |
+
 Five effective layers on the register path, ordered cheapest-to-most-expensive:
 
 ```
@@ -355,7 +381,7 @@ The `lookup-agent` Edge Function is an internal Worker upstream and does not exp
 | `/badge/*` | Cloudflare Worker proxy → Supabase Edge Function | `handleBadge` forwards with header hygiene + path-traversal defense |
 | Edge functions (register, lookup, badge) | Supabase Edge Functions (Deno) | Holds service role key. `register-agent` and `lookup-agent` are internal Worker upstreams gated by `DMV_PROXY_SECRET`; direct function calls return 403. |
 | Database | Supabase PostgreSQL | RLS denies anon, service key bypasses |
-| Rate limiting (DMV) | Cloudflare Workers Rate Limiting API + Workers KV | `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` shared with `agentCommunity_PAGE` at the CF account level, `REGISTER_COOLDOWN_KV` is DMV-local. Upstash removed. |
+| Rate limiting (DMV) | Cloudflare Workers Rate Limiting API + Workers KV | Registration uses `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` shared with PAGE. Lookup uses DMV-local `RL_CERT_LOOKUP` (30/60s/IP) plus `REGISTER_COOLDOWN_KV`; `BADGE_CACHE_KV` holds lookup results. Upstash removed. |
 | NPM package | npm registry | `@agentcommunity/dmv-agent` + `dmv-agent` alias |
 
 ## Security Model
@@ -373,7 +399,7 @@ Worker:          validates → CAPTCHA/fingerprint for registration
 
 Edge functions:  verify DMV_PROXY_SECRET before client creation
                  → register: validate, cap, generate cert, INSERT
-                 → lookup: select certificate ID + domain only
+                 → lookup: select certificate ID + requested name only
                  (hold service role key; not public API routes)
 
 Database:        RLS denies all anon access
@@ -384,7 +410,7 @@ No database credentials exist in any client code — web, CLI, MCP, or JS API. T
 
 ---
 
-## What's Implemented (DMV side, as of 2026-04-08)
+## What's Implemented (DMV side, as of 2026-07-22)
 
 Everything below is shipped in this repo and ready to deploy:
 
@@ -392,6 +418,7 @@ Everything below is shipped in this repo and ready to deploy:
 |---------|--------|-------|
 | Worker `/api/register` proxy | Done | `worker/index.ts` `handleRegister` |
 | Worker `/api/lookup` certificate verification boundary | Done | `worker/index.ts`, `worker/certificate-lookup.ts` |
+| Lookup 30/60s/IP + 300s/60s result cache + minimal six-field response | Done | `RL_CERT_LOOKUP`, `REGISTER_COOLDOWN_KV`, `BADGE_CACHE_KV` |
 | Cloudflare Turnstile (browser) | Done | `worker/index.ts` `verifyTurnstileToken`, `index.html` widget mount |
 | Shared CF rate limits with PAGE | Done | `wrangler.jsonc` `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` (ns 4005/4007) |
 | DMV-local KV fingerprint cooldown | Done | `worker/rate-limit-kv.ts`, `REGISTER_COOLDOWN_KV` binding |
@@ -417,6 +444,15 @@ Everything below is shipped in this repo and ready to deploy:
 | Dead code removed (CardPoster.js) | Done | Deleted |
 | Dead Vercel artifacts removed (`api/`, `vercel.json`, `middleware.js`) | Done | Deleted post-cutover |
 | Fog leak fixed | Done | `js/TV.js` |
+
+### Lookup deployment order
+
+Configure the same generated `DMV_PROXY_SECRET` on the Cloudflare Worker and
+Supabase project without writing it to source. Confirm `RL_CERT_LOOKUP`,
+`BADGE_CACHE_KV`, and `REGISTER_COOLDOWN_KV` are bound, deploy the Worker first,
+then deploy `lookup-agent --no-verify-jwt`. Worker-first preserves a public
+rate-limited lookup path before the previously documented direct Edge surface is
+secret-gated. Direct Edge URLs are never client APIs.
 
 ## Cross-Repo Migrations (owned by PAGE)
 

@@ -57,7 +57,7 @@ The Department of Machine Verification is the identity registration system for t
  │              CLOUDFLARE — dmv.agentcommunity.org      │               │
  │                                                      │               │
  │  ┌───────────────────────────────────────────────┐  │               │
- │  │  Worker — worker/index.ts handleRegister       │◄─┘               │
+ │  │  Worker — worker/index.ts                      │◄─┘               │
  │  │                                                │                   │
  │  │  POST /api/register                            │                   │
  │  │    Browser path (signup_source: 'ui'):         │                   │
@@ -83,7 +83,12 @@ The Department of Machine Verification is the identity registration system for t
  │  │  CAPTCHA always before counters — invalid       │  │               │
  │  │  tokens cannot exhaust quota for real users.   │  │               │
  │  │                                                │  │               │
- │  │  🔑 Holds TURNSTILE_SECRET_KEY                 │  │               │
+ │  │  GET /api/lookup?id=CERT-ID                    │  │               │
+ │  │    → 30/60s/IP; cache 300s/60s                │  │               │
+ │  │    → six public fields; no domain lookup      │  │               │
+ │  │                                                │  │               │
+ │  │  🔑 Holds TURNSTILE_SECRET_KEY +              │  │               │
+ │  │     DMV_PROXY_SECRET                           │  │               │
  │  └────────────────────────────────────────────────┘  │               │
  └────────────────────────────────────────────────────────┼───────────────┘
                                                           │
@@ -109,10 +114,9 @@ The Department of Machine Verification is the identity registration system for t
  │  │    NOTE: Upstash rate limiting REMOVED — the      │                   │
  │  │    worker owns anti-abuse now.                    │                   │
  │  │                                                  │                   │
- │  │  GET /lookup-agent?id=CERT-ID                    │                   │
- │  │    → single result (cert IDs are unique)         │                   │
- │  │  GET /lookup-agent?domain=name                   │                   │
- │  │    → array (multiple pre-registrations)          │                   │
+ │  │  GET /lookup-agent?id=CERT-ID (internal)         │                   │
+ │  │    → requires x-dmv-proxy: DMV_PROXY_SECRET      │                   │
+ │  │    → direct access 403; domain lookup removed   │                   │
  │  │                                                  │                   │
  │  │  GET /badge?id=CERT-ID&style=flat|card           │                   │
  │  │    → SVG badge (cert ID only, domain lookup     │                   │
@@ -165,9 +169,15 @@ The CLI features an interactive CRT terminal experience (ASCII art frame, green 
 
 ### Rate limiting
 
-Two distinct surfaces, owned by the Cloudflare Worker.
+Three distinct surfaces, owned by the Cloudflare Worker.
 
 **Render path** (`/api/card`, `/api/og`): `API_RATE_LIMITER` binding — 100 req/60s per `${ip}:${pathname}`, namespace `1001` (DMV-local). Runs BEFORE the in-Worker cache lookup so rejections don't eat CPU on L1/R2 reads. Rejected requests return `429` with `Retry-After: 60`. Configured in `wrangler.jsonc` under the top-level `ratelimits` array.
+
+**Certificate lookup** (`/api/lookup`): `RL_CERT_LOOKUP` plus an authoritative
+hashed-IP bucket in `REGISTER_COOLDOWN_KV` enforce 30 requests/60s/IP. Valid
+requests consume quota before `BADGE_CACHE_KV` is read. Issued responses are
+cached for 300 seconds, not-found responses for 60 seconds, and upstream errors
+are not cached. Client responses remain `Cache-Control: private, no-store`.
 
 **Register path** (`/api/register`): five layers, ordered cheapest-to-most-expensive.
 
@@ -204,7 +214,7 @@ threejs_box_design_dmv/
 │
 ├── supabase/functions/
 │   ├── register-agent/index.ts   POST — Worker upstream (validate, lifetime cap, generate cert, insert). Anti-abuse lives in the worker.
-│   ├── lookup-agent/index.ts     GET — public read-only lookup by cert ID or domain
+│   ├── lookup-agent/index.ts     GET — secret-gated internal lookup by certificate ID only
 │   └── badge/index.ts            GET — SVG badge generator (flat + card styles)
 │
 ├── packages/dmv-agent/           NPM package: @agentcommunity/dmv-agent
@@ -265,8 +275,13 @@ Principle: never trust the client.
 Client code:     validates → POST JSON → reads response
                  (no secrets, no DB access, just fetch())
 
-Edge function:   validates again → rate limits → generates cert → INSERTs
-                 (holds service role key, server-side authority)
+Worker:          owns public registration and certificate lookup policy
+                 (rate limits, caches, minimizes lookup responses)
+
+Edge functions:  verify DMV_PROXY_SECRET before client creation
+                 → register: validate, cap, generate cert, INSERT
+                 → lookup: select certificate ID + requested name only
+                 (hold service role key; not public API routes)
 
 Database:        RLS denies all anon access
                  (only reachable through edge function with service key)
@@ -277,10 +292,10 @@ Database:        RLS denies all anon access
 | Spam registrations (browser) | Cloudflare Turnstile (server-side hostname + `dmv_register` action check) + shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared with `agentCommunity_PAGE` at the CF account level) + DB lifetime cap 5/email (12 if endorsed). CAPTCHA always runs before counters. |
 | Spam registrations (CLI/MCP) | Machine fingerprint required + same shared CF rate limits + DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`) + DB lifetime cap. Headless clients can't solve Turnstile, so fingerprint substitutes. |
 | Name squatting | Pre-registration model — multiple users can claim the same domain. Magic link email verifies identity. |
-| Credential theft | No credentials in client code. Anon key removed. Only the worker `/api/register` URL is public; `TURNSTILE_SECRET_KEY` is encrypted on the worker, `SUPABASE_SERVICE_ROLE_KEY` only inside the edge function runtime. |
-| Data exfil | lookup-agent returns only public fields. No email, no IP, no operator name. |
+| Credential theft | No credentials in client code. Anon key removed. The Worker owns public `/api/register` and `/api/lookup`; `TURNSTILE_SECRET_KEY` and `DMV_PROXY_SECRET` are encrypted Worker secrets, and `SUPABASE_SERVICE_ROLE_KEY` exists only inside Edge Functions. |
+| Data exfil | Worker `/api/lookup` returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`. No email, IP, operator name, domain record, timestamps, description, or metadata. |
 | Token reuse across properties | Turnstile tokens are scoped to the DMV hostname AND the `dmv_register` action. A token minted on PAGE or for a different DMV route is rejected by `verifyTurnstileToken`. |
-| DDoS on edge fn | The worker is the public choke point — Supabase only sees worker-forwarded traffic (plus a temporary direct-bypass for legacy CLI versions, see CLOUDFLARE.md "Known gaps"). Worker has built-in CF DDoS protection. |
+| DDoS on edge fn | The Worker is the public choke point. Secret-gated `register-agent` and `lookup-agent` reject direct calls before creating a database client. Worker rate limits and Cloudflare DDoS protection apply before lookup traffic reaches Supabase. |
 
 ## Badges
 
@@ -375,8 +390,8 @@ npm run text:check      # strict tests (CI-safe)
 |-------|-----------|-------|
 | Web UI | Three.js 0.152.2, GSAP 3.12.2, Canvas2D | No build system, native ES modules |
 | NPM package | TypeScript, MCP SDK | pnpm for dev, bunx for users |
-| Edge functions | Deno (Supabase Edge Functions) | Auto-deployed env vars |
+| Edge functions | Deno (Supabase Edge Functions) | Secret-gated internal upstreams; deploy with `--no-verify-jwt` after the Worker |
 | Database | PostgreSQL (Supabase) | RLS, unique constraints |
 | Hosting (web) | Cloudflare Workers Static Assets + Container | dist/ served by `dmv-agentcommunity` worker |
-| Hosting (API anti-abuse) | Cloudflare Worker (`/api/register`) | Turnstile + shared CF rate limits + KV cooldown |
-| Hosting (API upstream) | Supabase Edge Functions | Validation + cert ID generation + DB writes |
+| Hosting (public API) | Cloudflare Worker (`/api/register`, `/api/lookup`) | Registration anti-abuse plus rate-limited, cached, minimized certificate lookup |
+| Hosting (API upstream) | Supabase Edge Functions | `DMV_PROXY_SECRET`-gated validation, DB writes, and certificate-ID lookup |
