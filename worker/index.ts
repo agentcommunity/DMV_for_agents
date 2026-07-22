@@ -1,4 +1,4 @@
-// DMV card Worker — entry point for /api/card with R2 read-through cache.
+// DMV card Worker — entry point for dynamic DMV API routes.
 //
 // Flow:
 //   GET /api/card?id=<>&name=<>&type=<>
@@ -11,6 +11,7 @@
 // Endpoints:
 //   GET /api/card     → cached PNG, 880×630 card (renders on first miss)
 //   GET /api/og       → cached PNG, 1200×630 composite for OG/Twitter
+//   GET /api/lookup   → certificate status lookup proxy
 //   GET /badge/*      → proxied through to the Supabase badge edge function
 //   GET /c/:id/:name  → SPA shell (crawler UA gets OG meta-injected variant)
 //   GET /healthz      → 200 ok (verifies worker + container reachability)
@@ -19,6 +20,7 @@
 // This Worker only handles dynamic routes.
 
 import { Container, getContainer } from '@cloudflare/containers';
+import { handleCertificateLookup } from './certificate-lookup';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import { incrementKvCooldown } from './rate-limit-kv';
 import { normalizeAgentName, validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
@@ -69,19 +71,20 @@ interface Env {
   // Schema: see emitAnalytics() below. Bound in wrangler.jsonc as
   // analytics_engine_datasets.
   ANALYTICS: AnalyticsEngineDataset;
-  // Workers Rate Limiting API binding. Configured in wrangler.jsonc under
-  // the top-level `ratelimits` array. 100 req/60s per IP+path across /api/*.
+  // Workers Rate Limiting API binding for existing render routes. Configured
+  // in wrangler.jsonc under the top-level `ratelimits` array.
   API_RATE_LIMITER: RateLimit;
+  // Dedicated public certificate lookup limiter: 30 req/60s per IP.
+  RL_CERT_LOOKUP: RateLimit;
   // Shared signup abuse counters with PAGE. Only the email and IP+email
   // surfaces are shared across products.
   RL_OTP_EMAIL: RateLimit;
   RL_OTP_IP_EMAIL: RateLimit;
-  // KV cache for /badge/* responses. 10 min TTL. Keyed by
-  // `badge:${pathname}${search}`. Values are raw bytes with content-type
-  // stored in the KV metadata.
+  // BADGE_CACHE_KV stores badge responses and prefixed certificate lookup cache
+  // entries. Badge values are raw bytes with content-type stored in KV metadata.
   BADGE_CACHE_KV: KVNamespace;
-  // DMV-local coarse cooldown state for machine-fingerprint registration
-  // limits on CLI/MCP flows. Intentionally not shared with PAGE.
+  // REGISTER_COOLDOWN_KV stores registration cooldowns and prefixed lookup
+  // counters. Intentionally not shared with PAGE.
   REGISTER_COOLDOWN_KV: KVNamespace;
   TURNSTILE_SECRET_KEY: string;
   // Shared secret sent to register-agent as the `x-dmv-proxy` header value;
@@ -1495,6 +1498,9 @@ export default {
 
     // /api/og → SAME container renderer, composited onto 1200x630 for OG/Twitter
     if (url.pathname === '/api/og') return handleOg(request, env, ctx);
+
+    // /api/lookup → public certificate status lookup proxy
+    if (url.pathname === '/api/lookup') return handleCertificateLookup(request, env);
 
     // /badge/* → Supabase Edge Function proxy
     if (url.pathname.startsWith('/badge/') || url.pathname === '/badge') {

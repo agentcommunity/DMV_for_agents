@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -124,6 +125,20 @@ test('exports the certificate lookup policy constants', () => {
   assert.equal(LOOKUP_WINDOW_SECONDS, 60);
   assert.equal(LOOKUP_POSITIVE_TTL_SECONDS, 300);
   assert.equal(LOOKUP_NEGATIVE_TTL_SECONDS, 60);
+});
+
+test('Worker imports and dispatches /api/lookup before static assets', async () => {
+  const source = await readFile(new URL('../worker/index.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /import \{ handleCertificateLookup \} from '\.\/certificate-lookup';/);
+  assert.match(
+    source,
+    /if \(url\.pathname === '\/api\/lookup'\) return handleCertificateLookup\(request, env\);/,
+  );
+  assert.ok(
+    source.indexOf("if (url.pathname === '/api/lookup')")
+    < source.indexOf('return env.ASSETS.fetch(request);'),
+  );
 });
 
 test('rejects an invalid check digit without calling upstream', async () => {
