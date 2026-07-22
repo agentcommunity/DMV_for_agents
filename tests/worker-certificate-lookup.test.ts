@@ -167,6 +167,11 @@ function assertPrivateNoStore(response: Response): void {
   assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
 }
 
+function assertNoExactRateLimitTelemetry(response: Response): void {
+  assert.equal(response.headers.get('RateLimit-Remaining'), null);
+  assert.equal(response.headers.get('RateLimit-Reset'), null);
+}
+
 test('exports the certificate lookup policy constants', () => {
   assert.equal(LOOKUP_LIMIT, 30);
   assert.equal(LOOKUP_WINDOW_SECONDS, 60);
@@ -209,6 +214,7 @@ test('rejects an invalid check digit without calling upstream', async () => {
   });
   assert.equal(upstream.calls.length, 0);
   assert.equal(badgeKv.reads.length + durableLimiter.requests.length, 0);
+  assertNoExactRateLimitTelemetry(response);
   assertPrivateNoStore(response);
 });
 
@@ -465,7 +471,7 @@ test('returns 429 when the Cloudflare limiter rejects', async (t) => {
   assert.equal(response.status, 429);
   assert.deepEqual(await readJson(response), { error: 'rate_limited', retry_after_seconds: 60 });
   assert.equal(response.headers.get('Retry-After'), '60');
-  assert.equal(response.headers.get('RateLimit-Reset'), '60');
+  assertNoExactRateLimitTelemetry(response);
   assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
   assert.equal(durableLimiter.requests.length, 0);
   assert.equal(upstream.calls.length, 0);
@@ -502,6 +508,7 @@ test('fails closed before cache or upstream when the Durable Object throws', asy
 
   assert.equal(response.status, 503);
   assert.equal((await readJson(response)).status, 'unavailable');
+  assertNoExactRateLimitTelemetry(response);
   assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
   assert.equal(upstream.calls.length, 0);
   assertPrivateNoStore(response);
@@ -526,6 +533,7 @@ test('fails closed before cache or upstream for an invalid Durable Object respon
   });
   assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
   assert.equal(upstream.calls.length, 0);
+  assertNoExactRateLimitTelemetry(response);
   assertPrivateNoStore(response);
 });
 
@@ -551,6 +559,7 @@ test('maps SHA-256 digest rejection to unavailable before cache or upstream', as
   assert.equal(durableLimiter.requests.length, 0);
   assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
   assert.equal(upstream.calls.length, 0);
+  assertNoExactRateLimitTelemetry(response);
   assertPrivateNoStore(response);
 });
 
@@ -661,6 +670,7 @@ test('fails loud when DMV_PROXY_SECRET is absent', async () => {
   assert.equal(limiter.calls.length, 0);
   assert.equal(badgeKv.reads.length + durableLimiter.requests.length, 0);
   assert.equal(upstream.calls.length, 0);
+  assertNoExactRateLimitTelemetry(response);
   assertPrivateNoStore(response);
 });
 
@@ -676,6 +686,7 @@ test('allows only GET', async () => {
   assert.equal(response.status, 405);
   assert.equal(response.headers.get('Allow'), 'GET');
   assert.deepEqual(await readJson(response), { error: 'method_not_allowed' });
+  assertNoExactRateLimitTelemetry(response);
   assert.equal(badgeKv.reads.length + durableLimiter.requests.length, 0);
   assert.equal(upstream.calls.length, 0);
   assertPrivateNoStore(response);

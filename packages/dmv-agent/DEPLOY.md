@@ -82,24 +82,77 @@ shell history, or client configuration. The Worker also requires
 and `BADGE_CACHE_KV` (lookup result cache) as configured in `wrangler.jsonc`.
 `REGISTER_COOLDOWN_KV` remains registration-only.
 
-Deploy in this order:
+Before merging, run these container gates on a Docker-capable machine:
 
 ```bash
-# 1. Deploy the public Worker boundary first.
-pnpm cf:deploy
-
-# 2. Then deploy the internal Edge upstreams. They must bypass Supabase's
-# platform JWT layer because the Worker authenticates with x-dmv-proxy.
-supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
-supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
-
-# 3. Badge remains behind the Worker proxy.
-supabase functions deploy badge --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+docker info
+pnpm cf:container:build
 ```
 
-Worker-first is required so the rate-limited `/api/lookup` replacement is live
-before `lookup-agent` begins rejecting the formerly documented direct access.
-Supabase automatically injects `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+Any Docker CLI error text is a failed gate even if a wrapper later exits zero. The
+2026-07-22 implementation host has no Docker/Podman runtime, so these gates and the
+real Worker rollout must run in Cloudflare's build environment or another
+Docker-capable environment.
+
+Deploy in this order:
+
+1. Record the merged `main` SHA, the currently deployed Worker version, and the
+   target Worker version in the launch notes. In the Cloudflare account, confirm
+   that native rate-limit namespace `1002` is allocated to `RL_CERT_LOOKUP` and
+   does not collide with another account-wide binding. Confirm `BADGE_CACHE_KV`,
+   `CERT_LOOKUP_LIMITER`, the v1/v2 Durable Object migrations, and the shared
+   `DMV_PROXY_SECRET` are configured without printing the secret.
+2. Merge to `main` and use the Cloudflare Git integration's automatic build as
+   the single authoritative Worker deploy path. Watch that build and capture its
+   deployed commit SHA/version. If no automatic build starts, first confirm in
+   the dashboard that no build/deploy is active, then use `pnpm cf:deploy` once
+   as the fallback. Never run the automatic and manual paths concurrently.
+3. Before changing Supabase, smoke `/healthz`, an existing card and badge,
+   validation-only registration, invalid lookup (`400`), and a known valid-format
+   lookup. The valid-format lookup is expected to be a brief `503 unavailable`
+   while the Worker talks to the legacy Edge response; this is the accepted
+   Worker-first compatibility interval. Do not expect `issued` or `not_found`
+   until Step 4.
+4. Deploy **only** the changed lookup function:
+
+```bash
+supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+```
+
+Do not redeploy `register-agent` or `badge` during this rollout. Supabase must
+bypass its platform JWT layer because the Worker authenticates with
+`x-dmv-proxy`. Supabase automatically injects `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`.
+
+5. Prove issued and generated-valid-but-absent results through the Worker, the
+   invalid-format response, exact 30/60 limiting, and a secretless direct
+   `lookup-agent` request returning `403`. Also re-run health, card, badge, and
+   registration smokes. Keep `wrangler tail` or the Cloudflare Durable Object
+   metrics open: capture first provisioning/storage, the 31st-request denial,
+   an alarm event/metric after expiry, and a post-window request with 29
+   remaining. This is the real deployed v2 storage/alarm smoke.
+6. Only after those results pass, change the lookup status from unpublished to
+   live in `README.md`, `llms.txt`, `index.html`, `CLOUDFLARE.md`,
+   `AUTH_DMV.md`, this file, and `AGENT_HANDOFF.md`. Commit and push that
+   evidence-backed status update before declaring launch complete.
+
+### v2-safe recovery
+
+Cloudflare's v2 SQLite Durable Object migration is forward-only operational
+state. Never use Cloudflare rollback to a pre-v2 Worker: such a version lacks
+the `CertificateLookupRateLimiter` export/binding while the account retains the
+v2 migration. Preserve both v1 and v2 migrations, the class export, and the
+`CERT_LOOKUP_LIMITER` binding in every recovery version.
+
+- If the Worker fails before the Edge deploy, stop. Restore traffic by shipping
+  a new compatible Worker version that retains the migration/export/bindings;
+  prefer roll-forward. Do not deploy the Edge function yet.
+- If the Edge deploy fails after its secret gate is active, the Worker safely
+  returns uncached `503 unavailable`. Roll forward `lookup-agent`; do not restore
+  the legacy Edge contract or direct public access.
+- Record the prior/current deployed versions and the exact failed smoke state
+  before remediation. Do not delete or reverse Durable Object migrations or
+  storage.
 
 ### Verify it's running
 
@@ -188,8 +241,12 @@ curl -X POST .../api/register -H 'Content-Type: application/json' \
 ```bash
 BASE=https://dmv.agentcommunity.org
 
-# After Task 8 publication: certificate ID through the Worker → 200 JSON
+# After the Edge deploy: issued or not_found through the Worker → 200 JSON
 curl "$BASE/api/lookup?id=MESA-DD6-660J"
+
+# Direct secretless Edge access must be closed → 403
+curl -i \
+  "https://tcymqfwwphacnosnnzxl.supabase.co/functions/v1/lookup-agent?id=MESA-DD6-660J"
 
 # Domain enumeration is removed; do not send requested names to this endpoint.
 

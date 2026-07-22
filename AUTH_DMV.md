@@ -454,11 +454,27 @@ Everything below is shipped in this repo and ready to deploy:
 ### Lookup deployment order
 
 Configure the same generated `DMV_PROXY_SECRET` on the Cloudflare Worker and
-Supabase project without writing it to source. Confirm `RL_CERT_LOOKUP`,
-`CERT_LOOKUP_LIMITER`, and `BADGE_CACHE_KV` are bound, deploy the Worker first,
-then deploy `lookup-agent --no-verify-jwt`. Worker-first preserves a public
-rate-limited lookup path before the previously documented direct Edge surface is
-secret-gated. Direct Edge URLs are never client APIs.
+Supabase project without writing it to source. On a Docker-capable deployment
+host, require `docker info` and `pnpm cf:container:build`; the current
+2026-07-22 implementation host cannot satisfy this gate. Confirm account-wide
+namespace `1002` is assigned only to `RL_CERT_LOOKUP`, and confirm
+`CERT_LOOKUP_LIMITER`, `BADGE_CACHE_KV`, the v1/v2 migrations, and the shared
+secret binding.
+
+Merge to `main` and use the Cloudflare Git automatic build as the sole Worker
+deploy path. Record the prior version, merged SHA, and deployed version. Manual
+`pnpm cf:deploy` is a fallback only when no automatic build started and no
+deploy is active. Before Edge deployment, smoke the route/bindings and expect a
+valid-format lookup to fail closed with a brief compatibility `503` against the
+legacy Edge response. Then deploy **only** `lookup-agent --no-verify-jwt` and
+prove Worker issued/not-found results plus secretless direct Edge `403`.
+
+Never use Cloudflare rollback to a pre-v2 Worker. Retain both migrations, the
+Durable Object class export, and its binding in a compatible roll-forward. Edge
+failure stays fail-closed (`503`) while the Edge function rolls forward; do not
+restore direct access. After all smokes, update the canonical unpublished
+status surfaces listed in `packages/dmv-agent/DEPLOY.md`, commit, and push that
+evidence-backed status change. Direct Edge URLs are never client APIs.
 
 ## Cross-Repo Migrations (owned by PAGE)
 

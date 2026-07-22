@@ -355,13 +355,14 @@ the npm tarball in a temporary consumer project to prove the published-style
 ### Deploying the lookup boundary
 
 ```bash
-# Configure the same secret on Cloudflare and Supabase without storing it here.
-# Deploy the public Worker first, then close the internal Edge upstream.
-pnpm cf:deploy
+# Require docker info + pnpm cf:container:build on a capable environment.
+# Merge main for the Cloudflare Git Worker deploy, smoke the expected temporary
+# valid-format 503, then deploy only the internal lookup upstream.
 supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
-See [DEPLOY.md](DEPLOY.md) for the full go-live checklist.
+Never roll back to a pre-v2 Worker. See [DEPLOY.md](DEPLOY.md) for the automatic
+deploy, compatibility, evidence, status-update, and roll-forward checklist.
 
 ## License
 

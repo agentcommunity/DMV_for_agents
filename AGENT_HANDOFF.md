@@ -15,7 +15,8 @@ DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate acti
                                                            status NOT set on INSERT (DB default applies)
                                                            MUST be deployed with --no-verify-jwt
 
-npm                @agentcommunity/dmv-agent@0.2.0         published, routes through /api/register
+npm                @agentcommunity/dmv-agent@0.2.1         published, routes through /api/register
+                   dmv-agent@0.1.1 alias                  depends on @agentcommunity/dmv-agent ^0.2.1
 
 Lookup branch      GET /api/lookup + lookup-agent changes  implementation-ready, not published
                                                            Task 8 still needs deployed SHA + live smoke evidence
@@ -82,15 +83,25 @@ ID: `ec0cdc55c2f94267af84f0218c961a00` (preview: `dc0c4a98b4764d448f35872de11984
 
 ### 7. The npm CLI auto-resolves the scoped package
 
-`bunx dmv-agent register` installs `dmv-agent@0.1.0` (the unscoped alias) which depends on `@agentcommunity/dmv-agent>=0.1.0`. npm resolves that range to the latest matching version, currently 0.2.0. So publishing a new `@agentcommunity/dmv-agent` version transparently updates what `bunx dmv-agent` users get, without republishing the alias. When publishing: `cd packages/dmv-agent && npm publish --access public`. Do NOT publish from the repo root — the root `package.json` has `"private": true` as a safety rail, but a missing private flag would ship 17 MB of everything. See `.gitignore` for `.worktrees/` exclusion that backstops this.
+`bunx dmv-agent register` installs `dmv-agent@0.1.1` (the unscoped alias), which depends on `@agentcommunity/dmv-agent^0.2.1`. The currently published scoped package is `0.2.1`. Publishing a compatible new scoped version can transparently update what alias users get, subject to that caret range. When publishing: `cd packages/dmv-agent && npm publish --access public`. Do NOT publish from the repo root — the root `package.json` has `"private": true` as a safety rail, but a missing private flag would ship 17 MB of everything. See `.gitignore` for `.worktrees/` exclusion that backstops this.
 
 ### 8. Lookup deploy order is Worker first, then Edge
 
 Set the same generated `DMV_PROXY_SECRET` on Cloudflare and Supabase without
-writing it to source. Confirm `RL_CERT_LOOKUP`, `CERT_LOOKUP_LIMITER`, and
-`BADGE_CACHE_KV`, deploy the Worker first, and only then deploy
-`lookup-agent --no-verify-jwt`. Reversing the order would close the formerly
-documented direct lookup before its public Worker replacement is available.
+writing it to source. Require Docker/container-build gates on a capable host,
+confirm account-wide native namespace `1002`, the lookup bindings, and v1/v2
+migrations, then merge `main`. Cloudflare Git automatic deploy is authoritative;
+manual deploy is a non-concurrent fallback only if auto deploy never starts.
+
+Worker first is intentional. Before Edge, route/binding smokes include invalid
+ID `400` and an expected brief `503 unavailable` for a valid-format ID against
+the legacy response. Then deploy only `lookup-agent --no-verify-jwt`; prove
+issued/not-found, direct secretless `403`, exact limit/rollover and real DO
+storage/alarm behavior, plus existing registration/health/card/badge smokes.
+Never roll back to pre-v2: preserve the migrations, DO export and binding in a
+roll-forward. If Worker fails, stop before Edge. If Edge fails after gating,
+keep the safe Worker `503` and roll Edge forward without reopening direct access.
+Finally update and push all unpublished status surfaces listed in DEPLOY.md.
 
 ## Residual TODOs — prioritize here next time
 

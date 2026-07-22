@@ -47,7 +47,8 @@ We'll acknowledge your report within 48 hours and work with you on a fix before 
   Worker. It accepts certificate IDs, applies coarse/eventually consistent
   `RL_CERT_LOOKUP` at 60/60, then uses one `CERT_LOOKUP_LIMITER` SQLite Durable
   Object per SHA-256 hashed IP for exact transactional 30/60 accounting and
-  remaining/reset values. Durable Object failure fails closed before cache or
+  remaining/reset values. Responses produced before an authoritative Durable
+  Object decision omit guessed remaining/reset telemetry. Durable Object failure fails closed before cache or
   upstream; `BADGE_CACHE_KV` stores results only. The staged Supabase
   `lookup-agent` change makes the Edge Function an internal upstream with exact
   typed HTTP 200 `issued`/`not_found` envelopes: it requires the

@@ -36,24 +36,26 @@ function secondsUntilNextMinute(now = Date.now()): number {
   return LOOKUP_WINDOW_SECONDS - elapsedSeconds;
 }
 
-function responseHeaders(remaining: number, reset: number): Headers {
-  return new Headers({
+function responseHeaders(rateLimit?: { remaining: number; reset: number }): Headers {
+  const headers = new Headers({
     'Cache-Control': 'private, no-store',
     'Content-Type': 'application/json; charset=utf-8',
     'RateLimit-Limit': String(LOOKUP_LIMIT),
-    'RateLimit-Remaining': String(remaining),
-    'RateLimit-Reset': String(reset),
   });
+  if (rateLimit) {
+    headers.set('RateLimit-Remaining', String(rateLimit.remaining));
+    headers.set('RateLimit-Reset', String(rateLimit.reset));
+  }
+  return headers;
 }
 
 function jsonResponse(
   body: CertificateLookupResult | Record<string, unknown>,
   status: number,
-  remaining: number,
-  reset: number,
+  rateLimit?: { remaining: number; reset: number },
   extraHeaders?: HeadersInit,
 ): Response {
-  const headers = responseHeaders(remaining, reset);
+  const headers = responseHeaders(rateLimit);
   if (extraHeaders) {
     new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
   }
@@ -205,12 +207,10 @@ export async function handleCertificateLookup(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   if (request.method !== 'GET') {
-    const reset = secondsUntilNextMinute();
     return jsonResponse(
       { error: 'method_not_allowed' },
       405,
-      LOOKUP_LIMIT,
-      reset,
+      undefined,
       { Allow: 'GET' },
     );
   }
@@ -221,8 +221,6 @@ export async function handleCertificateLookup(
     return jsonResponse(
       invalidFormatResult(id),
       400,
-      LOOKUP_LIMIT,
-      secondsUntilNextMinute(),
     );
   }
 
@@ -231,8 +229,6 @@ export async function handleCertificateLookup(
     return jsonResponse(
       unavailableResult(id),
       503,
-      LOOKUP_LIMIT,
-      secondsUntilNextMinute(),
     );
   }
 
@@ -242,7 +238,7 @@ export async function handleCertificateLookup(
     ipHash = await hashIp(ip);
   } catch (error) {
     console.error('[certificate-lookup] IP hashing failed', { error });
-    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute());
+    return jsonResponse(unavailableResult(id), 503);
   }
 
   try {
@@ -252,8 +248,7 @@ export async function handleCertificateLookup(
       return jsonResponse(
         { error: 'rate_limited', retry_after_seconds: reset },
         429,
-        0,
-        reset,
+        undefined,
         { 'Retry-After': String(reset) },
       );
     }
@@ -264,14 +259,13 @@ export async function handleCertificateLookup(
   const exactLimit = await consumeExactRateLimit(env.CERT_LOOKUP_LIMITER, ipHash);
 
   if (!exactLimit) {
-    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute());
+    return jsonResponse(unavailableResult(id), 503);
   }
   if (!exactLimit.allowed) {
     return jsonResponse(
       { error: 'rate_limited', retry_after_seconds: exactLimit.reset },
       429,
-      0,
-      exactLimit.reset,
+      { remaining: 0, reset: exactLimit.reset },
       { 'Retry-After': String(exactLimit.reset) },
     );
   }
@@ -283,7 +277,9 @@ export async function handleCertificateLookup(
     const cachedValue = await env.BADGE_CACHE_KV.get(cacheKey);
     if (cachedValue) {
       const cachedResult = parseCachedResult(cachedValue, id);
-      if (cachedResult) return jsonResponse(cachedResult, 200, remaining, reset);
+      if (cachedResult) {
+        return jsonResponse(cachedResult, 200, { remaining, reset });
+      }
     }
   } catch (error) {
     console.error('[certificate-lookup] result cache read failed', { cacheKey, error });
@@ -303,35 +299,35 @@ export async function handleCertificateLookup(
     );
 
     if (upstream.status !== 200) {
-      return jsonResponse(unavailableResult(id), 503, remaining, reset);
+      return jsonResponse(unavailableResult(id), 503, { remaining, reset });
     }
 
     let upstreamBody: unknown;
     try {
       upstreamBody = await upstream.json();
     } catch {
-      return jsonResponse(unavailableResult(id), 503, remaining, reset);
+      return jsonResponse(unavailableResult(id), 503, { remaining, reset });
     }
     if (!upstreamBody || typeof upstreamBody !== 'object') {
-      return jsonResponse(unavailableResult(id), 503, remaining, reset);
+      return jsonResponse(unavailableResult(id), 503, { remaining, reset });
     }
 
     const upstreamRecord = upstreamBody as Record<string, unknown>;
     if (isNotFoundEnvelope(upstreamRecord, id)) {
       const result = notFoundResult(id);
       await cacheResult(env.BADGE_CACHE_KV, cacheKey, result, LOOKUP_NEGATIVE_TTL_SECONDS);
-      return jsonResponse(result, 200, remaining, reset);
+      return jsonResponse(result, 200, { remaining, reset });
     }
     if (!isIssuedEnvelope(upstreamRecord, id)) {
-      return jsonResponse(unavailableResult(id), 503, remaining, reset);
+      return jsonResponse(unavailableResult(id), 503, { remaining, reset });
     }
 
     const result = issuedResult(id, upstreamRecord.agent_name as string);
     await cacheResult(env.BADGE_CACHE_KV, cacheKey, result, LOOKUP_POSITIVE_TTL_SECONDS);
-    return jsonResponse(result, 200, remaining, reset);
+    return jsonResponse(result, 200, { remaining, reset });
   } catch (error) {
     console.error('[certificate-lookup] upstream lookup failed', { error });
-    return jsonResponse(unavailableResult(id), 503, remaining, reset);
+    return jsonResponse(unavailableResult(id), 503, { remaining, reset });
   } finally {
     clearTimeout(timeout);
   }

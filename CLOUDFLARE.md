@@ -161,10 +161,15 @@ pnpm wrangler r2 bucket create dmv-card-cache-test-preview
 # Local dev — runs build-cf.mjs then wrangler dev on http://localhost:8787
 pnpm cf:dev
 
-# Deploy the public boundary first (dmv-agentcommunity, dmv.agentcommunity.org)
-pnpm cf:deploy
+# Mandatory pre-deploy gates on a Docker-capable machine
+docker info
+pnpm cf:container:build
 
-# Only after the Worker is live, deploy the secret-gated lookup upstream.
+# Merge to main and let Cloudflare Git deploy the Worker. Use pnpm cf:deploy
+# only if no automatic build started, after confirming no deploy is active.
+
+# Only after the Worker-first compatibility smokes, deploy the changed Edge
+# function (not register-agent or badge).
 supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 
 # Visual fidelity spot-check: local vs deployed
@@ -182,14 +187,41 @@ open test-harness/output/index.html
    registry, and rolls out the Worker.
 
 The lookup changes are implementation-ready but unpublished as of 2026-07-22;
-do not call this boundary live until Task 8 records the deployed SHA and smoke
-evidence. Lookup rollout order is non-negotiable: configure the same generated
-`DMV_PROXY_SECRET` on Cloudflare and Supabase, confirm the Worker bindings
-`RL_CERT_LOOKUP`, `CERT_LOOKUP_LIMITER`, and `BADGE_CACHE_KV`, deploy the
-Worker first, and only then deploy the secret-gated `lookup-agent` Edge
-Function. This establishes `/api/lookup` before the former direct Edge surface
-starts returning 403. Never record the secret in this repository or pass it to
-clients.
+do not call this boundary live until Task 8 records the deployed SHA/version and
+smoke evidence. The 2026-07-22 implementation host has no Docker runtime, so a
+Docker-capable environment must pass both commands above before rollout; any
+Docker CLI error text is a failed gate regardless of a wrapper's exit code.
+
+Lookup rollout order is non-negotiable. Configure the same generated
+`DMV_PROXY_SECRET` on Cloudflare and Supabase without printing it. Confirm
+account-wide native namespace `1002` is allocated to `RL_CERT_LOOKUP` without a
+collision, plus `CERT_LOOKUP_LIMITER`, `BADGE_CACHE_KV`, and unchanged v1/new v2
+migrations. Merge to `main` and treat the Cloudflare Git automatic build as the
+single authoritative Worker deployment. Record the previous version, merged
+SHA, and deployed version. Use manual `pnpm cf:deploy` only if automatic deploy
+did not start and the dashboard confirms no deploy is active; never run both.
+
+After the Worker deploy, smoke health, card, badge, registration validation,
+invalid lookup, and a valid-format certificate. The last check is expected to
+return a brief fail-closed `503 unavailable` against the legacy Edge contract.
+Only then deploy **only** `lookup-agent`; `issued`/`not_found` are post-Edge
+expectations. Prove secretless direct Edge access is `403`, issued and generated
+valid-but-absent results, exact request 31 denial, minute rollover, and real
+Durable Object provisioning/storage/alarm activity via tail/metrics. Re-run the
+existing health/card/badge/registration smokes.
+
+The v2 SQLite migration is forward-only operational state. Never roll back to a
+pre-v2 Worker. Preserve the v1/v2 migrations, `CertificateLookupRateLimiter`
+export, and binding in a compatible roll-forward. If Worker smokes fail, stop
+before Edge and ship a new compatible Worker. If Edge fails after gating, leave
+the Worker's fail-closed 503 in place and roll Edge forward; never reopen legacy
+direct access. Full recovery and evidence steps are in
+`packages/dmv-agent/DEPLOY.md`.
+
+Only after every smoke passes, change `README.md`, `llms.txt`, `index.html`, this
+file, `AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`, and `AGENT_HANDOFF.md` from
+unpublished to live, then commit and push that status/evidence update. Never
+record the secret in this repository or pass it to clients.
 
 ## Operational notes
 
