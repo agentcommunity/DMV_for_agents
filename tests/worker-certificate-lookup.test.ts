@@ -26,9 +26,15 @@ interface TestEnv {
     calls: Array<string>;
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
+  CERT_LOOKUP_LIMITER: DurableObjectNamespace;
   BADGE_CACHE_KV: KVNamespace;
-  REGISTER_COOLDOWN_KV: KVNamespace;
   DMV_PROXY_SECRET?: string;
+}
+
+interface TrackedDurableLimiter {
+  namespace: DurableObjectNamespace;
+  names: Array<string>;
+  requests: Array<Request>;
 }
 
 function createKv(options: {
@@ -72,21 +78,62 @@ function createLimiter(options: { success?: boolean; throws?: boolean } = {}) {
   };
 }
 
+function createDurableLimiter(options: {
+  throws?: boolean;
+  invalidResponse?: boolean;
+  decision?: { allowed: boolean; remaining: number; reset: number };
+} = {}): TrackedDurableLimiter {
+  const names: Array<string> = [];
+  const requests: Array<Request> = [];
+  const counts = new Map<string, number>();
+  let activeName = '';
+
+  return {
+    names,
+    requests,
+    namespace: {
+      idFromName(name: string) {
+        names.push(name);
+        activeName = name;
+        return { toString: () => name } as DurableObjectId;
+      },
+      get() {
+        const objectName = activeName;
+        return {
+          async fetch(request: Request) {
+            requests.push(request.clone());
+            if (options.throws) throw new Error('Durable Object unavailable');
+            if (options.invalidResponse) return Response.json({ allowed: 'yes' });
+            if (options.decision) return Response.json(options.decision);
+            const count = (counts.get(objectName) ?? 0) + 1;
+            counts.set(objectName, count);
+            return Response.json({
+              allowed: count <= LOOKUP_LIMIT,
+              remaining: Math.max(0, LOOKUP_LIMIT - count),
+              reset: 60,
+            });
+          },
+        };
+      },
+    } as unknown as DurableObjectNamespace,
+  };
+}
+
 function createEnv(options: {
   badgeKv?: TrackedKv;
-  cooldownKv?: TrackedKv;
   limiter?: ReturnType<typeof createLimiter>;
+  durableLimiter?: TrackedDurableLimiter;
   secret?: string;
-} = {}): { env: TestEnv; badgeKv: TrackedKv; cooldownKv: TrackedKv } {
+} = {}): { env: TestEnv; badgeKv: TrackedKv; durableLimiter: TrackedDurableLimiter } {
   const badgeKv = options.badgeKv ?? createKv();
-  const cooldownKv = options.cooldownKv ?? createKv();
+  const durableLimiter = options.durableLimiter ?? createDurableLimiter();
   return {
     badgeKv,
-    cooldownKv,
+    durableLimiter,
     env: {
       RL_CERT_LOOKUP: options.limiter ?? createLimiter(),
+      CERT_LOOKUP_LIMITER: durableLimiter.namespace,
       BADGE_CACHE_KV: badgeKv.namespace,
-      REGISTER_COOLDOWN_KV: cooldownKv.namespace,
       DMV_PROXY_SECRET: options.secret ?? 'worker-secret',
     },
   };
@@ -142,7 +189,7 @@ test('Worker imports and dispatches /api/lookup before static assets', async () 
 });
 
 test('rejects an invalid check digit without calling upstream', async () => {
-  const { env, badgeKv, cooldownKv } = createEnv();
+  const { env, badgeKv, durableLimiter } = createEnv();
   const upstream = createFetch([]);
 
   const response = await handleCertificateLookup(
@@ -161,7 +208,7 @@ test('rejects an invalid check digit without calling upstream', async () => {
     certificate_url: null,
   });
   assert.equal(upstream.calls.length, 0);
-  assert.equal(badgeKv.reads.length + cooldownKv.reads.length, 0);
+  assert.equal(badgeKv.reads.length + durableLimiter.requests.length, 0);
   assertPrivateNoStore(response);
 });
 
@@ -169,14 +216,10 @@ test('returns issued with a canonical permalink for an upstream row', async () =
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([
     Response.json({
+      status: 'issued',
       certificate_id: VALID_ID,
       agent_name: 'mesa agent',
       domain: 'mesa-agent.agent',
-      source: 'private-data',
-      registered_at: '2026-07-21T00:00:00Z',
-      description: 'must not escape',
-      metadata: { email: 'private@example.com' },
-      email: 'private@example.com',
     }),
   ]);
 
@@ -205,7 +248,12 @@ test('returns issued with a canonical permalink for an upstream row', async () =
 test('rejects an upstream certificate ID mismatch without caching it', async () => {
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([
-    Response.json({ certificate_id: 'MESA-DD6-660K', agent_name: 'mesa-agent' }),
+    Response.json({
+      status: 'issued',
+      certificate_id: 'MESA-DD6-660K',
+      agent_name: 'mesa-agent',
+      domain: 'mesa-agent.agent',
+    }),
   ]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
@@ -219,7 +267,12 @@ test('rejects an upstream certificate ID mismatch without caching it', async () 
 test('rejects a whitespace-only upstream agent name without caching it', async () => {
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([
-    Response.json({ certificate_id: VALID_ID, agent_name: '   ' }),
+    Response.json({
+      status: 'issued',
+      certificate_id: VALID_ID,
+      agent_name: '   ',
+      domain: 'mesa-agent.agent',
+    }),
   ]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
@@ -270,28 +323,74 @@ test('maps an upstream redirect rejection to unavailable without forwarding the 
   assertPrivateNoStore(response);
 });
 
-test('maps upstream 404 to a cached 200 not_found result', async () => {
+test('maps a platform-style upstream 404 to unavailable twice without caching', async () => {
   const { env, badgeKv } = createEnv();
-  const upstream = createFetch([new Response('not found', { status: 404 })]);
+  const upstream = createFetch([
+    new Response('function not found', { status: 404 }),
+    new Response('function not found', { status: 404 }),
+  ]);
+
+  const first = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+  const second = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  for (const response of [first, second]) {
+    assert.equal(response.status, 503);
+    assert.deepEqual(await readJson(response), {
+      certificate_id: VALID_ID,
+      status: 'unavailable',
+      valid_format: true,
+      issued: null,
+      agent_name: null,
+      certificate_url: null,
+    });
+    assertPrivateNoStore(response);
+  }
+  assert.equal(upstream.calls.length, 2);
+  assert.equal(badgeKv.writes.length, 0);
+});
+
+test('maps a typed not_found envelope to public absence and caches it', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    Response.json({ status: 'not_found', certificate_id: VALID_ID }),
+  ]);
 
   const first = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
   const second = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
 
   for (const response of [first, second]) {
     assert.equal(response.status, 200);
-    assert.deepEqual(await readJson(response), {
-      certificate_id: VALID_ID,
-      status: 'not_found',
-      valid_format: true,
-      issued: false,
-      agent_name: null,
-      certificate_url: null,
-    });
-    assertPrivateNoStore(response);
+    assert.equal((await readJson(response)).status, 'not_found');
   }
   assert.equal(upstream.calls.length, 1);
   assert.equal(badgeKv.writes.length, 1);
   assert.equal(badgeKv.writes[0].options?.expirationTtl, LOOKUP_NEGATIVE_TTL_SECONDS);
+});
+
+test('rejects a mismatched typed not_found certificate ID without caching it', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    Response.json({ status: 'not_found', certificate_id: 'MESA-DD6-660K' }),
+  ]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(badgeKv.writes.length, 0);
+});
+
+test('rejects an unknown typed upstream status without caching it', async () => {
+  const { env, badgeKv } = createEnv();
+  const upstream = createFetch([
+    Response.json({ status: 'pending', certificate_id: VALID_ID }),
+  ]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(badgeKv.writes.length, 0);
 });
 
 test('does not cache an upstream 500 and returns unavailable', async () => {
@@ -323,7 +422,7 @@ test('does not cache an upstream 500 and returns unavailable', async () => {
 test('returns 429 when the Cloudflare limiter rejects', async (t) => {
   t.mock.method(Date, 'now', () => 1_752_537_600_000);
   const limiter = createLimiter({ success: false });
-  const { env, badgeKv, cooldownKv } = createEnv({ limiter });
+  const { env, badgeKv, durableLimiter } = createEnv({ limiter });
   const upstream = createFetch([]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
@@ -333,17 +432,19 @@ test('returns 429 when the Cloudflare limiter rejects', async (t) => {
   assert.equal(response.headers.get('Retry-After'), '60');
   assert.equal(response.headers.get('RateLimit-Reset'), '60');
   assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
-  assert.equal(cooldownKv.reads.length + cooldownKv.writes.length, 0);
+  assert.equal(durableLimiter.requests.length, 0);
   assert.equal(upstream.calls.length, 0);
   assertPrivateNoStore(response);
 });
 
-test('continues to the KV limiter when the Cloudflare binding throws', async (t) => {
+test('continues to the exact Durable Object when the Cloudflare binding throws', async (t) => {
   const logged: Array<unknown> = [];
   t.mock.method(console, 'error', (...values: Array<unknown>) => logged.push(values));
   const limiter = createLimiter({ throws: true });
-  const { env, cooldownKv } = createEnv({ limiter });
-  const upstream = createFetch([new Response(null, { status: 404 })]);
+  const { env, durableLimiter } = createEnv({ limiter });
+  const upstream = createFetch([
+    Response.json({ status: 'not_found', certificate_id: VALID_ID }),
+  ]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
 
@@ -351,17 +452,15 @@ test('continues to the KV limiter when the Cloudflare binding throws', async (t)
   assert.equal((await readJson(response)).status, 'not_found');
   assert.equal(logged.length, 1);
   assert.match(String((logged[0] as Array<unknown>)[0]), /limiter/i);
-  assert.equal(cooldownKv.reads.length, 1);
-  assert.equal(cooldownKv.writes.length, 1);
+  assert.equal(durableLimiter.requests.length, 1);
   assert.equal(upstream.calls.length, 1);
   assertPrivateNoStore(response);
 });
 
-test('fails closed when both limiter layers are unavailable', async (t) => {
+test('fails closed before cache or upstream when the Durable Object throws', async (t) => {
   t.mock.method(console, 'error', () => undefined);
-  const limiter = createLimiter({ throws: true });
-  const cooldownKv = createKv({ failRead: true });
-  const { env, badgeKv } = createEnv({ limiter, cooldownKv });
+  const durableLimiter = createDurableLimiter({ throws: true });
+  const { env, badgeKv } = createEnv({ durableLimiter });
   const upstream = createFetch([]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
@@ -373,33 +472,10 @@ test('fails closed when both limiter layers are unavailable', async (t) => {
   assertPrivateNoStore(response);
 });
 
-test('fails closed when Cloudflare throws and the stored KV counter is corrupt', async (t) => {
+test('fails closed before cache or upstream for an invalid Durable Object response', async (t) => {
   t.mock.method(console, 'error', () => undefined);
-  const limiter = createLimiter({ throws: true });
-  const cooldownKv = createKv({ readValue: 'not-a-number' });
-  const { env, badgeKv } = createEnv({ limiter, cooldownKv });
-  const upstream = createFetch([]);
-
-  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
-
-  assert.equal(response.status, 503);
-  assert.deepEqual(await readJson(response), {
-    certificate_id: VALID_ID,
-    status: 'unavailable',
-    valid_format: true,
-    issued: null,
-    agent_name: null,
-    certificate_url: null,
-  });
-  assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
-  assert.equal(upstream.calls.length, 0);
-  assertPrivateNoStore(response);
-});
-
-test('fails closed when KV is indeterminate even if Cloudflare allows', async (t) => {
-  t.mock.method(console, 'error', () => undefined);
-  const cooldownKv = createKv({ failRead: true });
-  const { env, badgeKv } = createEnv({ cooldownKv });
+  const durableLimiter = createDurableLimiter({ invalidResponse: true });
+  const { env, badgeKv } = createEnv({ durableLimiter });
   const upstream = createFetch([]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
@@ -423,7 +499,7 @@ test('maps SHA-256 digest rejection to unavailable before cache or upstream', as
   t.mock.method(crypto.subtle, 'digest', async () => {
     throw new Error('digest unavailable');
   });
-  const { env, badgeKv, cooldownKv } = createEnv();
+  const { env, badgeKv, durableLimiter } = createEnv();
   const upstream = createFetch([]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
@@ -437,13 +513,13 @@ test('maps SHA-256 digest rejection to unavailable before cache or upstream', as
     agent_name: null,
     certificate_url: null,
   });
-  assert.equal(cooldownKv.reads.length + cooldownKv.writes.length, 0);
+  assert.equal(durableLimiter.requests.length, 0);
   assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
   assert.equal(upstream.calls.length, 0);
   assertPrivateNoStore(response);
 });
 
-test('selects the wall-clock bucket after a delayed SHA-256 digest', async (t) => {
+test('passes the post-hash wall clock to the exact Durable Object', async (t) => {
   let now = 1_752_537_659_000;
   const digest = crypto.subtle.digest.bind(crypto.subtle);
   t.mock.method(Date, 'now', () => now);
@@ -451,22 +527,27 @@ test('selects the wall-clock bucket after a delayed SHA-256 digest', async (t) =
     now += 1_000;
     return await digest(algorithm, data);
   });
-  const { env, cooldownKv } = createEnv();
-  const upstream = createFetch([new Response(null, { status: 404 })]);
+  const { env, durableLimiter } = createEnv();
+  const upstream = createFetch([
+    Response.json({ status: 'not_found', certificate_id: VALID_ID }),
+  ]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('RateLimit-Reset'), '60');
-  assert.equal(cooldownKv.writes.length, 1);
-  assert.equal(cooldownKv.writes[0].key.endsWith(`:${Math.floor(now / 60_000)}`), true);
+  assert.equal(durableLimiter.requests.length, 1);
+  assert.deepEqual(await durableLimiter.requests[0].json(), { now });
 });
 
-test('returns 429 after 30 sequential KV-counted lookups', async (t) => {
+test('returns 429 after 30 exact Durable Object-counted lookups without exposing raw IP', async (t) => {
   t.mock.method(Date, 'now', () => 1_752_537_600_000);
   const rawIp = '198.51.100.42';
-  const { env, cooldownKv } = createEnv();
-  const upstream = createFetch([new Response(null, { status: 404 })]);
+  const limiter = createLimiter();
+  const { env, badgeKv, durableLimiter } = createEnv({ limiter });
+  const upstream = createFetch([
+    Response.json({ status: 'not_found', certificate_id: VALID_ID }),
+  ]);
 
   for (let count = 0; count < LOOKUP_LIMIT; count += 1) {
     const response = await handleCertificateLookup(
@@ -487,39 +568,43 @@ test('returns 429 after 30 sequential KV-counted lookups', async (t) => {
   assert.deepEqual(await readJson(denied), { error: 'rate_limited', retry_after_seconds: 60 });
   assert.equal(denied.headers.get('RateLimit-Remaining'), '0');
   assert.equal(denied.headers.get('Retry-After'), '60');
-  assert.ok(cooldownKv.reads.every((key) => !key.includes(rawIp)));
-  assert.ok(cooldownKv.writes.every(({ key }) => !key.includes(rawIp)));
+  assert.equal(durableLimiter.requests.length, 31);
+  assert.ok(durableLimiter.names.every((name) => !name.includes(rawIp)));
+  assert.ok(limiter.calls.every((key) => !key.includes(rawIp)));
+  assert.ok(badgeKv.reads.every((key) => !key.includes(rawIp)));
+  assert.ok(badgeKv.writes.every(({ key }) => !key.includes(rawIp)));
+  assert.ok(durableLimiter.requests.every((request) => !request.url.includes(rawIp)));
+  assert.equal(upstream.calls.length, 1);
   assertPrivateNoStore(denied);
 });
 
-test('starts a fresh KV budget at the next wall-clock minute', async (t) => {
-  let now = 1_752_537_600_000;
-  t.mock.method(Date, 'now', () => now);
-  const { env, cooldownKv } = createEnv();
-  const upstream = createFetch([new Response(null, { status: 404 })]);
+test('uses exact Durable Object remaining and reset values in public headers', async () => {
+  const durableLimiter = createDurableLimiter({
+    decision: { allowed: true, remaining: 12, reset: 7 },
+  });
+  const { env } = createEnv({ durableLimiter });
+  const upstream = createFetch([
+    Response.json({ status: 'not_found', certificate_id: VALID_ID }),
+  ]);
 
-  await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
-  const firstKey = cooldownKv.writes[0].key;
-  now += 60_000;
-  await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
-  const secondKey = cooldownKv.writes[1].key;
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
 
-  assert.notEqual(firstKey, secondKey);
-  assert.equal(cooldownKv.values.has(firstKey), true);
-  assert.equal(cooldownKv.values.has(secondKey), true);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('RateLimit-Remaining'), '12');
+  assert.equal(response.headers.get('RateLimit-Reset'), '7');
+  assertPrivateNoStore(response);
 });
 
-test('reports one second until the active minute bucket resets', async (t) => {
-  t.mock.method(Date, 'now', () => 1_752_537_659_000);
-  const limiter = createLimiter({ success: false });
-  const { env } = createEnv({ limiter });
-
+test('uses an exact Durable Object denial for the public 429 response', async () => {
+  const durableLimiter = createDurableLimiter({
+    decision: { allowed: false, remaining: 0, reset: 1 },
+  });
+  const { env } = createEnv({ durableLimiter });
   const response = await handleCertificateLookup(lookupRequest(), env, createFetch([]).fetchImpl);
 
   assert.deepEqual(await readJson(response), { error: 'rate_limited', retry_after_seconds: 1 });
   assert.equal(response.headers.get('Retry-After'), '1');
   assert.equal(response.headers.get('RateLimit-Reset'), '1');
-  assertPrivateNoStore(response);
 });
 
 test('maps a wrong Worker secret upstream 403 to unavailable', async () => {
@@ -536,7 +621,7 @@ test('maps a wrong Worker secret upstream 403 to unavailable', async () => {
 
 test('fails loud when DMV_PROXY_SECRET is absent', async () => {
   const limiter = createLimiter();
-  const { env, badgeKv, cooldownKv } = createEnv({ limiter, secret: '' });
+  const { env, badgeKv, durableLimiter } = createEnv({ limiter, secret: '' });
   const upstream = createFetch([]);
 
   const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
@@ -544,13 +629,13 @@ test('fails loud when DMV_PROXY_SECRET is absent', async () => {
   assert.equal(response.status, 503);
   assert.equal((await readJson(response)).status, 'unavailable');
   assert.equal(limiter.calls.length, 0);
-  assert.equal(badgeKv.reads.length + cooldownKv.reads.length, 0);
+  assert.equal(badgeKv.reads.length + durableLimiter.requests.length, 0);
   assert.equal(upstream.calls.length, 0);
   assertPrivateNoStore(response);
 });
 
 test('allows only GET', async () => {
-  const { env, badgeKv, cooldownKv } = createEnv();
+  const { env, badgeKv, durableLimiter } = createEnv();
   const upstream = createFetch([]);
   const request = new Request(`https://dmv.agentcommunity.org/api/lookup?id=${VALID_ID}`, {
     method: 'POST',
@@ -561,7 +646,7 @@ test('allows only GET', async () => {
   assert.equal(response.status, 405);
   assert.equal(response.headers.get('Allow'), 'GET');
   assert.deepEqual(await readJson(response), { error: 'method_not_allowed' });
-  assert.equal(badgeKv.reads.length + cooldownKv.reads.length, 0);
+  assert.equal(badgeKv.reads.length + durableLimiter.requests.length, 0);
   assert.equal(upstream.calls.length, 0);
   assertPrivateNoStore(response);
 });

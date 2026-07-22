@@ -84,7 +84,7 @@ being served.
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
 | `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint for browser, CLI, MCP, and JS API. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (server-side hostname + `dmv_register` action check) → shared CF rate limiters → forward to Supabase. CLI/MCP path: validate JSON → require `machine_fingerprint` → shared CF rate limiters → DMV-local KV fingerprint cooldown → forward. Anti-abuse ordering matches `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4 — CAPTCHA always runs before shared counters |
-| `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | Implementation-ready, unpublished route. After Task 7 deploy SHA + live smoke evidence, this becomes the only public certificate lookup. Certificate IDs only; domain lookup is removed. Valid requests are limited to 30/60s/IP before a KV cache read. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
+| `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | Implementation-ready, unpublished route. After Task 8 deploy SHA + live smoke evidence, this becomes the only public certificate lookup. Certificate IDs only; domain lookup is removed. `RL_CERT_LOOKUP` is a coarse 60/60 filter; `CERT_LOOKUP_LIMITER` is the exact 30/60 authority before the KV result cache. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
 | `/healthz` | Worker | `{ worker, container }` health probe — pings the container too |
@@ -127,10 +127,11 @@ eyeball the bake-off output (`pnpm cf:test:render` — see below).
 | Path | Purpose |
 |---|---|
 | `worker/index.ts` | Worker entry — routes, L1/R2/container cache hierarchy, HTMLRewriter permalink middleware, public `/api/register` and `/api/lookup`, `/badge/*` Supabase proxy, cron prewarm |
-| `worker/certificate-lookup.ts` | Worker-only public lookup policy: certificate-ID validation, 30/60s/IP enforcement, result cache, upstream secret, minimal response shaping |
-| `worker/rate-limit-kv.ts` | DMV-local KV helper used for the CLI/MCP fingerprint cooldown and authoritative hashed-IP lookup buckets in `REGISTER_COOLDOWN_KV` |
+| `worker/certificate-lookup.ts` | Worker-only public lookup policy: certificate-ID validation, coarse-filter/exact-DO ordering, result cache, upstream secret, typed envelope validation, minimal response shaping |
+| `worker/certificate-lookup-rate-limiter.ts` | SQLite Durable Object for atomic fixed-minute 30/60 accounting per SHA-256 hashed IP; v2 migration |
+| `worker/rate-limit-kv.ts` | DMV-local KV helper used only for the CLI/MCP registration fingerprint cooldown in `REGISTER_COOLDOWN_KV` |
 | `worker/container-instance.ts` | **Generated** by `scripts/build-cf.mjs` — content-hash of container sources that doubles as the Durable Object instance ID |
-| `wrangler.jsonc` | Static Assets + Container binding, R2 binding, DO migration, cron trigger, `PREWARM_ORIGIN`, registration bindings, lookup `RL_CERT_LOOKUP`, and lookup cache/counter KV bindings |
+| `wrangler.jsonc` | Static Assets + Container/R2 bindings, unchanged CardRenderer v1 plus CertificateLookupRateLimiter v2 migration, cron, registration bindings, coarse `RL_CERT_LOOKUP`, and result-cache KV |
 | `tsconfig.json` | TypeScript config for the worker |
 | `container/Dockerfile` | Node 20 Alpine + `@napi-rs/canvas` |
 | `container/package.json` | Container runtime deps (Hono + `@napi-rs/canvas`) |
@@ -181,10 +182,10 @@ open test-harness/output/index.html
    registry, and rolls out the Worker.
 
 The lookup changes are implementation-ready but unpublished as of 2026-07-22;
-do not call this boundary live until Task 7 records the deployed SHA and smoke
+do not call this boundary live until Task 8 records the deployed SHA and smoke
 evidence. Lookup rollout order is non-negotiable: configure the same generated
 `DMV_PROXY_SECRET` on Cloudflare and Supabase, confirm the Worker bindings
-`RL_CERT_LOOKUP`, `BADGE_CACHE_KV`, and `REGISTER_COOLDOWN_KV`, deploy the
+`RL_CERT_LOOKUP`, `CERT_LOOKUP_LIMITER`, and `BADGE_CACHE_KV`, deploy the
 Worker first, and only then deploy the secret-gated `lookup-agent` Edge
 Function. This establishes `/api/lookup` before the former direct Edge surface
 starts returning 403. Never record the secret in this repository or pass it to
@@ -265,12 +266,14 @@ clients.
   don't count as Worker invocations.
 
   **Certificate lookup** (`/api/lookup`): `RL_CERT_LOOKUP` (namespace `1002`)
-  and a hashed-IP minute bucket in `REGISTER_COOLDOWN_KV` enforce 30
-  requests/60s/IP. An indeterminate KV counter fails closed with 503. Valid
-  requests consume quota before `BADGE_CACHE_KV` is read, so cache hits cannot
-  bypass the limit. Issued results use a 300-second KV TTL; not-found results
-  use 60 seconds; unavailable results are not cached. All client responses use
-  `Cache-Control: private, no-store` and include `RateLimit-*` headers.
+  is a permissive/eventually consistent 60/60 emergency filter, not exact
+  accounting. One `CERT_LOOKUP_LIMITER` SQLite Durable Object per hashed IP
+  then transactionally enforces exact 30/60 and supplies remaining/reset
+  headers. A binding, fetch, or response failure fails closed before
+  `BADGE_CACHE_KV` or upstream. Issued results use a 300-second KV TTL; only a
+  typed HTTP 200 `not_found` envelope uses 60 seconds; non-200 and malformed
+  upstream results are unavailable and uncached. All client responses use
+  `Cache-Control: private, no-store`.
 
 - **Turnstile**: `/api/register` browser path requires a valid Turnstile
   token (`cf-turnstile-response` field in the JSON body). The site key
@@ -319,8 +322,9 @@ clients.
   safely read `container.status` across all branches.
 
 - **Worker tests**: certificate lookup policy and dispatch are covered by
-  `tests/worker-certificate-lookup.test.ts`; certificate validation and KV
-  limiting have focused tests beside it. Rendering still uses
+  `tests/worker-certificate-lookup.test.ts`; atomic transaction and alarm
+  behavior is covered by `tests/worker-certificate-lookup-rate-limiter.test.ts`.
+  Rendering still uses
   `test-harness/render-comparison.mjs` plus manual smoke of `/healthz`,
   `/api/card`, `/api/og`, `/c/:id/:name`, and `/badge/*`.
 
@@ -338,7 +342,8 @@ clients.
   production.* The planned public lookup is Worker
   `GET /api/lookup?id=CERT-ID`. The staged `lookup-agent` Edge change uses the
   same `DMV_PROXY_SECRET` gate, rejects direct calls before database client
-  creation, and removes domain queries. This gap is not closed until Task 7
+  creation, removes domain queries, and returns typed HTTP 200
+  `issued`/`not_found` envelopes. This gap is not closed until Task 8
   records a deployed SHA and live smoke evidence.
 
 - **DMV-branded OTP email flow** — custom branding via

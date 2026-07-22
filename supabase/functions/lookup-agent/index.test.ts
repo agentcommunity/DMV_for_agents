@@ -165,7 +165,7 @@ Deno.test('allows a certificate-ID lookup with the correct proxy secret', async 
   })
 })
 
-Deno.test('returns 404 for a valid certificate ID that is not found', async () => {
+Deno.test('returns the exact typed not_found envelope with HTTP 200', async () => {
   await withEnv({ DMV_PROXY_SECRET: PROXY_SECRET }, async () => {
     const mock = createSupabaseMock({ data: null, error: null })
 
@@ -174,8 +174,11 @@ Deno.test('returns 404 for a valid certificate ID that is not found', async () =
       { createSupabaseClient: mock.createSupabaseClient as never },
     )
 
-    assert.equal(response.status, 404)
-    assert.deepEqual(await readJson(response), { error: 'Not found', valid: true })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await readJson(response), {
+      status: 'not_found',
+      certificate_id: VALID_CERTIFICATE_ID,
+    })
   })
 })
 
@@ -200,6 +203,7 @@ Deno.test('returns only the public certificate fields on success', async () => {
 
     assert.equal(response.status, 200)
     assert.deepEqual(await readJson(response), {
+      status: 'issued',
       certificate_id: VALID_CERTIFICATE_ID,
       agent_name: 'mesa-agent',
       domain: 'mesa-agent.agent',

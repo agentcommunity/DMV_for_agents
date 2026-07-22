@@ -33,7 +33,7 @@ bunx dmv-agent register \
 # Verify a certificate ID (offline, no network)
 bunx dmv-agent verify MESA-DD6-660J
 
-# After Task 7 publication, check issuance (public Worker, certificate ID only)
+# After Task 8 publication, check issuance (public Worker, certificate ID only)
 curl "https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J"
 
 # Check the public DMV surface without submitting a valid registration
@@ -242,11 +242,13 @@ verifyCertificateId('MESA-DD6-660J'); // true
 - **Content-addressed IDs** — deterministic hashes, not sequential. This makes
   blind guessing harder; the planned lookup rate limit mitigates but does not
   eliminate enumeration risk.
-- **Worker-only lookup (implementation ready; unpublished)** — after Task 7
+- **Worker-only lookup (implementation ready; unpublished)** — after Task 8
   records a deployed SHA and live smoke evidence, public callers will use
   `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The staged
   Supabase `lookup-agent` change makes that URL a `DMV_PROXY_SECRET`-gated
-  internal upstream.
+  internal upstream with typed HTTP 200 `issued`/`not_found` envelopes. The
+  Worker applies coarse 60/60 filtering, exact atomic 30/60 accounting through
+  `CERT_LOOKUP_LIMITER`, and uses `BADGE_CACHE_KV` only for result caching.
 
 ## API reference
 
@@ -286,7 +288,7 @@ The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP cl
 ### GET /api/lookup
 
 **Status (2026-07-22): implementation-ready but unpublished.** Do not depend on
-this route until Task 7 records the deployed DMV commit SHA and live smoke
+this route until Task 8 records the deployed DMV commit SHA and live smoke
 evidence. Once published, the only public network lookup endpoint will be:
 
 ```http
@@ -312,9 +314,11 @@ seconds per IP before reading its cache. Issued results are cached internally fo
 Those are the only result fields. `issued: true` means a matching DMV
 registration row exists; it does not mean the operator completed email
 verification, the requested `.agent` name was allocated, or DNS delegation
-exists. Domain enumeration is removed from the staged contract. After Task 7,
+exists. Domain enumeration is removed from the staged contract. After Task 8,
 the Supabase `lookup-agent` URL will be an internal Worker upstream protected by
-`DMV_PROXY_SECRET`; direct calls will be unsupported and return 403.
+`DMV_PROXY_SECRET`; direct calls will be unsupported and return 403. Only its
+typed HTTP 200 `not_found` envelope becomes cached public absence; non-200 or
+malformed responses become uncached `unavailable`.
 
 | HTTP | Result |
 |------|--------|

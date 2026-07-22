@@ -78,9 +78,9 @@ the deployed SHA plus live smoke evidence before describing them as production.
 `DMV_PROXY_SECRET` must be the same generated secret on the Cloudflare Worker
 and the Supabase project. Never put its value in `.env.example`, documentation,
 shell history, or client configuration. The Worker also requires
-`RL_CERT_LOOKUP` (30/60s/IP), `BADGE_CACHE_KV` (lookup result cache), and
-`REGISTER_COOLDOWN_KV` (authoritative lookup counter) as configured in
-`wrangler.jsonc`.
+`RL_CERT_LOOKUP` (coarse 60/60), `CERT_LOOKUP_LIMITER` (exact SQLite DO 30/60),
+and `BADGE_CACHE_KV` (lookup result cache) as configured in `wrangler.jsonc`.
+`REGISTER_COOLDOWN_KV` remains registration-only.
 
 Deploy in this order:
 
@@ -188,7 +188,7 @@ curl -X POST .../api/register -H 'Content-Type: application/json' \
 ```bash
 BASE=https://dmv.agentcommunity.org
 
-# After Task 7 publication: certificate ID through the Worker → 200 JSON
+# After Task 8 publication: certificate ID through the Worker → 200 JSON
 curl "$BASE/api/lookup?id=MESA-DD6-660J"
 
 # Domain enumeration is removed; do not send requested names to this endpoint.
@@ -205,12 +205,16 @@ curl "$BASE/badge?id=MESA-DD6-660J&style=card" -o badge-card.svg
 # Badge lookup is also certificate-ID-only; do not send requested names.
 ```
 
-The lookup Worker limit is 30 requests per 60 seconds per IP. Issued results are
+The lookup Worker applies the permissive/eventually consistent native 60/60
+filter first, then exact atomic 30 requests per 60 seconds per hashed IP through
+`CERT_LOOKUP_LIMITER`. Issued results are
 cached internally for 300 seconds and not-found results for 60 seconds, but client
 responses are `private, no-store`. Results contain only `certificate_id`,
 `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`.
 `issued: true` means a matching registration row exists; it does not mean email
-verification, name allocation, or DNS delegation completed.
+verification, name allocation, or DNS delegation completed. Only the internal
+typed HTTP 200 `not_found` envelope is cached as absence; non-200 or malformed
+upstream results are uncached `unavailable`.
 
 ### Badge embed codes
 
@@ -337,9 +341,11 @@ These are noted for future work, not needed for go-live:
 - [x] **Email verification flow** — Magic link sent by agentcommunity.org trigger (on_dmv_registration). New users get magic link + certificate email. Existing users get certificate email only.
 - [ ] **Google/GitHub OAuth** — alternative to email verification
 - **Staged lookup hardening:** domain lookup is removed from `lookup-agent` to
-  reduce enumeration exposure. After Task 7 publication, public verification
-  will be certificate-ID-only through Worker `/api/lookup`; the 30/60s/IP
-  limits mitigate rather than eliminate enumeration risk.
+  reduce enumeration exposure. After Task 8 publication, public verification
+  will be certificate-ID-only through Worker `/api/lookup`; the coarse 60/60
+  filter plus exact Durable Object 30/60 limit mitigate rather than eliminate
+  enumeration risk. The internal response is a typed HTTP 200
+  `issued`/`not_found` union.
 - [x] **Badge by cert ID** — `badge` edge function (domain lookup deprecated)
 - [ ] **Real OG images** — server-side card rendering for social media previews (front face of HoloCard as static PNG)
 - [ ] **Python SDK** — thin wrapper that shells out to `bunx` for cross-language support

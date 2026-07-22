@@ -6,6 +6,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const DMV_PROXY_HEADER = 'x-dmv-proxy'
 
+export type LookupAgentResult =
+  | { status: 'issued'; certificate_id: string; agent_name: string; domain: string }
+  | { status: 'not_found'; certificate_id: string }
+
 // Constant-time string comparison copied from register-agent. There is no
 // fallback value: an unset secret fails closed.
 function timingSafeStrEqual(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -16,7 +20,7 @@ function timingSafeStrEqual(a: string | null | undefined, b: string | null | und
   return diff === 0
 }
 
-function json(body: Record<string, unknown>, status: number): Response {
+function json(body: Record<string, unknown> | LookupAgentResult, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
@@ -66,10 +70,12 @@ export async function handleLookupAgent(
     return json({ error: 'Domain lookup is not supported. Provide ?id=CERT-ID' }, 400)
   }
 
-  const certId = url.searchParams.get('id')
-  if (!certId) {
+  const requestedCertId = url.searchParams.get('id')
+  if (!requestedCertId) {
     return json({ error: 'Provide ?id=CERT-ID' }, 400)
   }
+
+  const certId = requestedCertId.trim().toUpperCase()
 
   if (!verifyCertificateId(certId)) {
     return json({ error: 'Invalid certificate ID (check digit failed)', valid: false }, 400)
@@ -93,14 +99,22 @@ export async function handleLookupAgent(
   }
 
   if (!data) {
-    return json({ error: 'Not found', valid: true }, 404)
+    const result: LookupAgentResult = { status: 'not_found', certificate_id: certId }
+    return json(result, 200)
   }
 
-  return json({
+  if (data.certificate_id !== certId) {
+    console.error('Lookup returned a mismatched certificate ID')
+    return json({ error: 'Lookup failed' }, 500)
+  }
+
+  const result: LookupAgentResult = {
+    status: 'issued',
     certificate_id: data.certificate_id,
     agent_name: data.domain_requested.replace(/\.agent$/, ''),
     domain: data.domain_requested,
-  }, 200)
+  }
+  return json(result, 200)
 }
 
 if (import.meta.main) {

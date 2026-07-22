@@ -44,14 +44,18 @@ We'll acknowledge your report within 48 hours and work with you on a fix before 
 - Anti-abuse on `/api/register` is owned by the Cloudflare Worker, not the Supabase edge function. Browser path: validate → Turnstile siteverify (server-side hostname + `dmv_register` action check) → shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both `namespace_id` values shared at the CF account level with `agentCommunity_PAGE`) → forward to Supabase. CLI/MCP path: validate → require `machine_fingerprint` → same shared limits → DMV-local KV fingerprint cooldown (`REGISTER_COOLDOWN_KV`) → forward. CAPTCHA always runs before shared counters so invalid tokens cannot exhaust quota for real users. Upstash Redis was removed in the 2026-04-08 hardening pass.
 - The staged public certificate verification boundary is
   `GET /api/lookup?id=CERT-ID` on the
-  Worker. It accepts certificate IDs, enforces 30 valid requests per 60 seconds
-  per IP with `RL_CERT_LOOKUP` plus the authoritative `REGISTER_COOLDOWN_KV`
-  bucket, and returns a minimized six-field response. The staged Supabase
-  `lookup-agent` change makes the Edge Function an internal upstream: it requires the
+  Worker. It accepts certificate IDs, applies coarse/eventually consistent
+  `RL_CERT_LOOKUP` at 60/60, then uses one `CERT_LOOKUP_LIMITER` SQLite Durable
+  Object per SHA-256 hashed IP for exact transactional 30/60 accounting and
+  remaining/reset values. Durable Object failure fails closed before cache or
+  upstream; `BADGE_CACHE_KV` stores results only. The staged Supabase
+  `lookup-agent` change makes the Edge Function an internal upstream with exact
+  typed HTTP 200 `issued`/`not_found` envelopes: it requires the
   Worker-set `x-dmv-proxy: DMV_PROXY_SECRET` value, compares it in constant
   time, fails closed when the secret is unset, and rejects direct callers before
-  creating a Supabase client. Domain lookup is unsupported. These lookup
+  creating a Supabase client. Non-200 or malformed envelopes are unavailable
+  and uncached. Domain lookup is unsupported. These lookup
   changes are implementation-ready but unpublished as of 2026-07-22; they are
-  not production claims until Task 7 records a deployed SHA and live smoke
+  not production claims until Task 8 records a deployed SHA and live smoke
   evidence.
 - The Supabase edge function still runs validation, the lifetime cap, and the unique-cert-ID constraint as a defense-in-depth backstop.

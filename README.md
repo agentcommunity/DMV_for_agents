@@ -111,7 +111,7 @@ You (web / CLI / MCP)
 ### Certificate lookup (implementation ready; unpublished)
 
 **Status (2026-07-22):** the Worker and Edge changes are implementation-ready
-but unpublished. Do not depend on this boundary until Task 7 records the
+but unpublished. Do not depend on this boundary until Task 8 records the
 deployed DMV commit SHA and live smoke evidence.
 
 Once published, the only public network lookup will be:
@@ -121,7 +121,9 @@ GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J
 ```
 
 It accepts certificate IDs only; lookup by requested domain is not supported. The
-Worker enforces 30 requests per 60 seconds per IP before serving its result cache.
+Worker applies the permissive `RL_CERT_LOOKUP` 60/60 filter first, then uses the
+`CERT_LOOKUP_LIMITER` SQLite Durable Object for exact 30/60 accounting before
+serving its `BADGE_CACHE_KV` result cache.
 Issued results are cached internally for 300 seconds and not-found results for 60
 seconds, while client responses use `Cache-Control: private, no-store`.
 
@@ -132,8 +134,10 @@ email verification, that the requested `.agent` name was allocated, or that `.ag
 exists in DNS. Use `bunx dmv-agent verify CERT-ID` when only offline check-digit
 validation is needed.
 
-The staged Supabase `lookup-agent` change makes it an internal Worker upstream.
-Once Task 7 deploys that change, direct access will be unsupported and
+The staged Supabase `lookup-agent` change makes it an internal Worker upstream
+that returns typed `issued` or `not_found` HTTP 200 envelopes. Every other
+upstream response is treated as unavailable and is not cached. Once Task 8
+deploys that change, direct access will be unsupported and
 secret-gated; callers must never send or depend on the internal `x-dmv-proxy`
 credential.
 

@@ -21,6 +21,7 @@
 
 import { Container, getContainer } from '@cloudflare/containers';
 import { handleCertificateLookup } from './certificate-lookup';
+import { CertificateLookupRateLimiter } from './certificate-lookup-rate-limiter';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import { incrementKvCooldown } from './rate-limit-kv';
 import { fetchRegistrationUpstream } from './registration-upstream';
@@ -48,6 +49,8 @@ export class CardRenderer extends Container {
   }
 }
 
+export { CertificateLookupRateLimiter };
+
 // Ambient type for the Workers Rate Limiting API binding. Not exported by
 // @cloudflare/workers-types at all versions; define locally.
 interface RateLimit {
@@ -56,6 +59,7 @@ interface RateLimit {
 
 interface Env {
   CARD_RENDERER: DurableObjectNamespace<CardRenderer>;
+  CERT_LOOKUP_LIMITER: DurableObjectNamespace;
   CARD_CACHE: R2Bucket;
   // Workers Static Assets binding — points at the dist/ directory built by
   // scripts/build-cf.mjs. Used for: (1) crawler middleware HTMLRewriter
@@ -75,7 +79,8 @@ interface Env {
   // Workers Rate Limiting API binding for existing render routes. Configured
   // in wrangler.jsonc under the top-level `ratelimits` array.
   API_RATE_LIMITER: RateLimit;
-  // Dedicated public certificate lookup limiter: 30 req/60s per IP.
+  // Coarse certificate lookup burst filter: 60 req/60s per hashed IP. The
+  // CERT_LOOKUP_LIMITER Durable Object owns exact public 30/60 accounting.
   RL_CERT_LOOKUP: RateLimit;
   // Shared signup abuse counters with PAGE. Only the email and IP+email
   // surfaces are shared across products.
@@ -84,8 +89,8 @@ interface Env {
   // BADGE_CACHE_KV stores badge responses and prefixed certificate lookup cache
   // entries. Badge values are raw bytes with content-type stored in KV metadata.
   BADGE_CACHE_KV: KVNamespace;
-  // REGISTER_COOLDOWN_KV stores registration cooldowns and prefixed lookup
-  // counters. Intentionally not shared with PAGE.
+  // REGISTER_COOLDOWN_KV stores registration cooldowns only. Intentionally not
+  // shared with PAGE.
   REGISTER_COOLDOWN_KV: KVNamespace;
   TURNSTILE_SECRET_KEY: string;
   // Shared secret sent to register-agent as the `x-dmv-proxy` header value;

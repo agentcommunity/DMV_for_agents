@@ -81,6 +81,10 @@
 			{
 				"name": "CARD_RENDERER",
 				"class_name": "CardRenderer"
+			},
+			{
+				"name": "CERT_LOOKUP_LIMITER",
+				"class_name": "CertificateLookupRateLimiter"
 			}
 		]
 	},
@@ -89,6 +93,12 @@
 			"tag": "v1",
 			"new_sqlite_classes": [
 				"CardRenderer"
+			]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"CertificateLookupRateLimiter"
 			]
 		}
 	],
@@ -111,8 +121,8 @@
 	// ──────────────────────────────────────────────────────────────────────────
 	// BADGE_CACHE_KV stores badge responses and prefixed certificate lookup cache
 	// entries.
-	// REGISTER_COOLDOWN_KV stores registration cooldowns and prefixed lookup
-	// counters. Kept LOCAL to DMV — not shared with PAGE.
+	// REGISTER_COOLDOWN_KV stores registration cooldowns only. Kept LOCAL to DMV
+	// — not shared with PAGE.
 	"kv_namespaces": [
 		{
 			"binding": "BADGE_CACHE_KV",
@@ -143,7 +153,8 @@
 	// ──────────────────────────────────────────────────────────────────────────
 	// API_RATE_LIMITER guards existing render routes /api/card and /api/og from
 	// enumeration; its 100/minute budget is intentionally unchanged.
-	// RL_CERT_LOOKUP guards only /api/lookup at 30/minute/IP.
+	// RL_CERT_LOOKUP is a permissive 60/minute/IP emergency burst filter for
+	// /api/lookup. CERT_LOOKUP_LIMITER is the exact public 30/minute/IP counter.
 	// RL_OTP_EMAIL + RL_OTP_IP_EMAIL share the exact Cloudflare namespace IDs
 	// used by PAGE because those counters represent the same abuse surface on
 	// both properties. DMV intentionally does NOT bind RL_AUTH or RL_OTP_IP from
@@ -166,7 +177,7 @@
 			"name": "RL_CERT_LOOKUP",
 			"namespace_id": "1002",
 			"simple": {
-				"limit": 30,
+				"limit": 60,
 				"period": 60
 			}
 		},

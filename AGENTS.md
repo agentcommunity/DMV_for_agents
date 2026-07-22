@@ -4,7 +4,7 @@ Terse docs for agents. File-by-file, function-by-function.
 
 **Deployment:** Cloudflare Workers Static Assets + Cloudflare Container (Skia card renderer). Worker `dmv-agentcommunity` on Taqanu account, instance type `lite`. Deploy from `main` in this order: Worker first (`pnpm cf:deploy`), then the secret-gated `lookup-agent` Edge Function (`supabase functions deploy lookup-agent --no-verify-jwt`). Full context: `CLOUDFLARE.md` and `packages/dmv-agent/DEPLOY.md`.
 
-**Certificate lookup contract (implementation-ready, unpublished as of 2026-07-22):** After Task 7 records a deployed SHA and live smoke evidence, the only public network lookup will be `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. Certificate IDs only; domain lookup is removed. The Worker implementation enforces 30 requests/60s/IP, caches issued results for 300s and not-found results for 60s, and returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`. `issued: true` means a matching registration row exists, not that operator email verification, `.agent` allocation, or DNS delegation completed. The staged `supabase/functions/lookup-agent` change makes it a `DMV_PROXY_SECRET`-gated internal Worker upstream; do not claim that boundary is live until Task 7 evidence exists.
+**Certificate lookup contract (implementation-ready, unpublished as of 2026-07-22):** After Task 8 records a deployed SHA and live smoke evidence, the only public network lookup will be `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. Certificate IDs only; domain lookup is removed. The Worker applies coarse `RL_CERT_LOOKUP` at 60/60 and uses `CERT_LOOKUP_LIMITER` for exact atomic 30/60 accounting, caches issued results for 300s and typed not-found results for 60s in `BADGE_CACHE_KV`, and returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`. Durable Object failure, non-200 upstream, or malformed typed envelope fails closed as uncached unavailable. `issued: true` means a matching registration row exists, not that operator email verification, `.agent` allocation, or DNS delegation completed. The staged `supabase/functions/lookup-agent` change makes it a `DMV_PROXY_SECRET`-gated internal Worker upstream; do not claim that boundary is live until Task 8 evidence exists.
 
 ---
 
@@ -22,6 +22,7 @@ images/             → Favicon assets (`favicon.ico`, `favicon_dark.ico`)
 fonts/              → PPSupply font files (4 .otf files)
 models/             → 3D models (tv1.glb)
 worker/certificate-lookup.ts → Public Worker-only certificate lookup policy and response shaping
+worker/certificate-lookup-rate-limiter.ts → Exact SQLite DO lookup counter (v2 migration)
 supabase/functions/lookup-agent/index.ts → Secret-gated internal certificate-ID upstream
 ```
 

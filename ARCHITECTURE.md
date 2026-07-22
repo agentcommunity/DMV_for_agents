@@ -84,7 +84,8 @@ The Department of Machine Verification is the identity registration system for t
  │  │  tokens cannot exhaust quota for real users.   │  │               │
  │  │                                                │  │               │
  │  │  GET /api/lookup?id=CERT-ID                    │  │               │
- │  │    → 30/60s/IP; cache 300s/60s                │  │               │
+ │  │    → CF coarse 60/60; DO exact 30/60          │  │               │
+ │  │    → BADGE_CACHE_KV results 300s/60s          │  │               │
  │  │    → six public fields; no domain lookup      │  │               │
  │  │                                                │  │               │
  │  │  🔑 Holds TURNSTILE_SECRET_KEY +              │  │               │
@@ -116,6 +117,7 @@ The Department of Machine Verification is the identity registration system for t
  │  │                                                  │                   │
  │  │  GET /lookup-agent?id=CERT-ID (internal)         │                   │
  │  │    → requires x-dmv-proxy: DMV_PROXY_SECRET      │                   │
+ │  │    → typed 200 issued/not_found envelopes       │                   │
  │  │    → direct access 403; domain lookup removed   │                   │
  │  │                                                  │                   │
  │  │  GET /badge?id=CERT-ID&style=flat|card           │                   │
@@ -173,11 +175,16 @@ Three distinct surfaces, owned by the Cloudflare Worker.
 
 **Render path** (`/api/card`, `/api/og`): `API_RATE_LIMITER` binding — 100 req/60s per `${ip}:${pathname}`, namespace `1001` (DMV-local). Runs BEFORE the in-Worker cache lookup so rejections don't eat CPU on L1/R2 reads. Rejected requests return `429` with `Retry-After: 60`. Configured in `wrangler.jsonc` under the top-level `ratelimits` array.
 
-**Certificate lookup** (`/api/lookup`): `RL_CERT_LOOKUP` plus an authoritative
-hashed-IP bucket in `REGISTER_COOLDOWN_KV` enforce 30 requests/60s/IP. Valid
-requests consume quota before `BADGE_CACHE_KV` is read. Issued responses are
+**Certificate lookup** (`/api/lookup`): permissive/eventually consistent
+`RL_CERT_LOOKUP` rejects only obvious bursts at 60 requests/60s/IP, then one
+`CERT_LOOKUP_LIMITER` SQLite Durable Object per SHA-256 hashed IP transactionally
+enforces the exact public 30/60 limit and supplies remaining/reset values. A
+Durable Object failure fails closed before cache/upstream. Valid requests consume
+quota before `BADGE_CACHE_KV` is read. Issued responses are
 cached for 300 seconds, not-found responses for 60 seconds, and upstream errors
-are not cached. Client responses remain `Cache-Control: private, no-store`.
+are not cached. `lookup-agent` returns typed HTTP 200 `issued`/`not_found`
+envelopes; non-200 or malformed envelopes are unavailable and uncached. Client
+responses remain `Cache-Control: private, no-store`.
 
 **Register path** (`/api/register`): five layers, ordered cheapest-to-most-expensive.
 
@@ -271,7 +278,7 @@ Format:  WORD-XXX-XXXC
 ## Security model
 
 The lookup components below are implementation-ready but unpublished as of
-2026-07-22. They become the production boundary only after Task 7 records the
+2026-07-22. They become the production boundary only after Task 8 records the
 deployed DMV commit SHA and live smoke evidence.
 
 ```

@@ -1,7 +1,10 @@
 import { normalizeCertificateId, verifyCertificateId } from './certificate';
-import { consumeKvBucket, type KvBucketResult } from './rate-limit-kv';
+import {
+  CERTIFICATE_LOOKUP_LIMIT,
+  type CertificateLookupRateLimitDecision,
+} from './certificate-lookup-rate-limiter';
 
-export const LOOKUP_LIMIT = 30;
+export const LOOKUP_LIMIT = CERTIFICATE_LOOKUP_LIMIT;
 export const LOOKUP_WINDOW_SECONDS = 60;
 export const LOOKUP_POSITIVE_TTL_SECONDS = 300;
 export const LOOKUP_NEGATIVE_TTL_SECONDS = 60;
@@ -12,8 +15,8 @@ const LOOKUP_TIMEOUT_MILLISECONDS = 5_000;
 
 interface LookupEnv {
   RL_CERT_LOOKUP: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  CERT_LOOKUP_LIMITER: DurableObjectNamespace;
   BADGE_CACHE_KV: KVNamespace;
-  REGISTER_COOLDOWN_KV: KVNamespace;
   DMV_PROXY_SECRET?: string;
 }
 
@@ -130,12 +133,60 @@ async function hashIp(ip: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function isAuthoritativeKvLimitResult(result: KvBucketResult | null): result is KvBucketResult {
-  if (!result) return false;
-  if (typeof result.allowed !== 'boolean') return false;
-  if (!Number.isInteger(result.remaining)) return false;
-  if (result.remaining < 0 || result.remaining >= LOOKUP_LIMIT) return false;
-  return result.allowed || result.remaining === 0;
+function isRateLimitDecision(result: unknown): result is CertificateLookupRateLimitDecision {
+  if (!result || typeof result !== 'object') return false;
+  const record = result as Record<string, unknown>;
+  if (Object.keys(record).sort().join(',') !== 'allowed,remaining,reset') return false;
+  if (typeof record.allowed !== 'boolean') return false;
+  if (!Number.isInteger(record.remaining)) return false;
+  if (!Number.isInteger(record.reset)) return false;
+  if ((record.remaining as number) < 0 || (record.remaining as number) >= LOOKUP_LIMIT) return false;
+  if ((record.reset as number) < 1 || (record.reset as number) > LOOKUP_WINDOW_SECONDS) return false;
+  return record.allowed || record.remaining === 0;
+}
+
+function hasExactKeys(record: Record<string, unknown>, keys: Array<string>): boolean {
+  return Object.keys(record).sort().join(',') === [...keys].sort().join(',');
+}
+
+function isNotFoundEnvelope(record: Record<string, unknown>, requestedId: string): boolean {
+  return hasExactKeys(record, ['status', 'certificate_id'])
+    && record.status === 'not_found'
+    && record.certificate_id === requestedId;
+}
+
+function isIssuedEnvelope(record: Record<string, unknown>, requestedId: string): boolean {
+  return hasExactKeys(record, ['status', 'certificate_id', 'agent_name', 'domain'])
+    && record.status === 'issued'
+    && record.certificate_id === requestedId
+    && typeof record.agent_name === 'string'
+    && record.agent_name.trim().length > 0
+    && typeof record.domain === 'string'
+    && record.domain.trim().length > 0;
+}
+
+async function consumeExactRateLimit(
+  namespace: DurableObjectNamespace,
+  ipHash: string,
+  now: number,
+): Promise<CertificateLookupRateLimitDecision | null> {
+  try {
+    const objectId = namespace.idFromName(ipHash);
+    const stub = namespace.get(objectId);
+    const response = await stub.fetch(
+      new Request('https://certificate-lookup-rate-limiter.internal/consume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ now }),
+      }),
+    );
+    if (response.status !== 200) return null;
+    const result: unknown = await response.json();
+    return isRateLimitDecision(result) ? result : null;
+  } catch (error) {
+    console.error('[certificate-lookup] exact limiter failed', { error });
+    return null;
+  }
 }
 
 async function cacheResult(
@@ -189,8 +240,16 @@ export async function handleCertificateLookup(
   }
 
   const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  let ipHash: string;
   try {
-    const cloudflareResult = await env.RL_CERT_LOOKUP.limit({ key: `${ip}:/api/lookup` });
+    ipHash = await hashIp(ip);
+  } catch (error) {
+    console.error('[certificate-lookup] IP hashing failed', { error });
+    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute());
+  }
+
+  try {
+    const cloudflareResult = await env.RL_CERT_LOOKUP.limit({ key: `${ipHash}:/api/lookup` });
     if (!cloudflareResult.success) {
       const reset = secondsUntilNextMinute();
       return jsonResponse(
@@ -205,39 +264,24 @@ export async function handleCertificateLookup(
     console.error('[certificate-lookup] Cloudflare limiter failed', { error });
   }
 
-  let ipHash: string;
-  try {
-    ipHash = await hashIp(ip);
-  } catch (error) {
-    console.error('[certificate-lookup] IP hashing failed', { error });
-    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute());
-  }
-
   const now = Date.now();
-  const reset = secondsUntilNextMinute(now);
-  const minuteBucket = Math.floor(now / 60_000);
-  const bucketKey = `dmv:lookup:v1:${ipHash}:${minuteBucket}`;
-  const kvLimit = await consumeKvBucket(
-    env.REGISTER_COOLDOWN_KV,
-    bucketKey,
-    LOOKUP_LIMIT,
-    LOOKUP_WINDOW_SECONDS,
-  );
+  const exactLimit = await consumeExactRateLimit(env.CERT_LOOKUP_LIMITER, ipHash, now);
 
-  if (!isAuthoritativeKvLimitResult(kvLimit)) {
-    return jsonResponse(unavailableResult(id), 503, 0, reset);
+  if (!exactLimit) {
+    return jsonResponse(unavailableResult(id), 503, 0, secondsUntilNextMinute(now));
   }
-  if (!kvLimit.allowed) {
+  if (!exactLimit.allowed) {
     return jsonResponse(
-      { error: 'rate_limited', retry_after_seconds: reset },
+      { error: 'rate_limited', retry_after_seconds: exactLimit.reset },
       429,
       0,
-      reset,
-      { 'Retry-After': String(reset) },
+      exactLimit.reset,
+      { 'Retry-After': String(exactLimit.reset) },
     );
   }
 
-  const remaining = kvLimit.remaining;
+  const remaining = exactLimit.remaining;
+  const reset = exactLimit.reset;
   const cacheKey = `lookup:v1:${id}`;
   try {
     const cachedValue = await env.BADGE_CACHE_KV.get(cacheKey);
@@ -262,11 +306,6 @@ export async function handleCertificateLookup(
       },
     );
 
-    if (upstream.status === 404) {
-      const result = notFoundResult(id);
-      await cacheResult(env.BADGE_CACHE_KV, cacheKey, result, LOOKUP_NEGATIVE_TTL_SECONDS);
-      return jsonResponse(result, 200, remaining, reset);
-    }
     if (upstream.status !== 200) {
       return jsonResponse(unavailableResult(id), 503, remaining, reset);
     }
@@ -282,16 +321,16 @@ export async function handleCertificateLookup(
     }
 
     const upstreamRecord = upstreamBody as Record<string, unknown>;
-    if (
-      typeof upstreamRecord.certificate_id !== 'string'
-      || upstreamRecord.certificate_id !== id
-      || typeof upstreamRecord.agent_name !== 'string'
-      || upstreamRecord.agent_name.trim().length === 0
-    ) {
+    if (isNotFoundEnvelope(upstreamRecord, id)) {
+      const result = notFoundResult(id);
+      await cacheResult(env.BADGE_CACHE_KV, cacheKey, result, LOOKUP_NEGATIVE_TTL_SECONDS);
+      return jsonResponse(result, 200, remaining, reset);
+    }
+    if (!isIssuedEnvelope(upstreamRecord, id)) {
       return jsonResponse(unavailableResult(id), 503, remaining, reset);
     }
 
-    const result = issuedResult(upstreamRecord.certificate_id, upstreamRecord.agent_name);
+    const result = issuedResult(id, upstreamRecord.agent_name as string);
     await cacheResult(env.BADGE_CACHE_KV, cacheKey, result, LOOKUP_POSITIVE_TTL_SECONDS);
     return jsonResponse(result, 200, remaining, reset);
   } catch (error) {
