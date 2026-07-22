@@ -282,7 +282,9 @@ merged `main` `fabafe6` (PR #20) deployed as Worker version
 `d9755e66-3883-4970-be84-a59307011f14` at `2026-07-22T12:01:52.501Z`.
 Smokes recorded issued `REEF-068-BD0Q`, not-found `ZZZZ-FFF-FFFD`, invalid
 `400`, exact 31st-call `429`, next-minute recovery, and secretless direct Edge
-`403 direct_access_deprecated` without deleting or mutating production data.
+`403 direct_access_deprecated`. No Supabase registration or member rows were
+deleted or mutated; the limiter/cache smokes intentionally wrote Durable
+Object/KV operational state.
 
 ```
 Principle: never trust the client.

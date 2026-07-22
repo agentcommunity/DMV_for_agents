@@ -211,8 +211,9 @@ for a valid-format certificate until only `lookup-agent` was deployed with
 `masato`; generated absent `ZZZZ-FFF-FFFD` returned `200 not_found`; `INVALID`
 returned `400`; calls 1–30 passed, call 31 returned `429` with remaining `0`,
 and the next-minute call returned `200` with remaining `29`. `/healthz`, card,
-badge, permalink, and validation-only registration also passed. No production
-data was deleted or mutated during verification.
+badge, permalink, and validation-only registration also passed. No Supabase
+registration or member rows were deleted or mutated during verification; the
+limiter/cache smokes intentionally wrote Durable Object/KV operational state.
 
 The v2 SQLite migration is forward-only operational state. Never roll back to a
 pre-v2 Worker. Preserve the v1/v2 migrations, `CertificateLookupRateLimiter`

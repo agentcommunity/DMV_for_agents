@@ -118,7 +118,8 @@ including the manual-redirect runtime fix) is deployed as Worker version
 The exact limiter allowed calls 1–30, denied call 31 with `429` and remaining
 `0`, then allowed a next-minute call with remaining `29`. `/healthz`, badge,
 permalink, and card checks returned `200`; validation-only `GET /api/register`
-returned `405`. No production data was deleted or mutated during verification.
+returned `405`. No Supabase registration or member rows were deleted or mutated;
+the limiter and cache checks intentionally wrote Durable Object/KV operational state.
 
 The only public network lookup is:
 

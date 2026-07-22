@@ -108,7 +108,9 @@ The completed rollout used the order below. Final production results were:
 - `/healthz` returned JSON `200`; badge returned SVG `200`; permalink returned
   HTML `200`; card returned PNG `200`; validation-only `GET /api/register`
   returned `405`.
-- No production data was deleted or mutated during verification.
+- No Supabase registration or member rows were deleted or mutated during
+  verification. The limiter and result-cache smokes intentionally wrote Durable
+  Object/KV operational state.
 
 ### Future rollout order
 
@@ -127,10 +129,11 @@ The completed rollout used the order below. Final production results were:
    once as the fallback. Never run the automatic and manual paths concurrently.
 3. Before changing Supabase, smoke `/healthz`, an existing card and badge,
    validation-only registration, invalid lookup (`400`), and a known valid-format
-   lookup. The valid-format lookup is expected to be a brief `503 unavailable`
-   while the Worker talks to the legacy Edge response; this is the accepted
-   Worker-first compatibility interval. Do not expect `issued` or `not_found`
-   until Step 4.
+   lookup. **Only on a first publication against a legacy Edge contract**, the
+   valid-format lookup may briefly be fail-closed `503 unavailable` before Step
+   4. On future changes to the already-live Edge contract, expect the current
+   typed result instead; treat any unexpected `503` as a failure to investigate,
+   not as an expected rollout state.
 4. Deploy **only** the changed lookup function:
 
 ```bash

@@ -127,7 +127,9 @@ Update all status surfaces in DEPLOY.md after any future evidence-backed rollout
    SELECT id, user_id, certificate_id, domain_name FROM public.user_domains
    WHERE certificate_id IN ('NEON-219-A55A', 'FLUX-79E-D61O');
    ```
-   If rows exist, delete them. The corresponding `public.registrations` and `auth.users` rows were already cleaned up by the user on 2026-04-09.
+   If rows exist, record the result and request explicit user approval before
+   any cleanup. Do not delete Supabase data as part of a diagnostic; escalate
+   the proposed target set and recovery plan instead.
 
 4. **Historical `llms.txt` lookup gap (closed 2026-07-22)** — PR #8 removed a
    broken `/api/lookup` reference while no Worker route existed. The live route
