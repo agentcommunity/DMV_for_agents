@@ -1,5 +1,5 @@
 import { normalizeCertificateId, verifyCertificateId } from './certificate';
-import { consumeKvBucket } from './rate-limit-kv';
+import { consumeKvBucket, type KvBucketResult } from './rate-limit-kv';
 
 export const LOOKUP_LIMIT = 30;
 export const LOOKUP_WINDOW_SECONDS = 60;
@@ -130,6 +130,14 @@ async function hashIp(ip: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function isAuthoritativeKvLimitResult(result: KvBucketResult | null): result is KvBucketResult {
+  if (!result) return false;
+  if (typeof result.allowed !== 'boolean') return false;
+  if (!Number.isInteger(result.remaining)) return false;
+  if (result.remaining < 0 || result.remaining >= LOOKUP_LIMIT) return false;
+  return result.allowed || result.remaining === 0;
+}
+
 async function cacheResult(
   kv: KVNamespace,
   key: string,
@@ -181,7 +189,6 @@ export async function handleCertificateLookup(
   }
 
   const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
-  let cloudflareLimiterAvailable = true;
   try {
     const cloudflareResult = await env.RL_CERT_LOOKUP.limit({ key: `${ip}:/api/lookup` });
     if (!cloudflareResult.success) {
@@ -195,14 +202,20 @@ export async function handleCertificateLookup(
       );
     }
   } catch (error) {
-    cloudflareLimiterAvailable = false;
     console.error('[certificate-lookup] Cloudflare limiter failed', { error });
   }
 
-  const ipHash = await hashIp(ip);
   const now = Date.now();
-  const minuteBucket = Math.floor(now / 60_000);
   const reset = secondsUntilNextMinute(now);
+  let ipHash: string;
+  try {
+    ipHash = await hashIp(ip);
+  } catch (error) {
+    console.error('[certificate-lookup] IP hashing failed', { error });
+    return jsonResponse(unavailableResult(id), 503, 0, reset);
+  }
+
+  const minuteBucket = Math.floor(now / 60_000);
   const bucketKey = `dmv:lookup:v1:${ipHash}:${minuteBucket}`;
   const kvLimit = await consumeKvBucket(
     env.REGISTER_COOLDOWN_KV,
@@ -211,7 +224,10 @@ export async function handleCertificateLookup(
     LOOKUP_WINDOW_SECONDS,
   );
 
-  if (kvLimit && !kvLimit.allowed) {
+  if (!isAuthoritativeKvLimitResult(kvLimit)) {
+    return jsonResponse(unavailableResult(id), 503, 0, reset);
+  }
+  if (!kvLimit.allowed) {
     return jsonResponse(
       { error: 'rate_limited', retry_after_seconds: reset },
       429,
@@ -220,11 +236,8 @@ export async function handleCertificateLookup(
       { 'Retry-After': String(reset) },
     );
   }
-  if (!cloudflareLimiterAvailable && !kvLimit) {
-    return jsonResponse(unavailableResult(id), 503, 0, reset);
-  }
 
-  const remaining = kvLimit?.remaining ?? LOOKUP_LIMIT - 1;
+  const remaining = kvLimit.remaining;
   const cacheKey = `lookup:v1:${id}`;
   try {
     const cachedValue = await env.BADGE_CACHE_KV.get(cacheKey);

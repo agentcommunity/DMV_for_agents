@@ -49,11 +49,25 @@ export async function consumeKvBucket(
   windowSeconds: number,
 ): Promise<KvBucketResult | null> {
   try {
-    const current = Number.parseInt((await kv.get(key)) ?? '0', 10);
+    const stored = await kv.get(key);
+    if (stored !== null && !/^(0|[1-9]\d*)$/.test(stored)) {
+      console.error('[rate-limit-kv] consumeKvBucket found invalid count', { key });
+      return null;
+    }
+    const current = stored === null ? 0 : Number(stored);
+    if (!Number.isInteger(current) || current < 0 || current > limit) {
+      console.error('[rate-limit-kv] consumeKvBucket found invalid count', { key });
+      return null;
+    }
     if (current >= limit) return { allowed: false, remaining: 0 };
     const next = current + 1;
+    const remaining = limit - next;
+    if (!Number.isInteger(remaining) || remaining < 0 || remaining > limit) {
+      console.error('[rate-limit-kv] consumeKvBucket computed invalid remaining count', { key });
+      return null;
+    }
     await kv.put(key, String(next), { expirationTtl: windowSeconds });
-    return { allowed: true, remaining: Math.max(0, limit - next) };
+    return { allowed: true, remaining };
   } catch (error) {
     console.error('[rate-limit-kv] consumeKvBucket failed', { key, error });
     return null;

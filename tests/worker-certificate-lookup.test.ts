@@ -30,7 +30,11 @@ interface TestEnv {
   DMV_PROXY_SECRET?: string;
 }
 
-function createKv(options: { failRead?: boolean; failWrite?: boolean } = {}): TrackedKv {
+function createKv(options: {
+  failRead?: boolean;
+  failWrite?: boolean;
+  readValue?: string;
+} = {}): TrackedKv {
   const values = new Map<string, string>();
   const reads: Array<string> = [];
   const writes: Array<{ key: string; value: string; options?: KVNamespacePutOptions }> = [];
@@ -43,6 +47,7 @@ function createKv(options: { failRead?: boolean; failWrite?: boolean } = {}): Tr
       async get(key: string) {
         reads.push(key);
         if (options.failRead) throw new Error('KV read unavailable');
+        if (options.readValue !== undefined) return options.readValue;
         return values.get(key) ?? null;
       },
       async put(key: string, value: string, putOptions?: KVNamespacePutOptions) {
@@ -280,6 +285,76 @@ test('fails closed when both limiter layers are unavailable', async (t) => {
 
   assert.equal(response.status, 503);
   assert.equal((await readJson(response)).status, 'unavailable');
+  assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
+  assert.equal(upstream.calls.length, 0);
+  assertPrivateNoStore(response);
+});
+
+test('fails closed when Cloudflare throws and the stored KV counter is corrupt', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
+  const limiter = createLimiter({ throws: true });
+  const cooldownKv = createKv({ readValue: 'not-a-number' });
+  const { env, badgeKv } = createEnv({ limiter, cooldownKv });
+  const upstream = createFetch([]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await readJson(response), {
+    certificate_id: VALID_ID,
+    status: 'unavailable',
+    valid_format: true,
+    issued: null,
+    agent_name: null,
+    certificate_url: null,
+  });
+  assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
+  assert.equal(upstream.calls.length, 0);
+  assertPrivateNoStore(response);
+});
+
+test('fails closed when KV is indeterminate even if Cloudflare allows', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
+  const cooldownKv = createKv({ failRead: true });
+  const { env, badgeKv } = createEnv({ cooldownKv });
+  const upstream = createFetch([]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await readJson(response), {
+    certificate_id: VALID_ID,
+    status: 'unavailable',
+    valid_format: true,
+    issued: null,
+    agent_name: null,
+    certificate_url: null,
+  });
+  assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
+  assert.equal(upstream.calls.length, 0);
+  assertPrivateNoStore(response);
+});
+
+test('maps SHA-256 digest rejection to unavailable before cache or upstream', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
+  t.mock.method(crypto.subtle, 'digest', async () => {
+    throw new Error('digest unavailable');
+  });
+  const { env, badgeKv, cooldownKv } = createEnv();
+  const upstream = createFetch([]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await readJson(response), {
+    certificate_id: VALID_ID,
+    status: 'unavailable',
+    valid_format: true,
+    issued: null,
+    agent_name: null,
+    certificate_url: null,
+  });
+  assert.equal(cooldownKv.reads.length + cooldownKv.writes.length, 0);
   assert.equal(badgeKv.reads.length + badgeKv.writes.length, 0);
   assert.equal(upstream.calls.length, 0);
   assertPrivateNoStore(response);

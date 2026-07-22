@@ -63,3 +63,35 @@ test('returns null when KV reads or writes fail', async (t) => {
     assert.equal(result, null);
   }
 });
+
+test('returns null for malformed or out-of-range stored counts', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
+
+  for (const storedCount of [
+    '',
+    '   ',
+    'not-a-number',
+    '7junk',
+    '-1',
+    '1.5',
+    '1e1',
+    '01',
+    'Infinity',
+    '31',
+  ]) {
+    let putCalls = 0;
+    const kv = {
+      async get() {
+        return storedCount;
+      },
+      async put() {
+        putCalls += 1;
+      },
+    } as KVNamespace;
+
+    const result = await consumeKvBucket(kv, 'lookup:203.0.113.7:minute', 30, 60);
+
+    assert.equal(result, null);
+    assert.equal(putCalls, 0, `must not overwrite corrupt counter ${JSON.stringify(storedCount)}`);
+  }
+});
