@@ -15,6 +15,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250101.0
         version: 4.20260405.1
+      '@types/node':
+        specifier: 20.19.39
+        version: 20.19.39
       tsx:
         specifier: ^4.23.1
         version: 4.23.1

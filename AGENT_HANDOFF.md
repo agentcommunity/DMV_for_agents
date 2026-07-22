@@ -1,6 +1,6 @@
 # Agent Handoff — DMV API Hardening (updated 2026-07-22)
 
-Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This file is the most recent state snapshot; the rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) are aligned with the world this file describes.
+Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This file is the most recent state snapshot; the rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) are aligned with the world this file describes, including `SECURITY.md`'s public `/api/lookup` route inventory and internal secret-gated `lookup-agent` boundary.
 
 ## Current production state — everything works
 
