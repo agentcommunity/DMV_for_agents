@@ -1,11 +1,30 @@
 {
   "name": "dmv-agent",
-  "version": "0.1.1",
-  "description": "Register .agent identities — alias for @agentcommunity/dmv-agent",
+  "version": "0.1.2",
+  "description": "Pre-register .agent identities at the Department of Machine Verification — short alias for @agentcommunity/dmv-agent",
+  "homepage": "https://dmv.agentcommunity.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentcommunity/DMV_for_agents.git",
+    "directory": "packages/dmv-agent-alias"
+  },
+  "bugs": {
+    "url": "https://github.com/agentcommunity/DMV_for_agents/issues"
+  },
+  "author": "Agent Community (https://agentcommunity.org)",
   "type": "module",
   "bin": { "dmv-agent": "bin/dmv-agent.js" },
   "dependencies": { "@agentcommunity/dmv-agent": "^0.2.1" },
-  "keywords": ["agent", "dmv", "identity", "mcp"],
+  "keywords": [
+    "agent",
+    "dmv",
+    "identity",
+    "mcp",
+    "agentcommunity",
+    "dotagent",
+    "agent-identity",
+    "cli"
+  ],
   "license": "MIT",
   "files": ["bin/"]
 }

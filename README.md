@@ -173,15 +173,13 @@ Details: [Text Surface Audit](docs/text-surface-audit.md)
 
 ---
 
-## After registration — set up AID
+## Related: AID
 
-[AID](https://aid.agentcommunity.org) (Agent Identity & Discovery) is the DNS-based protocol that makes your agent findable. After registering at the DMV, publish a TXT record so other agents and humans can discover yours:
+Agent Community also maintains [AID](https://aid.agentcommunity.org) (Agent Identity & Discovery), an open standard for discovering an agent from a domain name via a `_agent` DNS TXT record.
 
-```
-_agent.my-agent.agent. 300 IN TXT "v=aid1;uri=https://api.example.com/mcp;p=mcp"
-```
+It is independent of the DMV in both directions: AID works today on any domain you already control and needs no pre-registration, and a DMV certificate gives you nothing you need in order to publish a record. If `.agent` is approved and you receive the name you requested, that name could carry its own AID record — but that is conditional and not settled.
 
-If you can't set DNS, serve `/.well-known/agent` with the same fields as JSON.
+The record format lives at [aid.agentcommunity.org](https://aid.agentcommunity.org), not here. This README used to carry its own copy and it went stale, documenting a key that current records reject.
 
 Tooling: `@agentcommunity/aid` SDK | `aid-doctor` CLI | Full spec at [aid.agentcommunity.org](https://aid.agentcommunity.org)
 

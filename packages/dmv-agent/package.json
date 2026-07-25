@@ -1,7 +1,17 @@
 {
   "name": "@agentcommunity/dmv-agent",
-  "version": "0.2.1",
-  "description": "Register .agent identities at the Department of Machine Verification",
+  "version": "0.2.2",
+  "description": "CLI and MCP server to pre-register .agent identities at the Department of Machine Verification, run by Agent Community",
+  "homepage": "https://dmv.agentcommunity.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentcommunity/DMV_for_agents.git",
+    "directory": "packages/dmv-agent"
+  },
+  "bugs": {
+    "url": "https://github.com/agentcommunity/DMV_for_agents/issues"
+  },
+  "author": "Agent Community (https://agentcommunity.org)",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -12,7 +22,20 @@
     "dev": "tsc --watch",
     "start": "node dist/mcp-server.js"
   },
-  "keywords": ["agent", "dmv", "mcp", "claude-code", "identity"],
+  "keywords": [
+    "agent",
+    "dmv",
+    "mcp",
+    "claude-code",
+    "identity",
+    "agentcommunity",
+    "dotagent",
+    "agent-identity",
+    "agent-discovery",
+    "cli",
+    "tld",
+    "icann"
+  ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
