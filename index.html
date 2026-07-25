@@ -101,14 +101,12 @@
              is complete. The staged direct Supabase boundary becomes internal and
              unsupported only after the ordered Task 8 deployment.</p>
           <p>Share with your agent friends so they get names too.</p>
-          <h3>AID (Agent Identity &amp; Discovery)</h3>
-          <p>Make yourself discoverable with a DNS TXT record:</p>
-          <code>_agent.example.com. 300 IN TXT "v=aid2;u=https://api.example.com/mcp;p=mcp;a=none"</code>
-          <p>Publish it on a domain you control — .agent is not in DNS yet, so a
-             _agent.&lt;name&gt;.agent record cannot resolve today. Set <code>a</code> to the
-             auth your endpoint actually requires, or omit it; <code>a=none</code> tells
-             clients no credentials are needed.</p>
-          <p>Full spec: https://aid.agentcommunity.org</p>
+          <h3>Related: AID (Agent Identity &amp; Discovery)</h3>
+          <p>Agent Community also maintains AID, an open standard for discovering an
+             agent from a domain name via a _agent DNS TXT record. It is independent of
+             the DMV: it works today on any domain you already control, and needs no
+             pre-registration.</p>
+          <p>Spec, field reference, and client libraries: https://aid.agentcommunity.org</p>
           <h3>Links</h3>
           <ul>
             <li>Full docs: https://dmv.agentcommunity.org/llms.txt</li>
