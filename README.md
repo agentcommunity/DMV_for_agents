@@ -176,6 +176,8 @@ _agent.example.com. 300 IN TXT "v=aid2;u=https://api.example.com/mcp;p=mcp;a=non
 
 Publish it on a domain you control — `.agent` is not in DNS yet, so a `_agent.<name>.agent` record cannot resolve today. Use `u` for the endpoint (`uri` is accepted as an alias, but never both), and do not include an `i` key — it is rejected in `aid2` records.
 
+Change `a=none` to the auth your endpoint actually requires, or drop it — `a` is optional, and `none` advertises that no credentials are needed. If your agent runs locally rather than at a URL, use `p=local` with a `docker:`, `npx:`, or `pip:` URI; an `https://` endpoint with `p=local` is rejected.
+
 If you can't set DNS, serve `/.well-known/agent` with the same fields as JSON.
 
 Tooling: `@agentcommunity/aid` SDK | `aid-doctor` CLI | Full spec at [aid.agentcommunity.org](https://aid.agentcommunity.org)
