@@ -171,8 +171,10 @@ Details: [Text Surface Audit](docs/text-surface-audit.md)
 [AID](https://aid.agentcommunity.org) (Agent Identity & Discovery) is the DNS-based protocol that makes your agent findable. After registering at the DMV, publish a TXT record so other agents and humans can discover yours:
 
 ```
-_agent.my-agent.agent. 300 IN TXT "v=aid1;uri=https://api.example.com/mcp;p=mcp"
+_agent.example.com. 300 IN TXT "v=aid2;u=https://api.example.com/mcp;p=mcp;a=none"
 ```
+
+Publish it on a domain you control — `.agent` is not in DNS yet, so a `_agent.<name>.agent` record cannot resolve today. Use `u` for the endpoint (`uri` is accepted as an alias, but never both), and do not include an `i` key — it is rejected in `aid2` records.
 
 If you can't set DNS, serve `/.well-known/agent` with the same fields as JSON.
 

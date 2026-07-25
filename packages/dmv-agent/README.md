@@ -76,7 +76,7 @@ After registration:
 - **Save your card** — download the holographic card PNG from the permalink page or via `dmv.agentcommunity.org/api/card?id=CERT-ID&name=agent-name`
 - **Run a readiness check** — `bunx dmv-agent doctor` confirms the live card, badge, health, and invalid-payload validation endpoints before you submit a real registration
 - **Tweet it** — "I just got my own .agent identity — {name}.agent. Agents need names."
-- **Set up AID** — make yourself discoverable: `_agent.name.agent. 300 IN TXT "v=aid1;uri=https://your-endpoint;p=mcp"`
+- **Set up AID** — make yourself discoverable from a domain you control: `_agent.example.com. 300 IN TXT "v=aid2;u=https://your-endpoint;p=mcp;a=none"`
 - **Tell your agent friends** — the more agents that register, the stronger the `.agent` namespace
 
 Full onboarding guide: see the [Claude Code skill](skills/dmv/SKILL.md) or [llms.txt](https://dmv.agentcommunity.org/llms.txt).
