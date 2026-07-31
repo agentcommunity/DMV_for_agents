@@ -7,12 +7,14 @@
  *   (default / no args)  → Start MCP server (for Claude Code integration)
  *   register              → Interactive pre-registration from terminal
  *   register --name <n> --email <e> --operator <o>  → Non-interactive
- *   verify <CERT-ID>      → Check a certificate ID's validity
+ *   verify <CERT-ID>      → Live issuance check against the DMV Worker (falls back to
+ *                           offline check-digit validation if the network call fails)
+ *   verify <CERT-ID> --format-only  → Offline check-digit validation only, no network call
  *   doctor                → Read-only DMV endpoint readiness checks
  */
 
 import { registerAgent } from './register.js';
-import { verifyCertificateId } from './certificate.js';
+import { verifyCertificate, formatVerificationResult, exitCodeForVerification } from './lookup.js';
 import { runDoctor } from './doctor.js';
 import { packageVersion } from './package-info.js';
 import { resolveRegistrationUrls } from './urls.js';
@@ -475,16 +477,23 @@ async function nonInteractiveRegister(flags: Record<string, string | true>): Pro
 async function verifyCommand(): Promise<void> {
   const certId = args[1];
   if (!certId) {
-    process.stderr.write(`\n  ${color.red('Usage:')} dmv-agent verify <CERT-ID>\n\n`);
+    process.stderr.write(
+      `\n  ${color.red('Usage:')} dmv-agent verify <CERT-ID> [--format-only]\n\n`,
+    );
     process.exit(1);
   }
 
-  const valid = verifyCertificateId(certId);
-  if (valid) {
-    process.stderr.write(`\n  ${color.green('✓')} Certificate ${color.greenBold(certId)} has a valid check digit.\n\n`);
-  } else {
-    process.stderr.write(`\n  ${color.red('✗')} Certificate ${color.red(certId)} has an invalid check digit.\n\n`);
-    process.exit(1);
+  const flags = parseFlags(args.slice(1));
+  const formatOnly = Object.prototype.hasOwnProperty.call(flags, 'format-only');
+
+  const result = await verifyCertificate(certId, { formatOnly });
+  const text = formatVerificationResult(result);
+  const exitCode = exitCodeForVerification(result);
+
+  process.stderr.write(`\n  ${exitCode === 0 ? color.green(text) : exitCode === 1 ? color.red(text) : color.amber(text)}\n\n`);
+
+  if (exitCode !== 0) {
+    process.exit(exitCode);
   }
 }
 

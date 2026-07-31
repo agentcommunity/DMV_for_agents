@@ -2,6 +2,44 @@
 
 Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This file is the most recent state snapshot; the rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) distinguish the live registration boundary from the implementation-ready but unpublished certificate lookup work.
 
+## 2026-08-01 — `verify_certificate` MCP name collision resolved (npm package v0.3.0)
+
+Code review across both `agentcommunity_PAGE` and this repo found that the
+`@agentcommunity/dmv-agent` npm package's MCP server exposed a tool named
+`verify_certificate` that only checked the Luhn mod-36 check digit
+(`packages/dmv-agent/src/certificate.ts`), while `agentcommunity_PAGE`'s
+`/mcp` endpoint exposes a tool of the **same name** that checks live issuance
+via `GET /api/lookup` on this Worker. An agent with both MCP servers
+configured could ask "is CERT-ID valid?" and get a "yes" from one server and
+a "no, not found" from the other, for the same ID.
+
+**Decision: Option A (wire the package to the real lookup), not Option B
+(rename).** The package's `verify_certificate` (MCP) and `dmv-agent verify`
+(CLI) now call `GET https://dmv.agentcommunity.org/api/lookup?id=<id>` by
+default — the same public, rate-limited (~30/60s per IP) Worker route the
+main site's tool uses — via the new `packages/dmv-agent/src/lookup.ts`. A
+`format_only: true` MCP argument / `--format-only` CLI flag preserves the old
+check-digit-only behavior with no network call. If the live call fails
+(network error, timeout, malformed response, or the Worker itself reporting
+`status: "unavailable"` — which it does today, see below), the tool
+automatically falls back to the offline check digit and labels the result
+`(format-only ...)` in its text output; a network failure is never reported
+as "not issued". Full detail in `packages/dmv-agent/CHANGELOG.md` (0.3.0)
+and `packages/dmv-agent/README.md`.
+
+This does **not** change the state described immediately below: the
+`lookup-agent` Supabase upstream is still unpublished, so
+`GET /api/lookup?id=<valid-format-id>` currently returns
+`{"status":"unavailable","issued":null,...}` in production (verified live
+2026-08-01). The package handles that correctly — `unavailable` is
+inconclusive, not a "not issued" claim — but it means `dmv-agent verify` /
+the MCP tool will show an inconclusive live-check result for every
+real certificate until Task 8 (below) ships. Nothing was published to npm as
+part of this change; `packages/dmv-agent/package.json` was bumped to
+`0.3.0` and the `dmv-agent` alias package's dependency range updated to
+`^0.3.0`, but both remain unpublished until someone explicitly runs
+`npm publish --access public` from `packages/dmv-agent`.
+
 ## Current production state — registration live; lookup unpublished
 
 ```

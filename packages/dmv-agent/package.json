@@ -1,6 +1,6 @@
 {
   "name": "@agentcommunity/dmv-agent",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Register .agent identities at the Department of Machine Verification",
   "type": "module",
   "main": "dist/index.js",
@@ -24,6 +24,7 @@
   "files": [
     "dist/",
     "skills/",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ]
 }

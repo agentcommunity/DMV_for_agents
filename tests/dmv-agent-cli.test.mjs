@@ -189,18 +189,152 @@ async function withDoctorServer(handler, options = {}) {
   }
 }
 
-test('verify accepts a valid DMV certificate ID', () => {
-  const result = runCli(['verify', 'MESA-DD6-660J']);
+async function withLookupServer(responseFor, handler) {
+  const server = http.createServer((request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1');
+    if (request.method === 'GET' && url.pathname === '/api/lookup') {
+      const id = url.searchParams.get('id') ?? '';
+      const config = responseFor(id);
+      response.writeHead(config.status, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(config.body));
+      return;
+    }
+    response.writeHead(404, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  await new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    await handler(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+  }
+}
+
+test('verify --format-only checks the check digit offline, with no network call', () => {
+  const result = runCli(['verify', 'MESA-DD6-660J', '--format-only'], {
+    env: { DMV_BASE_URL: 'http://127.0.0.1:9/dmv-smoke-should-not-be-called' },
+  });
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /has a valid check digit/);
+  assert.match(result.stderr, /format-only check/);
 });
 
-test('verify rejects an invalid DMV certificate ID', () => {
-  const result = runCli(['verify', 'FAKE-000-0000']);
+test('verify --format-only rejects an invalid DMV certificate ID', () => {
+  const result = runCli(['verify', 'FAKE-000-0000', '--format-only'], {
+    env: { DMV_BASE_URL: 'http://127.0.0.1:9/dmv-smoke-should-not-be-called' },
+  });
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /has an invalid check digit/);
+});
+
+test('verify (default, live) rejects an invalid DMV certificate ID without a network call', () => {
+  // Format is invalid, so the live-check path must short-circuit before ever touching
+  // DMV_BASE_URL — proven by pointing it at a port nothing listens on.
+  const result = runCli(['verify', 'FAKE-000-0000'], {
+    env: { DMV_BASE_URL: 'http://127.0.0.1:9/dmv-smoke-should-not-be-called' },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /has an invalid check digit/);
+  assert.match(result.stderr, /no network call was made/);
+});
+
+test('verify (default, live) reports issuance when the Worker confirms it', async () => {
+  await withLookupServer(
+    (id) => ({
+      status: 200,
+      body: {
+        certificate_id: id,
+        status: 'issued',
+        valid_format: true,
+        issued: true,
+        agent_name: 'smoke-agent',
+        certificate_url: 'https://dmv.agentcommunity.org/c/MESA-DD6-660J/smoke-agent',
+      },
+    }),
+    async (baseUrl) => {
+      const result = await runCliAsync(['verify', 'MESA-DD6-660J'], {
+        env: { DMV_BASE_URL: baseUrl, NO_COLOR: '1' },
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stderr, /is issued \(live check\)/);
+      assert.match(result.stderr, /smoke-agent\.agent/);
+    },
+  );
+});
+
+test('verify (default, live) reports not_found distinctly from an invalid check digit', async () => {
+  await withLookupServer(
+    (id) => ({
+      status: 200,
+      body: {
+        certificate_id: id,
+        status: 'not_found',
+        valid_format: true,
+        issued: false,
+        agent_name: null,
+        certificate_url: null,
+      },
+    }),
+    async (baseUrl) => {
+      const result = await runCliAsync(['verify', 'MESA-DD6-660J'], {
+        env: { DMV_BASE_URL: baseUrl, NO_COLOR: '1' },
+      });
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /not registered in the DMV database \(live check\)/);
+    },
+  );
+});
+
+test('verify (default, live) labels an unavailable Worker as inconclusive, not "not issued"', async () => {
+  await withLookupServer(
+    (id) => ({
+      status: 503,
+      body: {
+        certificate_id: id,
+        status: 'unavailable',
+        valid_format: true,
+        issued: null,
+        agent_name: null,
+        certificate_url: null,
+      },
+    }),
+    async (baseUrl) => {
+      const result = await runCliAsync(['verify', 'MESA-DD6-660J'], {
+        env: { DMV_BASE_URL: baseUrl, NO_COLOR: '1' },
+      });
+
+      assert.notEqual(result.status, 0);
+      assert.equal(result.status, 2);
+      assert.match(result.stderr, /could not be confirmed right now/);
+      assert.match(result.stderr, /NOT a "not issued" result/);
+    },
+  );
+});
+
+test('verify (default, live) falls back to the offline check digit when the network call fails', async () => {
+  // Nothing listens on this port — fetch() must fail/timeout and we must fall back cleanly.
+  const result = await runCliAsync(['verify', 'MESA-DD6-660J'], {
+    env: { DMV_BASE_URL: 'http://127.0.0.1:9', NO_COLOR: '1' },
+  });
+
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /has a valid check digit/);
+  assert.match(result.stderr, /format-only — live issuance check unavailable/);
+  assert.match(result.stderr, /Live check could not run/);
+  assert.doesNotMatch(result.stderr, /not issued in the DMV database/);
 });
 
 test('non-interactive registration validates fields before network submission', () => {

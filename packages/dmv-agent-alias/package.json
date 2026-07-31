@@ -4,7 +4,7 @@
   "description": "Register .agent identities — alias for @agentcommunity/dmv-agent",
   "type": "module",
   "bin": { "dmv-agent": "bin/dmv-agent.js" },
-  "dependencies": { "@agentcommunity/dmv-agent": "^0.2.1" },
+  "dependencies": { "@agentcommunity/dmv-agent": "^0.3.0" },
   "keywords": ["agent", "dmv", "identity", "mcp"],
   "license": "MIT",
   "files": ["bin/"]
