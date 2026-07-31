@@ -24,7 +24,8 @@ import { handleCertificateLookup } from './certificate-lookup';
 import { CertificateLookupRateLimiter } from './certificate-lookup-rate-limiter';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import { checkKvCooldown, incrementKvCooldown } from './rate-limit-kv';
-import { fetchRegistrationUpstream, isNewCertificateMint } from './registration-upstream';
+import { runFingerprintGatedUpstream } from './register-fingerprint-cooldown';
+import { fetchRegistrationUpstream } from './registration-upstream';
 import { normalizeAgentName, validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
 
 // Cloudflare Containers ship as Durable Objects under the hood.
@@ -1067,34 +1068,14 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  // Check-only: gate on the existing count without consuming budget for this
-  // attempt. Only a successful mint (see fingerprintCooldownKey use below,
-  // after the upstream call returns) increments the counter — a 5xx here, or
-  // an npm-client automatic retry of one, must not burn the machine's daily
-  // allowance.
+  // Fingerprint cooldown key — null when gating doesn't apply to this
+  // request (UI/Turnstile signups don't carry a machine fingerprint).
+  // Kept for the fingerprint_cooldown analytics event on the blocked path.
   let fingerprintCooldownKey: string | null = null;
+  let fingerprintHash: string | null = null;
   if (parsedBody.signup_source !== 'ui' && parsedBody.machine_fingerprint) {
-    const fingerprintHash = await sha256Hex(parsedBody.machine_fingerprint);
+    fingerprintHash = await sha256Hex(parsedBody.machine_fingerprint);
     fingerprintCooldownKey = `dmv:register:fingerprint:${fingerprintHash}`;
-    const cooldown = await checkKvCooldown(
-      env.REGISTER_COOLDOWN_KV,
-      fingerprintCooldownKey,
-      FINGERPRINT_COOLDOWN_THRESHOLD,
-      FINGERPRINT_COOLDOWN_SECONDS,
-    );
-
-    if (cooldown !== null) {
-      emitRegisterAnalytics(env, 'fingerprint_cooldown', fingerprintHash, Date.now() - startedAt);
-      return jsonResponse(
-        {
-          error: 'fingerprint_cooldown',
-          message: 'Too many registrations from this machine. Please wait before trying again.',
-          retry_after_seconds: cooldown,
-        },
-        429,
-        { 'Retry-After': String(cooldown) },
-      );
-    }
   }
 
   const upstreamHeaders = new Headers();
@@ -1122,27 +1103,49 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
     machine_fingerprint: parsedBody.machine_fingerprint,
   };
 
-  const upstream = await fetchRegistrationUpstream(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
-    method: 'POST',
-    headers: upstreamHeaders,
-    body: JSON.stringify(upstreamBody),
-  });
+  // Gates the upstream call behind the fingerprint cooldown: check-only
+  // BEFORE calling upstream (a request already over budget never reaches
+  // register-agent), increment AFTER, and only for an actual new-certificate
+  // mint — never for a 4xx/5xx failure, and never for an `already_recorded`
+  // replay (which mints nothing). See worker/register-fingerprint-cooldown.ts
+  // for why this ordering is pulled into its own (unit-tested) module.
+  const gateResult = await runFingerprintGatedUpstream(
+    {
+      check: (key, threshold, cooldownSeconds) =>
+        checkKvCooldown(env.REGISTER_COOLDOWN_KV, key, threshold, cooldownSeconds),
+      increment: (key, threshold, cooldownSeconds) =>
+        incrementKvCooldown(env.REGISTER_COOLDOWN_KV, key, threshold, cooldownSeconds),
+    },
+    fingerprintCooldownKey,
+    FINGERPRINT_COOLDOWN_THRESHOLD,
+    FINGERPRINT_COOLDOWN_SECONDS,
+    () =>
+      fetchRegistrationUpstream(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(upstreamBody),
+      }),
+  );
 
-  const bodyText = await upstream.clone().text();
-
-  // Consume cooldown budget only for an actual new mint — not a 4xx/5xx
-  // failure, and not an `already_recorded` replay (which mints nothing).
-  // This runs after the response is already decided, so a KV write failure
-  // here (logged internally by incrementKvCooldown) never affects what the
-  // caller receives.
-  if (fingerprintCooldownKey && isNewCertificateMint(upstream.status, bodyText)) {
-    await incrementKvCooldown(
-      env.REGISTER_COOLDOWN_KV,
-      fingerprintCooldownKey,
-      FINGERPRINT_COOLDOWN_THRESHOLD,
-      FINGERPRINT_COOLDOWN_SECONDS,
+  if (gateResult.blocked) {
+    emitRegisterAnalytics(
+      env,
+      'fingerprint_cooldown',
+      fingerprintHash ?? 'unknown',
+      Date.now() - startedAt,
+    );
+    return jsonResponse(
+      {
+        error: 'fingerprint_cooldown',
+        message: 'Too many registrations from this machine. Please wait before trying again.',
+        retry_after_seconds: gateResult.retryAfterSeconds,
+      },
+      429,
+      { 'Retry-After': String(gateResult.retryAfterSeconds) },
     );
   }
+
+  const { upstream, bodyText } = gateResult;
 
   emitRegisterAnalytics(
     env,
