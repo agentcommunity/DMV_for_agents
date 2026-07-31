@@ -23,8 +23,8 @@ import { Container, getContainer } from '@cloudflare/containers';
 import { handleCertificateLookup } from './certificate-lookup';
 import { CertificateLookupRateLimiter } from './certificate-lookup-rate-limiter';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
-import { incrementKvCooldown } from './rate-limit-kv';
-import { fetchRegistrationUpstream } from './registration-upstream';
+import { checkKvCooldown, incrementKvCooldown } from './rate-limit-kv';
+import { fetchRegistrationUpstream, isNewCertificateMint } from './registration-upstream';
 import { normalizeAgentName, validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
 
 // Cloudflare Containers ship as Durable Objects under the hood.
@@ -218,7 +218,12 @@ const DMV_TURNSTILE_ACTION = 'dmv_register';
 const TURNSTILE_VERIFY_ENDPOINT = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
 // Allow 3 successful registrations per machine fingerprint in a rolling 24h
-// window; block the 4th and later attempts until the existing TTL expires.
+// window; block the 4th and later attempts until the window expires. Only
+// successful mints (upstream 201, not an `already_recorded` replay) consume
+// budget — see the checkKvCooldown/incrementKvCooldown split below. A failed
+// upstream call or a replay of an existing registration must never burn a
+// machine's budget, or upstream 5xx + the registration client's automatic
+// retries could exhaust it with zero successful registrations.
 const FINGERPRINT_COOLDOWN_THRESHOLD = 4;
 const FINGERPRINT_COOLDOWN_SECONDS = 24 * 60 * 60;
 
@@ -1062,11 +1067,18 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  // Check-only: gate on the existing count without consuming budget for this
+  // attempt. Only a successful mint (see fingerprintCooldownKey use below,
+  // after the upstream call returns) increments the counter — a 5xx here, or
+  // an npm-client automatic retry of one, must not burn the machine's daily
+  // allowance.
+  let fingerprintCooldownKey: string | null = null;
   if (parsedBody.signup_source !== 'ui' && parsedBody.machine_fingerprint) {
     const fingerprintHash = await sha256Hex(parsedBody.machine_fingerprint);
-    const cooldown = await incrementKvCooldown(
+    fingerprintCooldownKey = `dmv:register:fingerprint:${fingerprintHash}`;
+    const cooldown = await checkKvCooldown(
       env.REGISTER_COOLDOWN_KV,
-      `dmv:register:fingerprint:${fingerprintHash}`,
+      fingerprintCooldownKey,
       FINGERPRINT_COOLDOWN_THRESHOLD,
       FINGERPRINT_COOLDOWN_SECONDS,
     );
@@ -1117,6 +1129,20 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   });
 
   const bodyText = await upstream.clone().text();
+
+  // Consume cooldown budget only for an actual new mint — not a 4xx/5xx
+  // failure, and not an `already_recorded` replay (which mints nothing).
+  // This runs after the response is already decided, so a KV write failure
+  // here (logged internally by incrementKvCooldown) never affects what the
+  // caller receives.
+  if (fingerprintCooldownKey && isNewCertificateMint(upstream.status, bodyText)) {
+    await incrementKvCooldown(
+      env.REGISTER_COOLDOWN_KV,
+      fingerprintCooldownKey,
+      FINGERPRINT_COOLDOWN_THRESHOLD,
+      FINGERPRINT_COOLDOWN_SECONDS,
+    );
+  }
 
   emitRegisterAnalytics(
     env,
