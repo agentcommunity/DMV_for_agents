@@ -300,12 +300,21 @@ export async function handleRegisterAgent(
   const currentCount = totalCerts ?? 0
 
   if (currentCount >= CAP_UNENDORSED) {
-    // Check if user is endorsed (has endorsement_status = 'signed' on any registration)
+    // Check if user is endorsed. Signing truth on the shared PAGE schema is
+    // `registrations.status = 'complete'` — `endorsement_status` stopped being
+    // written and is a dead column there (see PAGE's docs/SUPABASE.md). We
+    // deliberately do NOT also join endorsement_requests (status IN
+    // ('signed','complete')): that table has no email column, only
+    // `registration_id` and an unreliable `signer_email`, and this cap check
+    // is keyed by email (no user_id/registration_id available here), so that
+    // join would require first resolving every registration_id for the email
+    // via `registrations` anyway — status='complete' on `registrations`
+    // already gives us that in one query with no extra join.
     const { data: endorsed } = await supabase
       .from('registrations')
-      .select('endorsement_status')
+      .select('status')
       .eq('email', email)
-      .eq('endorsement_status', 'signed')
+      .eq('status', 'complete')
       .limit(1)
 
     const cap = endorsed?.length ? CAP_ENDORSED : CAP_UNENDORSED

@@ -142,6 +142,96 @@ function freshRegistrationResponses(): Array<MockResponse> {
   ]
 }
 
+// Cap-check round trips (currentCount >= CAP_UNENDORSED path), in order:
+//   1. findExactExistingRegistration -> maybeSingle (not found)
+//   2. lifetime-cap count           -> at/above CAP_UNENDORSED, triggers endorsed check
+//   3. endorsed check               -> registrations.status = 'complete'
+//   4. insert (only reached if under the resolved cap)
+//   5. queue-position count (only reached if under the resolved cap)
+function capCheckResponses(
+  currentCount: number,
+  endorsedRows: Array<MockResponse['data']>,
+): Array<MockResponse> {
+  return [
+    { data: null, error: null },
+    { count: currentCount, error: null },
+    { data: endorsedRows, error: null },
+    { error: null },
+    { count: currentCount + 1, error: null },
+  ]
+}
+
+Deno.test('endorsed cap check reads registrations.status, never endorsement_status', async () => {
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+  }, async () => {
+    // Row has status='complete' (signed) but endorsement_status is null — the
+    // dead-column bug would have missed this and wrongly capped at 5.
+    const mock = createSupabaseMock(capCheckResponses(5, [{ status: 'complete' }]))
+
+    const response = await handleRegisterAgent(
+      registerRequest(validBody({ agent_name: 'endorsed-agent' })),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+
+    assert.equal(response.status, 201)
+
+    const endorsedCall = mock.calls[2]
+    assert.equal(endorsedCall.table, 'registrations')
+    const eqSteps = endorsedCall.steps.filter((step) => step.name === 'eq')
+    const eqOnEndorsementStatus = eqSteps.some((step) => step.args[0] === 'endorsement_status')
+    const eqOnStatusComplete = eqSteps.some(
+      (step) => step.args[0] === 'status' && step.args[1] === 'complete',
+    )
+    assert.equal(eqOnEndorsementStatus, false)
+    assert.ok(eqOnStatusComplete, 'expected an eq("status", "complete") step')
+  })
+})
+
+Deno.test('unendorsed user (no status=complete row) is capped at CAP_UNENDORSED', async () => {
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+  }, async () => {
+    const mock = createSupabaseMock(capCheckResponses(5, []))
+
+    const response = await handleRegisterAgent(
+      registerRequest(validBody({ agent_name: 'unendorsed-agent' })),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+
+    assert.equal(response.status, 403)
+    const payload = await response.json()
+    assert.equal(payload.limit, 5)
+    assert.equal(payload.endorsed, false)
+    assert.equal(mock.insertedRows.length, 0)
+  })
+})
+
+Deno.test('endorsed user is allowed up to CAP_ENDORSED, then capped at 12', async () => {
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+  }, async () => {
+    const mock = createSupabaseMock(capCheckResponses(12, [{ status: 'complete' }]))
+
+    const response = await handleRegisterAgent(
+      registerRequest(validBody({ agent_name: 'maxed-endorsed-agent' })),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+
+    assert.equal(response.status, 403)
+    const payload = await response.json()
+    assert.equal(payload.limit, 12)
+    assert.equal(payload.endorsed, true)
+    assert.equal(mock.insertedRows.length, 0)
+  })
+})
+
 Deno.test('sha256Hex produces a stable 64-char lowercase hex digest', async () => {
   const digest = await sha256Hex('203.0.113.7')
   assert.match(digest, HASH_RE, 'sha256Hex output')
