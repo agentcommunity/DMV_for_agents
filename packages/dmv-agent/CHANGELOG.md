@@ -57,11 +57,13 @@ tool does not set `isError`.
 
 ### Compatibility
 
-No wire-protocol changes to `/api/register`. `dmv-agent@0.1.2` (the
-unscoped alias) now requires `@agentcommunity/dmv-agent@^0.3.0`. Nothing in
-this changelog entry has been published to npm yet — `packages/dmv-agent` is
-still at the locally-bumped `0.3.0` and the alias at `0.1.2`, both pending an
-explicit `npm publish --access public`.
+No wire-protocol changes to `/api/register`. `packages/dmv-agent` is at the
+locally-bumped `0.3.0`, pending an explicit `npm publish --access public`.
+The unscoped alias (`dmv-agent`) still declares `@agentcommunity/dmv-agent@^0.2.1`
+in-tree, because `0.3.0` is not yet on the registry and a `^0.3.0` range breaks
+`pnpm install --frozen-lockfile` (which CI/Cloudflare builds use). **Publish
+order:** publish `@agentcommunity/dmv-agent@0.3.0` first, then bump the alias's
+dependency to `^0.3.0`, bump the alias to `0.1.2`, and publish it.
 
 ## 0.2.1 and earlier
 

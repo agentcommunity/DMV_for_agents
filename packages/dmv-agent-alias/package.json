@@ -13,12 +13,8 @@
   },
   "author": "Agent Community (https://agentcommunity.org)",
   "type": "module",
-  "bin": {
-    "dmv-agent": "bin/dmv-agent.js"
-  },
-  "dependencies": {
-    "@agentcommunity/dmv-agent": "^0.3.0"
-  },
+  "bin": { "dmv-agent": "bin/dmv-agent.js" },
+  "dependencies": { "@agentcommunity/dmv-agent": "^0.2.1" },
   "keywords": [
     "agent",
     "dmv",
@@ -30,7 +26,5 @@
     "cli"
   ],
   "license": "MIT",
-  "files": [
-    "bin/"
-  ]
+  "files": ["bin/"]
 }
