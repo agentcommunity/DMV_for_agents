@@ -289,12 +289,14 @@ test('rejects a whitespace-only upstream agent name without caching it', async (
   assertPrivateNoStore(response);
 });
 
-test('maps an upstream redirect response to unavailable without forwarding the secret again', async () => {
+test('fails closed for an upstream redirect without following it or forwarding the secret', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
   const { env, badgeKv } = createEnv();
+  const redirectTarget = 'https://redirect.example.test/collect-secret';
   const upstream = createFetch([
     new Response(null, {
       status: 302,
-      headers: { Location: 'https://redirect.example.test/collect-secret' },
+      headers: { Location: redirectTarget },
     }),
   ]);
 
@@ -303,19 +305,20 @@ test('maps an upstream redirect response to unavailable without forwarding the s
   assert.equal(response.status, 503);
   assert.equal((await readJson(response)).status, 'unavailable');
   assert.equal(upstream.calls.length, 1);
-  assert.equal(upstream.calls[0].init?.redirect, 'error');
+  assert.equal(upstream.calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(upstream.calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
+  assert.ok(upstream.calls.every(({ input }) => input !== redirectTarget));
   assert.equal(badgeKv.writes.length, 0);
   assertPrivateNoStore(response);
 });
 
-test('maps an upstream redirect rejection to unavailable without forwarding the secret again', async (t) => {
+test('maps an upstream fetch rejection to unavailable with manual redirect mode', async (t) => {
   t.mock.method(console, 'error', () => undefined);
   const { env, badgeKv } = createEnv();
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
-    throw new TypeError('redirect mode is error');
+    throw new TypeError('network fetch failed');
   }) as typeof fetch;
 
   const response = await handleCertificateLookup(lookupRequest(), env, fetchImpl);
@@ -323,13 +326,57 @@ test('maps an upstream redirect rejection to unavailable without forwarding the 
   assert.equal(response.status, 503);
   assert.equal((await readJson(response)).status, 'unavailable');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].init?.redirect, 'error');
+  assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
   assert.equal(badgeKv.writes.length, 0);
   assertPrivateNoStore(response);
 });
 
-test('maps a platform-style upstream 404 to unavailable twice without caching', async () => {
+test('logs a safe upstream failure class when the upstream fetch rejects', async (t) => {
+  const logged: Array<Array<unknown>> = [];
+  t.mock.method(console, 'error', (...values: Array<unknown>) => logged.push(values));
+  const secret = 'worker-secret-must-not-appear-in-logs';
+  const { env } = createEnv({ secret });
+  const upstreamUrl = 'https://upstream.example.test/lookup-agent?id=MESA-DD6-660J';
+  const fetchImpl = (async () => {
+    throw new TypeError(`network failure for ${upstreamUrl} using ${secret}`);
+  }) as typeof fetch;
+
+  const response = await handleCertificateLookup(lookupRequest(), env, fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(logged, [
+    [
+      '[certificate-lookup] upstream fetch failed',
+      { error_name: 'TypeError' },
+    ],
+  ]);
+  assert.equal(JSON.stringify(logged).includes(secret), false);
+  assert.equal(JSON.stringify(logged).includes(upstreamUrl), false);
+});
+
+test('logs only the upstream status for a non-200 upstream response', async (t) => {
+  const logged: Array<Array<unknown>> = [];
+  t.mock.method(console, 'error', (...values: Array<unknown>) => logged.push(values));
+  const { env } = createEnv();
+  const upstream = createFetch([
+    new Response('do-not-log-this-body', { status: 502 }),
+  ]);
+
+  const response = await handleCertificateLookup(lookupRequest(), env, upstream.fetchImpl);
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(logged, [
+    [
+      '[certificate-lookup] upstream returned non-200',
+      { upstream_status: 502 },
+    ],
+  ]);
+  assert.equal(JSON.stringify(logged).includes('do-not-log-this-body'), false);
+});
+
+test('maps a platform-style upstream 404 to unavailable twice without caching', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([
     new Response('function not found', { status: 404 }),
@@ -434,7 +481,8 @@ test('maps extra-field typed envelopes to uncached unavailable', async () => {
   assert.equal(badgeKv.writes.length, 0);
 });
 
-test('does not cache an upstream 500 and returns unavailable', async () => {
+test('does not cache an upstream 500 and returns unavailable', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([
     Response.json({ error: 'database details' }, { status: 500 }),
@@ -646,7 +694,8 @@ test('uses an exact Durable Object denial for the public 429 response', async ()
   assert.equal(response.headers.get('RateLimit-Reset'), '1');
 });
 
-test('maps a wrong Worker secret upstream 403 to unavailable', async () => {
+test('maps a wrong Worker secret upstream 403 to unavailable', async (t) => {
+  t.mock.method(console, 'error', () => undefined);
   const { env, badgeKv } = createEnv();
   const upstream = createFetch([Response.json({ error: 'secret mismatch' }, { status: 403 })]);
 

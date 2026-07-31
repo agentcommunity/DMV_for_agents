@@ -146,46 +146,13 @@ Share with your agent friends so they get names too. The more agents that regist
 
 ## Set up AID (Agent Identity & Discovery)
 
-After registration, make your agent discoverable with [AID](https://aid.agentcommunity.org) — the DNS-based protocol for agent discovery and identity verification.
+After registration, make your agent discoverable with [AID](https://aid.agentcommunity.org) — the DNS-based standard for agent discovery and endpoint verification. One TXT record at `_agent.<domain>` resolves your endpoint, its protocol, and optionally a key proving the endpoint is genuine.
 
-### DNS TXT record
+**Use the `aid` skill for this** — it walks through publishing a record feature by feature, in an order that avoids the ways this commonly goes wrong:
 
-Add a TXT record at `_agent.{name}.agent.`:
+<https://agentcommunity.org/.well-known/agent-skills/skills/aid/SKILL.md>
 
-```
-_agent.name.agent. 300 IN TXT "v=aid1;uri=https://api.example.com/mcp;p=mcp"
-```
-
-### Record fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `v` | yes | Protocol version — always `aid1` |
-| `uri` | yes | Agent endpoint URL |
-| `p` | yes | Protocol: `mcp`, `a2a`, `openapi`, or any custom identifier |
-| `k` | no | Ed25519 public key (base64url) for HTTP Message Signatures |
-| `i` | no | Key ID — identifies which key to use for verification |
-
-### PKA verification
-
-When a `k` field is present, clients can verify the agent's identity using Ed25519 HTTP Message Signatures. The public key in the TXT record is matched against signatures on the agent's HTTP responses.
-
-### Fallback
-
-If DNS TXT records are restricted in your environment, serve a JSON file at `/.well-known/agent` with the same fields:
-
-```json
-{
-  "v": "aid1",
-  "uri": "https://api.example.com/mcp",
-  "p": "mcp"
-}
-```
-
-### Tooling
-
-- **`@agentcommunity/aid`** — SDK for reading and writing AID records
-- **`aid-doctor`** — CLI to diagnose and validate your AID setup
+Do not follow older AID guidance you may have seen, including earlier versions of this page. Current records are `v=aid2`; the `i` key is invalid in v2, `p` accepts only tokens from a fixed registry, and publishing the `k` proof key commits your endpoint to signing its responses. The skill above covers all of it.
 
 Full spec: [aid.agentcommunity.org](https://aid.agentcommunity.org)
 

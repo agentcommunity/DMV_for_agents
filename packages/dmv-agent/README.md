@@ -37,7 +37,7 @@ bunx dmv-agent verify MESA-DD6-660J
 # Offline only: just the Luhn check digit, no network call
 bunx dmv-agent verify MESA-DD6-660J --format-only
 
-# Same live check, called directly (public Worker, certificate ID only)
+# Check issuance (public Worker, certificate ID only)
 curl "https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J"
 
 # Check the public DMV surface without submitting a valid registration
@@ -80,7 +80,7 @@ After registration:
 - **Save your card** — download the holographic card PNG from the permalink page or via `dmv.agentcommunity.org/api/card?id=CERT-ID&name=agent-name`
 - **Run a readiness check** — `bunx dmv-agent doctor` confirms the live card, badge, health, and invalid-payload validation endpoints before you submit a real registration
 - **Tweet it** — "I just got my own .agent identity — {name}.agent. Agents need names."
-- **Set up AID** — make yourself discoverable: `_agent.name.agent. 300 IN TXT "v=aid1;uri=https://your-endpoint;p=mcp"`
+- **Related: [AID](https://aid.agentcommunity.org)** — Agent Community's open standard for discovering an agent from a domain name. Independent of the DMV: it works today on a domain you already control and needs no pre-registration. The record format lives at aid.agentcommunity.org, not in this README
 - **Tell your agent friends** — the more agents that register, the stronger the `.agent` namespace
 
 Full onboarding guide: see the [Claude Code skill](skills/dmv/SKILL.md) or [llms.txt](https://dmv.agentcommunity.org/llms.txt).
@@ -252,14 +252,15 @@ console.log(verification.issued);    // true | false | null
 - **Pre-registration model** — domain is NOT unique. Multiple parties can pre-register interest in the same name. Certificate ID IS unique (same user + agent + type = same cert).
 - **Email verification** — pre-registration is pending until the operator clicks the verification link.
 - **Content-addressed IDs** — deterministic hashes, not sequential. This makes
-  blind guessing harder; the planned lookup rate limit mitigates but does not
+  blind guessing harder; the live lookup rate limit mitigates but does not
   eliminate enumeration risk.
 - **Worker-only lookup (live)** — public callers use
-  `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The Supabase
-  `lookup-agent` function is a `DMV_PROXY_SECRET`-gated internal upstream
-  with typed HTTP 200 `issued`/`not_found` envelopes. The Worker applies
-  coarse 60/60 filtering, exact atomic 30/60 accounting through
+  `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The deployed
+  Supabase `lookup-agent` function is a `DMV_PROXY_SECRET`-gated internal
+  upstream with typed HTTP 200 `issued`/`not_found` envelopes. The
+  Worker applies coarse 60/60 filtering, exact atomic 30/60 accounting through
   `CERT_LOOKUP_LIMITER`, and uses `BADGE_CACHE_KV` only for result caching.
+  It is not a client API; secretless direct access returns `403 direct_access_deprecated`.
 
 ## API reference
 
@@ -301,10 +302,12 @@ The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP cl
 **Status (2026-08-01, verified live): the Supabase `lookup-agent` upstream is
 published and the route returns real results** — `status: "issued"` for
 issued certificates and `status: "not_found"` for valid-format IDs that
-don't exist, not `status: "unavailable"`. (`AGENT_HANDOFF.md` Task 8 still
-has some record-keeping outstanding — deployed SHA + a full smoke-evidence
-writeup — but the behavior itself is live in production.) This package's
-`verifyCertificate()` (and therefore `dmv-agent verify` / the
+don't exist, not `status: "unavailable"`. Deployed since `main` `fabafe6`
+(PR #20, manual-redirect runtime fix), Worker version
+`d9755e66-3883-4970-be84-a59307011f14` (`2026-07-22`). (`AGENT_HANDOFF.md`
+Task 8 still has some record-keeping outstanding — deployed SHA + a full
+smoke-evidence writeup — but the behavior itself is live in production.) This
+package's `verifyCertificate()` (and therefore `dmv-agent verify` / the
 `verify_certificate` MCP tool) call this route by default; `unavailable`
 remains the fallback for genuine failures (network error, timeout, malformed
 response) and is still treated as inconclusive, never as "not issued". The
@@ -333,9 +336,9 @@ seconds per IP before reading its cache. Issued results are cached internally fo
 Those are the only result fields. `issued: true` means a matching DMV
 registration row exists; it does not mean the operator completed email
 verification, the requested `.agent` name was allocated, or DNS delegation
-exists. Domain enumeration is not part of the contract. The Supabase
+exists. Domain enumeration is removed from the live contract. The Supabase
 `lookup-agent` URL is an internal Worker upstream protected by
-`DMV_PROXY_SECRET`; direct calls are unsupported and return 403. Only its
+`DMV_PROXY_SECRET`; direct calls are unsupported and return `403 direct_access_deprecated`. Only its
 typed HTTP 200 `not_found` envelope becomes cached public absence; non-200 or
 malformed responses become uncached `unavailable`.
 
@@ -374,9 +377,8 @@ the npm tarball in a temporary consumer project to prove the published-style
 ### Deploying the lookup boundary
 
 ```bash
-# Require docker info + pnpm cf:container:build on a capable environment.
-# Merge main for the Cloudflare Git Worker deploy, smoke the expected temporary
-# valid-format 503, then deploy only the internal lookup upstream.
+# Historical rollout command: use only when changing lookup-agent in a new,
+# reviewed rollout. The 2026-07-22 production rollout is complete.
 supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 

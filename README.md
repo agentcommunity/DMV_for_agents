@@ -117,6 +117,17 @@ exist, not `status: "unavailable"`. Task 8's remaining scope is
 record-keeping only (deployed DMV commit SHA + a full smoke-evidence
 writeup), not the behavior itself — see `AGENT_HANDOFF.md`.
 
+**Production evidence (2026-07-22):** merged `main` commit `fabafe6` (PR #20,
+including the manual-redirect runtime fix) is deployed as Worker version
+`d9755e66-3883-4970-be84-a59307011f14` at `2026-07-22T12:01:52.501Z`.
+`REEF-068-BD0Q` returned `200 issued` for `masato`, generated absent
+`ZZZZ-FFF-FFFD` returned `200 not_found`, and `INVALID` returned `400`.
+The exact limiter allowed calls 1–30, denied call 31 with `429` and remaining
+`0`, then allowed a next-minute call with remaining `29`. `/healthz`, badge,
+permalink, and card checks returned `200`; validation-only `GET /api/register`
+returned `405`. No Supabase registration or member rows were deleted or mutated;
+the limiter and cache checks intentionally wrote Durable Object/KV operational state.
+
 The only public network lookup is:
 
 ```http
@@ -137,11 +148,12 @@ email verification, that the requested `.agent` name was allocated, or that `.ag
 exists in DNS. Use `bunx dmv-agent verify CERT-ID` when only offline check-digit
 validation is needed.
 
-The Supabase `lookup-agent` function is an internal Worker upstream that
-returns typed `issued` or `not_found` HTTP 200 envelopes. Every other
-upstream response is treated as unavailable and is not cached. Direct access
-to `lookup-agent` is unsupported and secret-gated; callers must never send or
-depend on the internal `x-dmv-proxy` credential.
+The Supabase `lookup-agent` function is an internal Worker upstream
+that returns typed `issued` or `not_found` HTTP 200 envelopes. Every other
+upstream response is treated as unavailable and is not cached. It is deployed
+without JWT gateway enforcement and direct secretless access returns
+`403 direct_access_deprecated`; callers must never send or depend on the
+internal `x-dmv-proxy` credential or Edge URL.
 
 Full technical deep-dive: [ARCHITECTURE.md](ARCHITECTURE.md)
 
@@ -168,15 +180,13 @@ Details: [Text Surface Audit](docs/text-surface-audit.md)
 
 ---
 
-## After registration — set up AID
+## Related: AID
 
-[AID](https://aid.agentcommunity.org) (Agent Identity & Discovery) is the DNS-based protocol that makes your agent findable. After registering at the DMV, publish a TXT record so other agents and humans can discover yours:
+Agent Community also maintains [AID](https://aid.agentcommunity.org) (Agent Identity & Discovery), an open standard for discovering an agent from a domain name via a `_agent` DNS TXT record.
 
-```
-_agent.my-agent.agent. 300 IN TXT "v=aid1;uri=https://api.example.com/mcp;p=mcp"
-```
+It is independent of the DMV in both directions: AID works today on any domain you already control and needs no pre-registration, and a DMV certificate gives you nothing you need in order to publish a record. If `.agent` is approved and you receive the name you requested, that name could carry its own AID record — but that is conditional and not settled.
 
-If you can't set DNS, serve `/.well-known/agent` with the same fields as JSON.
+The record format lives at [aid.agentcommunity.org](https://aid.agentcommunity.org), not here. This README used to carry its own copy and it went stale, documenting a key that current records reject.
 
 Tooling: `@agentcommunity/aid` SDK | `aid-doctor` CLI | Full spec at [aid.agentcommunity.org](https://aid.agentcommunity.org)
 

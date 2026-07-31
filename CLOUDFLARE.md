@@ -84,7 +84,7 @@ being served.
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
 | `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint for browser, CLI, MCP, and JS API. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (server-side hostname + `dmv_register` action check) → shared CF rate limiters → forward to Supabase. CLI/MCP path: validate JSON → require `machine_fingerprint` → shared CF rate limiters → DMV-local KV fingerprint cooldown → forward. Anti-abuse ordering matches `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4 — CAPTCHA always runs before shared counters |
-| `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | Implementation-ready, unpublished route. After Task 8 deploy SHA + live smoke evidence, this becomes the only public certificate lookup. Certificate IDs only; domain lookup is removed. `RL_CERT_LOOKUP` is a coarse 60/60 filter; `CERT_LOOKUP_LIMITER` is the exact 30/60 authority before the KV result cache. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
+| `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | **Live 2026-07-22:** merged `main` `fabafe6` (PR #20) is deployed as version `d9755e66-3883-4970-be84-a59307011f14` created `2026-07-22T12:01:52.501Z`. The only public certificate lookup; certificate IDs only and domain lookup is removed. `RL_CERT_LOOKUP` is a coarse 60/60 filter; `CERT_LOOKUP_LIMITER` is the exact 30/60 authority before the KV result cache. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
 | `/healthz` | Worker | `{ worker, container }` health probe — pings the container too |
@@ -186,13 +186,16 @@ open test-harness/output/index.html
 2. `wrangler deploy` — builds the container image, pushes it to the CF
    registry, and rolls out the Worker.
 
-The lookup changes are implementation-ready but unpublished as of 2026-07-22;
-do not call this boundary live until Task 8 records the deployed SHA/version and
-smoke evidence. The 2026-07-22 implementation host has no Docker runtime, so a
-Docker-capable environment must pass both commands above before rollout; any
-Docker CLI error text is a failed gate regardless of a wrapper's exit code.
+### Completed lookup rollout (2026-07-22)
 
-Lookup rollout order is non-negotiable. Configure the same generated
+The lookup boundary is live. Merged `main` `fabafe6` (PR #20, including the
+manual-redirect runtime fix) deployed as Worker version
+`d9755e66-3883-4970-be84-a59307011f14` at `2026-07-22T12:01:52.501Z`. The
+2026-07-22 implementation host had no Docker runtime, so the Docker-capable
+Cloudflare build was the deployment gate; a Docker CLI error remains a failed
+gate for future rollouts.
+
+The completed rollout order was deliberately Worker first, then Edge. Configure the same generated
 `DMV_PROXY_SECRET` on Cloudflare and Supabase without printing it. Confirm
 account-wide native namespace `1002` is allocated to `RL_CERT_LOOKUP` without a
 collision, plus `CERT_LOOKUP_LIMITER`, `BADGE_CACHE_KV`, and unchanged v1/new v2
@@ -201,14 +204,16 @@ single authoritative Worker deployment. Record the previous version, merged
 SHA, and deployed version. Use manual `pnpm cf:deploy` only if automatic deploy
 did not start and the dashboard confirms no deploy is active; never run both.
 
-After the Worker deploy, smoke health, card, badge, registration validation,
-invalid lookup, and a valid-format certificate. The last check is expected to
-return a brief fail-closed `503 unavailable` against the legacy Edge contract.
-Only then deploy **only** `lookup-agent`; `issued`/`not_found` are post-Edge
-expectations. Prove secretless direct Edge access is `403`, issued and generated
-valid-but-absent results, exact request 31 denial, minute rollover, and real
-Durable Object provisioning/storage/alarm activity via tail/metrics. Re-run the
-existing health/card/badge/registration smokes.
+The historical Worker-first compatibility interval returned `503 unavailable`
+for a valid-format certificate until only `lookup-agent` was deployed with
+`--no-verify-jwt`. Final evidence: secretless direct Edge access returned
+`403 direct_access_deprecated`; issued `REEF-068-BD0Q` returned `200` for
+`masato`; generated absent `ZZZZ-FFF-FFFD` returned `200 not_found`; `INVALID`
+returned `400`; calls 1–30 passed, call 31 returned `429` with remaining `0`,
+and the next-minute call returned `200` with remaining `29`. `/healthz`, card,
+badge, permalink, and validation-only registration also passed. No Supabase
+registration or member rows were deleted or mutated during verification; the
+limiter/cache smokes intentionally wrote Durable Object/KV operational state.
 
 The v2 SQLite migration is forward-only operational state. Never roll back to a
 pre-v2 Worker. Preserve the v1/v2 migrations, `CertificateLookupRateLimiter`
@@ -218,21 +223,12 @@ the Worker's fail-closed 503 in place and roll Edge forward; never reopen legacy
 direct access. Full recovery and evidence steps are in
 `packages/dmv-agent/DEPLOY.md`.
 
-Only after every smoke passes, change every active status surface from
-unpublished to live: `README.md`, `llms.txt`, `index.html`, `CLOUDFLARE.md`,
-`AUTH_DMV.md`, `packages/dmv-agent/DEPLOY.md`, `AGENT_HANDOFF.md`, `AGENTS.md`,
-`CLAUDE.md`, `ARCHITECTURE.md`, `SECURITY.md`, and
-`packages/dmv-agent/README.md`. Commit and push that evidence-backed status
-update.
-
-Because those public docs/assets are part of the Worker bundle, the status
-commit triggers a second automatic production deployment. Observe the build for
-that exact commit through completion and capture its final commit SHA, Worker
-version/deployment ID, timestamps, and result. Against that final version,
-re-run at minimum one issued or typed-not-found lookup plus `/healthz`, an
-existing card, an existing badge, and validation-only registration. Do not hand
-off or declare the lookup live until this exact deployment and its final smokes
-pass. Never record the secret in this repository or pass it to clients.
+The documentation-status commit is part of the Worker bundle and therefore
+requires the same automatic-deploy observation and minimum final smoke set in
+future rollouts. Never record the secret in this repository or pass it to
+clients. Cloudflare's Worker runtime rejects `redirect: 'error'`; the upstream
+fetch intentionally uses `redirect: 'manual'` and treats every 3xx as
+fail-closed without following a redirect that could receive the shared secret.
 
 ## Operational notes
 
@@ -381,13 +377,13 @@ pass. Never record the secret in this repository or pass it to clients.
   `direct_access_deprecated`. `/api/register` on the worker is the only
   path that reaches validation.
 
-- **Certificate lookup exposure** — *Implementation ready; unresolved in
-  production.* The planned public lookup is Worker
-  `GET /api/lookup?id=CERT-ID`. The staged `lookup-agent` Edge change uses the
-  same `DMV_PROXY_SECRET` gate, rejects direct calls before database client
+- **Certificate lookup exposure** — *Closed 2026-07-22.* The live public
+  lookup is Worker `GET /api/lookup?id=CERT-ID`; deployed `lookup-agent` uses
+  the same `DMV_PROXY_SECRET` gate, rejects direct calls before database client
   creation, removes domain queries, and returns typed HTTP 200
-  `issued`/`not_found` envelopes. This gap is not closed until Task 8
-  records a deployed SHA and live smoke evidence.
+  `issued`/`not_found` envelopes. Evidence is `fabafe6` / Worker version
+  `d9755e66-3883-4970-be84-a59307011f14`; retain the rollout and recovery
+  safeguards above for future changes.
 
 - **DMV-branded OTP email flow** — custom branding via
   `admin.generateLink()` + Resend direct send is future work. See
