@@ -1,6 +1,6 @@
 {
   "name": "dmv-agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Register .agent identities — alias for @agentcommunity/dmv-agent",
   "type": "module",
   "bin": { "dmv-agent": "bin/dmv-agent.js" },

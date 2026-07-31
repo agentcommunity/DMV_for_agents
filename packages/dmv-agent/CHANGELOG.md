@@ -57,8 +57,11 @@ tool does not set `isError`.
 
 ### Compatibility
 
-No wire-protocol changes to `/api/register`. `dmv-agent@0.1.1` (the
-unscoped alias) now requires `@agentcommunity/dmv-agent@^0.3.0`.
+No wire-protocol changes to `/api/register`. `dmv-agent@0.1.2` (the
+unscoped alias) now requires `@agentcommunity/dmv-agent@^0.3.0`. Nothing in
+this changelog entry has been published to npm yet — `packages/dmv-agent` is
+still at the locally-bumped `0.3.0` and the alias at `0.1.2`, both pending an
+explicit `npm publish --access public`.
 
 ## 0.2.1 and earlier
 
