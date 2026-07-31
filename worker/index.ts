@@ -24,7 +24,11 @@ import { handleCertificateLookup } from './certificate-lookup';
 import { CertificateLookupRateLimiter } from './certificate-lookup-rate-limiter';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import { checkKvCooldown, incrementKvCooldown } from './rate-limit-kv';
-import { runFingerprintGatedUpstream } from './register-fingerprint-cooldown';
+import {
+  FINGERPRINT_COOLDOWN_SECONDS,
+  FINGERPRINT_COOLDOWN_THRESHOLD,
+  runFingerprintGatedUpstream,
+} from './register-fingerprint-cooldown';
 import { fetchRegistrationUpstream } from './registration-upstream';
 import { normalizeAgentName, validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
 
@@ -225,8 +229,11 @@ const TURNSTILE_VERIFY_ENDPOINT = 'https://challenges.cloudflare.com/turnstile/v
 // upstream call or a replay of an existing registration must never burn a
 // machine's budget, or upstream 5xx + the registration client's automatic
 // retries could exhaust it with zero successful registrations.
-const FINGERPRINT_COOLDOWN_THRESHOLD = 4;
-const FINGERPRINT_COOLDOWN_SECONDS = 24 * 60 * 60;
+//
+// FINGERPRINT_COOLDOWN_THRESHOLD / FINGERPRINT_COOLDOWN_SECONDS now live in
+// ./register-fingerprint-cooldown so the value that governs production
+// behavior is importable by tests — see that module for why 3 (not 4) is
+// the correct threshold under success-only counting.
 
 // URLs the cron prewarm handler hits to keep L1/L2 caches warm in whichever
 // PoP CF schedules the cron in. Add featured-agent OG cards here when we

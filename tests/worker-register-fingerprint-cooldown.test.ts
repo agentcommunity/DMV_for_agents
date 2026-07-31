@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  FINGERPRINT_COOLDOWN_SECONDS,
+  FINGERPRINT_COOLDOWN_THRESHOLD,
   runFingerprintGatedUpstream,
   type FingerprintCooldownGate,
 } from '../worker/register-fingerprint-cooldown.ts';
+import { checkKvCooldown, incrementKvCooldown } from '../worker/rate-limit-kv.ts';
 
 const THRESHOLD = 4;
 const COOLDOWN_SECONDS = 24 * 60 * 60;
@@ -128,4 +131,57 @@ test('the response returned on a mint carries the real upstream body', async () 
     // by internally cloning it to read bodyText).
     assert.deepEqual(await result.upstream.json(), { certificate_id: 'MESA-DD6-660J' });
   }
+});
+
+// Regression test for the exact bug that shipped: the increment moved from
+// before-upstream to after-success (correct), but FINGERPRINT_COOLDOWN_THRESHOLD
+// stayed at 4 (the old before-upstream value), which under success-only
+// counting allows 4 successful mints instead of 3 — only the 5th request
+// blocks. This test exercises the REAL exported threshold/window constants
+// against the REAL rate-limit-kv implementation (an in-memory KV, not a
+// mocked gate), so it pins the absolute budget end-to-end rather than just
+// the check-before/increment-after ordering the tests above already cover.
+//
+// Mutation check: setting FINGERPRINT_COOLDOWN_THRESHOLD back to 4 in
+// worker/register-fingerprint-cooldown.ts must fail this test (mint #4 would
+// succeed instead of being blocked).
+test('absolute budget: exactly 3 successful mints per machine fingerprint in 24h, the 4th blocks', async () => {
+  let stored: string | null = null;
+  const kv = {
+    async get() {
+      return stored;
+    },
+    async put(_key: string, value: string) {
+      stored = value;
+    },
+  } as unknown as KVNamespace;
+
+  const gate: FingerprintCooldownGate = {
+    check: (key, threshold, cooldownSeconds) => checkKvCooldown(kv, key, threshold, cooldownSeconds),
+    increment: (key, threshold, cooldownSeconds) =>
+      incrementKvCooldown(kv, key, threshold, cooldownSeconds),
+  };
+
+  const mintUpstream = async () =>
+    jsonResponse({ certificate_id: `CERT-${crypto.randomUUID()}` }, 201);
+
+  for (let mint = 1; mint <= 3; mint += 1) {
+    const result = await runFingerprintGatedUpstream(
+      gate,
+      KEY,
+      FINGERPRINT_COOLDOWN_THRESHOLD,
+      FINGERPRINT_COOLDOWN_SECONDS,
+      mintUpstream,
+    );
+    assert.equal(result.blocked, false, `mint ${mint} of 3 must succeed`);
+  }
+
+  const fourth = await runFingerprintGatedUpstream(
+    gate,
+    KEY,
+    FINGERPRINT_COOLDOWN_THRESHOLD,
+    FINGERPRINT_COOLDOWN_SECONDS,
+    mintUpstream,
+  );
+  assert.equal(fourth.blocked, true, 'the 4th mint attempt from the same machine must be blocked');
 });
