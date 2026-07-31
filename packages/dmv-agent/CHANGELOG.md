@@ -40,6 +40,21 @@ package's tool to the same live lookup the main site uses.
   `verifyCertificateId` (offline-only) is unchanged and still exported for
   callers that explicitly want the old check-digit-only behavior.
 
+### Fixed — 429 from the live lookup was mislabeled "malformed"
+
+The Worker's rate-limit response (`{error: "rate_limited",
+retry_after_seconds}`, both the coarse Cloudflare limiter and the exact
+per-IP Durable Object one) has no `status` field, so it was falling into the
+generic JSON-shape check and being reported as "lookup returned a malformed
+response (HTTP 429)" — misleading, since the response was well-formed, and
+`retry_after_seconds` was silently dropped. `verifyCertificate()` now checks
+`response.status === 429` before the shape check and returns a distinct
+`rateLimited: true` result (plus `retryAfterSeconds` when the Worker's body
+included it). `formatVerificationResult()` reports it plainly ("live
+issuance check is rate limited right now... Retry after Ns.") and treats it
+as inconclusive, not a negative result — exit code stays `2`, and the MCP
+tool does not set `isError`.
+
 ### Compatibility
 
 No wire-protocol changes to `/api/register`. `dmv-agent@0.1.1` (the

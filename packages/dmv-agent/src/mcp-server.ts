@@ -224,9 +224,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const baseUrl = process.env.DMV_BASE_URL;
     const result = await verifyCertificate(certId, { formatOnly, baseUrl });
 
-    const isError = result.checkMode === 'live'
-      ? result.status === 'invalid_format' || result.status === 'not_found'
-      : !result.formatValid;
+    // Rate limited and "unavailable" are inconclusive, not errors — a network
+    // failure or a throttled request is never reported as "not issued".
+    const isError = result.rateLimited
+      ? false
+      : result.checkMode === 'live'
+        ? result.status === 'invalid_format' || result.status === 'not_found'
+        : !result.formatValid;
 
     return {
       content: [{ type: 'text' as const, text: formatVerificationResult(result) }],

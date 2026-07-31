@@ -324,6 +324,28 @@ test('verify (default, live) labels an unavailable Worker as inconclusive, not "
   );
 });
 
+test('verify (default, live) reports a 429 as rate limited, not malformed', async () => {
+  await withLookupServer(
+    () => ({
+      // Exact Worker rate-limit envelope — worker/certificate-lookup.ts:248-253/265-270.
+      // Deliberately has no `status` field.
+      status: 429,
+      body: { error: 'rate_limited', retry_after_seconds: 37 },
+    }),
+    async (baseUrl) => {
+      const result = await runCliAsync(['verify', 'MESA-DD6-660J'], {
+        env: { DMV_BASE_URL: baseUrl, NO_COLOR: '1' },
+      });
+
+      assert.equal(result.status, 2, result.stderr);
+      assert.match(result.stderr, /rate limited/);
+      assert.match(result.stderr, /Retry after 37s/);
+      assert.doesNotMatch(result.stderr, /malformed/);
+      assert.doesNotMatch(result.stderr, /not issued/);
+    },
+  );
+});
+
 test('verify (default, live) falls back to the offline check digit when the network call fails', async () => {
   // Nothing listens on this port — fetch() must fail/timeout and we must fall back cleanly.
   const result = await runCliAsync(['verify', 'MESA-DD6-660J'], {

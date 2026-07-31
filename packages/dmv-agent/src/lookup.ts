@@ -34,6 +34,16 @@ export interface CertificateVerificationResult {
    * request from an unintended fallback.
    */
   fallbackReason?: string;
+  /**
+   * Set when the Worker itself answered with HTTP 429 (its own request, not the
+   * fallback path — the live check DID run, it was just throttled). The Worker's
+   * 429 body is `{error: "rate_limited", retry_after_seconds}` with no `status`
+   * field (see worker/certificate-lookup.ts), so this is reported distinctly from
+   * both a normal live result and a network-failure fallback.
+   */
+  rateLimited?: boolean;
+  /** Only set when rateLimited is true and the Worker's body included it. */
+  retryAfterSeconds?: number;
 }
 
 export interface VerifyCertificateOptions {
@@ -111,6 +121,31 @@ export async function verifyCertificate(
     );
 
     const text = await response.text();
+
+    // The Worker's rate-limit response (`{error: "rate_limited", retry_after_seconds}`,
+    // both the coarse Cloudflare limiter and the exact Durable Object one — see
+    // worker/certificate-lookup.ts:245-271) has no `status` field. Handle it before
+    // the generic shape check below, so a 429 is never mislabeled as "malformed" —
+    // the live check DID run, it was just throttled.
+    if (response.status === 429) {
+      let retryAfterSeconds: number | undefined;
+      try {
+        const body = JSON.parse(text) as Record<string, unknown>;
+        if (typeof body.retry_after_seconds === 'number') {
+          retryAfterSeconds = body.retry_after_seconds;
+        }
+      } catch {
+        // A malformed 429 body doesn't change what the status code already told us.
+      }
+      return {
+        certificateId,
+        formatValid,
+        checkMode: 'live',
+        rateLimited: true,
+        retryAfterSeconds,
+      };
+    }
+
     let json: Record<string, unknown>;
     try {
       json = JSON.parse(text) as Record<string, unknown>;
@@ -153,6 +188,16 @@ export async function verifyCertificate(
  * Shared by the CLI and MCP server so both surfaces describe outcomes identically.
  */
 export function formatVerificationResult(result: CertificateVerificationResult): string {
+  if (result.rateLimited) {
+    const retrySuffix = typeof result.retryAfterSeconds === 'number'
+      ? ` Retry after ${result.retryAfterSeconds}s.`
+      : '';
+    return [
+      `? Certificate ${result.certificateId}: live issuance check is rate limited right now.${retrySuffix}`,
+      `  This is inconclusive, not a negative result — the request was throttled, not answered.`,
+    ].join('\n');
+  }
+
   if (result.checkMode === 'format_only') {
     const headline = result.formatValid
       ? `✓ Certificate ${result.certificateId} has a valid check digit.`
@@ -195,6 +240,7 @@ export function formatVerificationResult(result: CertificateVerificationResult):
  * bad/absent, 2 = inconclusive (no confirmation either way was possible).
  */
 export function exitCodeForVerification(result: CertificateVerificationResult): 0 | 1 | 2 {
+  if (result.rateLimited) return 2;
   if (result.checkMode === 'format_only') {
     if (result.fallbackReason) return 2;
     return result.formatValid ? 0 : 1;

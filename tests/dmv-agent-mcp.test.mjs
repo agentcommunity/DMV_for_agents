@@ -276,6 +276,36 @@ test('MCP verify_certificate: default live check reports not_found as an error r
   );
 });
 
+test('MCP verify_certificate: a Worker 429 is reported as rate limited, not malformed', async () => {
+  await withLookupServer(
+    () => ({
+      // Exact Worker rate-limit envelope — worker/certificate-lookup.ts:248-253/265-270.
+      // Deliberately has no `status` field.
+      status: 429,
+      body: { error: 'rate_limited', retry_after_seconds: 42 },
+    }),
+    async (baseUrl) => {
+      await withMcpClient({ DMV_BASE_URL: baseUrl }, async (client) => {
+        const result = await withTimeout(
+          client.callTool({
+            name: 'verify_certificate',
+            arguments: { certificate_id: 'MESA-DD6-660J' },
+          }),
+          'MCP verify_certificate rate limited',
+        );
+        const text = textOf(result);
+
+        // Rate limited is inconclusive, not a tool error.
+        assert.equal(result.isError, false);
+        assert.match(text, /rate limited/);
+        assert.match(text, /Retry after 42s/);
+        assert.doesNotMatch(text, /malformed/);
+        assert.doesNotMatch(text, /not issued/);
+      });
+    },
+  );
+});
+
 test('MCP verify_certificate: network failure falls back to format-only and labels it', async () => {
   await withMcpClient(
     { DMV_BASE_URL: 'http://127.0.0.1:9' },
