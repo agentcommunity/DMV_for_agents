@@ -42,24 +42,16 @@ check digit and labels the result `(format-only ...)` in its text output; a
 network failure is never reported as "not issued". Full detail in
 `packages/dmv-agent/CHANGELOG.md` (0.3.0) and `packages/dmv-agent/README.md`.
 
-**Update (2026-08-01, re-verified live):** `GET /api/lookup` now returns real
-`not_found` (and, for issued certificates, real `issued`) results —
-`{"certificate_id":"MESA-DD6-660J","status":"not_found","valid_format":true,"issued":false,...}`
-against a real, unissued but valid-format ID; `status: "unavailable"` is no
-longer what production returns for a normal request. The `lookup-agent`
-Supabase upstream is live, not "implementation-ready but unpublished" as
-earlier revisions of this doc said. `dmv-agent verify` / the MCP tool now
-give a conclusive live-check result rather than the inconclusive
-`unavailable` fallback described above when this section was first written
-earlier the same day. Nothing was published to npm as part of the
-`verify_certificate` wiring change itself; `packages/dmv-agent/package.json`
-was bumped to `0.3.0`, still unpublished until someone explicitly runs
-`npm publish --access public` from `packages/dmv-agent`. The `dmv-agent`
-alias still declares `@agentcommunity/dmv-agent@^0.2.1` in-tree — a `^0.3.0`
-range breaks `pnpm install --frozen-lockfile` (which the Cloudflare build
-uses) because `0.3.0` is not yet on the registry. Publish order: publish
-`@agentcommunity/dmv-agent@0.3.0` first, then bump the alias dependency to
-`^0.3.0` and publish the alias. See `packages/dmv-agent/CHANGELOG.md`.
+The lookup boundary is live. Nothing was published to npm as part of this
+source change: the published packages remain
+`@agentcommunity/dmv-agent@0.2.2` and the compatibility alias
+`dmv-agent@0.1.2`. The canonical source manifest is `0.3.0`, the compatibility
+alias source is `0.1.3`, and publication remains an explicit package-owner
+action after the release gates pass.
+
+Production was re-verified on 2026-08-01: normal requests return real `issued`
+or `not_found` results, while `unavailable` remains reserved for genuine
+failures.
 
 ## Current production state — registration and lookup live
 
@@ -145,7 +137,16 @@ ID: `ec0cdc55c2f94267af84f0218c961a00` (preview: `dc0c4a98b4764d448f35872de11984
 
 ### 7. The npm CLI auto-resolves the scoped package
 
-`bunx dmv-agent register` installs `dmv-agent@0.1.1` (the unscoped alias), which depends on `@agentcommunity/dmv-agent^0.2.1`. The currently published scoped package is `0.2.1`. Publishing a compatible new scoped version can transparently update what alias users get, subject to that caret range. When publishing: `cd packages/dmv-agent && npm publish --access public`. Do NOT publish from the repo root — the root `package.json` has `"private": true` as a safety rail, but a missing private flag would ship 17 MB of everything. See `.gitignore` for `.worktrees/` exclusion that backstops this.
+Use `bunx @agentcommunity/dmv-agent register`. The published canonical package
+is `@agentcommunity/dmv-agent@0.2.2`; `dmv-agent@0.1.2` is a compatibility alias,
+not a second capability. This branch prepares canonical source `0.3.0` and
+compatibility alias source `0.1.3` with a dependency on `^0.3.0`, but neither
+may be published without the separate
+release-owner authorization and artifact gates. Publish only from the explicit
+package directory, never the repo root. The root `package.json` has
+`"private": true` as a safety rail, but a missing private flag would ship the
+whole repository. See `.gitignore` for the `.worktrees/` exclusion that
+backstops this.
 
 ### 8. Lookup deployment record and future order
 

@@ -39,12 +39,12 @@ If you (the AI agent) are registering yourself, frame it that way — you're get
 3. Run the registration:
 
 ```bash
-bunx dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>"
+bunx @agentcommunity/dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>"
 ```
 
 With optional flags:
 ```bash
-bunx dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>" --description "<description>"
+bunx @agentcommunity/dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>" --description "<description>"
 ```
 
 If `bunx` is not available, fall back to `npx @agentcommunity/dmv-agent register`.
@@ -61,14 +61,14 @@ Before running, verify the agent name meets requirements:
 The user may have typed `/dmv my-cool-agent`. In that case, use `$ARGUMENTS` as the agent name — ask for the email and operator name, then run:
 
 ```bash
-bunx dmv-agent register --name $ARGUMENTS --email <email> --operator "<operator-name>"
+bunx @agentcommunity/dmv-agent register --name $ARGUMENTS --email <email> --operator "<operator-name>"
 ```
 
 ### Verification only
 
 If the user just wants to verify an existing certificate:
 ```bash
-bunx dmv-agent verify $ARGUMENTS
+bunx @agentcommunity/dmv-agent verify $ARGUMENTS
 ```
 
 ## Worked example
@@ -79,7 +79,7 @@ A complete registration, end to end. The user says: *"Register scout.agent for m
 2. Run:
 
 ```bash
-bunx dmv-agent register --name scout --email ada@lovelace-labs.example --operator "Ada Lovelace Labs"
+bunx @agentcommunity/dmv-agent register --name scout --email ada@lovelace-labs.example --operator "Ada Lovelace Labs"
 ```
 
 3. The CLI responds with a framed green terminal card (abridged — the full
@@ -108,7 +108,7 @@ If the name is taken or invalid, the CLI prints the reason; suggest a variant (e
 When registration succeeds, the CLI prints (in priority order):
 
 1. **View your card** — a permalink to the holographic identity card at `dmv.agentcommunity.org/c/CERT-ID/agent-name`
-2. **Spread the word** — invite other agents with `bunx dmv-agent register` + share the card URL. Every pre-registration strengthens the claim for `.agent`.
+2. **Spread the word** — invite other agents with `bunx @agentcommunity/dmv-agent register` + share the card URL. Every pre-registration strengthens the community application for `.agent`.
 3. **Save your card** — download the holographic card as a PNG from `dmv.agentcommunity.org/api/card?id=CERT-ID&name=agent-name` (or use the "Save Card" button on the web permalink)
 4. **Add a badge** — copy-paste markdown to embed a DMV badge in READMEs
 5. **Email verification** — a reminder to check email and click the verification link
@@ -117,8 +117,8 @@ When registration succeeds, the CLI prints (in priority order):
 - View the holographic card — it's unique to each registration
 - Save the card as a PNG — use the "Save Card" button on the web, or download directly from the card image URL
 - Share with agent friends and partners to strengthen the `.agent` claim
-- Invite other agents: `bunx dmv-agent register`
-- The certificate ID is content-addressed and verifiable: `bunx dmv-agent verify MESA-DD6-660J`
+- Invite other agents: `bunx @agentcommunity/dmv-agent register`
+- The certificate ID is content-addressed and verifiable: `bunx @agentcommunity/dmv-agent verify MESA-DD6-660J --format-only`
 - A verification email was sent — click the magic link to complete registration
 
 ## Share your registration

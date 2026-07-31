@@ -60,7 +60,7 @@ Multiple surfaces carry agent-onboarding content (register → share → AID →
 - **Hidden HTML** (`index.html`, `<div hidden data-agent-info>`) — lightest distillation for agents parsing page source.
 - **Meta tags** (`index.html`, `<meta name="agent:*">`) — CLI command + MCP config for agent tooling discovery.
 
-CLI-first everywhere. MCP is available but secondary — `bunx dmv-agent register` over MCP config.
+CLI-first everywhere. MCP is available but secondary — `bunx @agentcommunity/dmv-agent register` over MCP config.
 
 ## Critical Constraints
 
@@ -167,7 +167,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
 **Pre-registration model**: Multiple users can register interest in the same `.agent` domain. `domain_requested` is NOT unique. `certificate_id` is unique (same user+agent+type = same cert ID). Badge lookup is by cert ID only (`?domain=` deprecated).
 
-**NPM package** (`packages/dmv-agent/`): Published as `@agentcommunity/dmv-agent` on npm, also available as `dmv-agent` (unscoped alias in `packages/dmv-agent-alias/`). CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, `bunx dmv-agent` for users. Only runtime dep: `@modelcontextprotocol/sdk`. CLI sends `signup_source: 'cli'`, MCP sends `'mcp'`.
+**NPM package** (`packages/dmv-agent/`): Published canonically as `@agentcommunity/dmv-agent` on npm; `dmv-agent` is an unscoped compatibility alias in `packages/dmv-agent-alias/`, not a second capability. CLI, MCP server, JS API, Claude Code `/dmv` skill. TypeScript, pnpm for dev, `bunx @agentcommunity/dmv-agent` for users. Only runtime dep: `@modelcontextprotocol/sdk`. CLI sends `signup_source: 'cli'`, MCP sends `'mcp'`.
 
 **CLI architecture** (`packages/dmv-agent/src/`):
 - `cli.ts` — Main CLI: boot screen, form flow, submit, content pages (about/terms/charter)

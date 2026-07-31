@@ -67,7 +67,7 @@ const CANONICAL_ORIGIN = (() => {
 })();
 
 const CLI_REGISTER_COMMAND = cliCommandMeta?.getAttribute('content')?.trim()
-  || 'bunx dmv-agent register';
+  || 'bunx @agentcommunity/dmv-agent register';
 const DMV_TURNSTILE_ACTION = 'dmv_register';
 const TURNSTILE_SCRIPT_ID = 'turnstile-api-script';
 
@@ -1048,7 +1048,7 @@ tv.crt.onShareCert = (certId, data) => {
   });
 };
 
-tv.crt.setAgentRegistrationCommands(CLI_REGISTER_COMMAND, 'bunx dmv-agent');
+tv.crt.setAgentRegistrationCommands(CLI_REGISTER_COMMAND, 'bunx @agentcommunity/dmv-agent');
 tv.crt.onCopyAgentCli = () => {
   return copyCliCommand(CLI_REGISTER_COMMAND).then((copied) => {
     announce(copied ? 'CLI command copied to clipboard.' : 'Copy failed. Use the command shown on screen.');

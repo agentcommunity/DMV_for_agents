@@ -361,7 +361,7 @@ export function renderSuccess(result: {
   lines.push(frameLineRaw(color.green('Every pre-registration strengthens the community bid')));
   lines.push(frameLineRaw(color.green('for .agent — help make agentcommunity loud.')));
   lines.push(frameEmpty());
-  lines.push(frameLineRaw(color.greenDim('  invite agents →  ') + color.green('bunx dmv-agent register')));
+  lines.push(frameLineRaw(color.greenDim('  invite agents →  ') + color.green('bunx @agentcommunity/dmv-agent register')));
   lines.push(frameLineRaw(color.greenDim('  share card    →  ') + color.green(result.viewUrl)));
 
   lines.push(frameEmpty());

@@ -21,8 +21,8 @@
   <meta name="twitter:image" content="https://dmv.agentcommunity.org/api/og">
   <meta name="twitter:image:alt" content="DMV certificate card — Department of Machine Verification">
   <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable site description">
-  <meta name="agent:cli" content='bunx dmv-agent register --name <agent-name> --email <operator-email> --operator "Operator Name"'>
-  <meta name="agent:mcp" content='{"command":"bunx","args":["dmv-agent"]}'>
+  <meta name="agent:cli" content='bunx @agentcommunity/dmv-agent register --name <agent-name> --email <operator-email> --operator "Operator Name"'>
+  <meta name="agent:mcp" content='{"command":"bunx","args":["@agentcommunity/dmv-agent"]}'>
   <meta name="dmv-turnstile-site-key" content="0x4AAAAAAC2BwC5T9LSdndaK">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="icon" type="image/x-icon" href="/images/favicon.ico?v=1" id="appFavicon">
@@ -85,9 +85,9 @@
              system for the .agent community. Pre-register a .agent domain name and
              receive a unique, content-addressed certificate ID.</p>
           <h3>Register</h3>
-          <p>Readiness check: bunx dmv-agent doctor</p>
-          <p>bunx dmv-agent register</p>
-          <p>Non-interactive: bunx dmv-agent register --name my-agent --email operator@example.com --operator "Operator Name"</p>
+          <p>Readiness check: bunx @agentcommunity/dmv-agent doctor</p>
+          <p>bunx @agentcommunity/dmv-agent register</p>
+          <p>Non-interactive: bunx @agentcommunity/dmv-agent register --name my-agent --email operator@example.com --operator "Operator Name"</p>
           <h3>After registration</h3>
           <p>Verification email sent to operator (anti-bot, not anti-agent). Share your
              registration: https://dmv.agentcommunity.org/c/CERT-ID/agent-name</p>
@@ -111,7 +111,7 @@
           <h3>Links</h3>
           <ul>
             <li>Full docs: https://dmv.agentcommunity.org/llms.txt</li>
-            <li>Package: https://www.npmjs.com/package/dmv-agent</li>
+            <li>Package: https://www.npmjs.com/package/@agentcommunity/dmv-agent</li>
             <li>Community: https://agentcommunity.org</li>
             <li>AID spec: https://aid.agentcommunity.org</li>
           </ul>
@@ -124,14 +124,14 @@
               <h2>Quick Start</h2>
 
               <h3>CLI (recommended)</h3>
-              <pre class="agent-view__code">bunx dmv-agent doctor</pre>
-              <pre class="agent-view__code">bunx dmv-agent register</pre>
+              <pre class="agent-view__code">bunx @agentcommunity/dmv-agent doctor</pre>
+              <pre class="agent-view__code">bunx @agentcommunity/dmv-agent register</pre>
 
               <h3>Non-interactive</h3>
-              <pre class="agent-view__code">bunx dmv-agent register --name my-agent --email operator@example.com --operator "Operator Name"</pre>
+              <pre class="agent-view__code">bunx @agentcommunity/dmv-agent register --name my-agent --email operator@example.com --operator "Operator Name"</pre>
 
               <h3>Claude Code Skill</h3>
-              <pre class="agent-view__code">bunx dmv-agent register
+              <pre class="agent-view__code">bunx @agentcommunity/dmv-agent register
 # The /dmv skill is bundled — just type /dmv in Claude Code</pre>
 
               <h3>MCP Server Config</h3>
@@ -139,7 +139,7 @@
   "mcpServers": {
     "dmv": {
       "command": "bunx",
-      "args": ["dmv-agent"]
+      "args": ["@agentcommunity/dmv-agent"]
     }
   }
 }</pre>

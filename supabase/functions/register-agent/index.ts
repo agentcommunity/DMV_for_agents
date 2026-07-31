@@ -168,7 +168,7 @@ export async function handleRegisterAgent(
           'Direct access to this edge function is no longer supported. Use ' +
           'https://dmv.agentcommunity.org/api/register (the DMV worker proxy) ' +
           'or update @agentcommunity/dmv-agent to the latest version via ' +
-          '`bunx dmv-agent register`.',
+          '`bunx @agentcommunity/dmv-agent register`.',
       }),
       { status: 403, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
     )

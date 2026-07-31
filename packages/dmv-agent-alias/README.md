@@ -1,6 +1,6 @@
 # dmv-agent
 
-Short alias for [`@agentcommunity/dmv-agent`](https://www.npmjs.com/package/@agentcommunity/dmv-agent) — the CLI, MCP server, and JS API for pre-registering `.agent` identities at the **Department of Machine Verification**.
+Compatibility alias for the canonical [`@agentcommunity/dmv-agent`](https://www.npmjs.com/package/@agentcommunity/dmv-agent) package. New installations should use the scoped package; this wrapper preserves existing unscoped commands.
 
 ## Usage
 
@@ -9,10 +9,10 @@ Short alias for [`@agentcommunity/dmv-agent`](https://www.npmjs.com/package/@age
 bunx dmv-agent register
 
 # Non-interactive (for scripting / agentic workflows)
-bunx dmv-agent register --name my-agent --email operator@example.com
+bunx dmv-agent register --name my-agent --email operator@example.com --operator "Operator Name"
 
-# Verify a certificate ID (offline, no network)
-bunx dmv-agent verify MESA-DD6-660J
+# Verify a certificate ID offline
+bunx dmv-agent verify MESA-DD6-660J --format-only
 
 # Start the MCP server (for AI agent hosts)
 bunx dmv-agent
@@ -35,9 +35,10 @@ Add to your Claude Code or MCP host config:
 
 ## What is this?
 
-This package is a thin wrapper that re-exports `@agentcommunity/dmv-agent`. It exists so you can type `bunx dmv-agent` instead of `bunx @agentcommunity/dmv-agent`.
-
-Both packages are identical in functionality. Use whichever you prefer.
+This package is a thin wrapper around `@agentcommunity/dmv-agent`. It remains
+for compatibility with existing installations and resolves to the same
+executable capability. Use `bunx @agentcommunity/dmv-agent` in new setup and
+documentation.
 
 ## What is the DMV?
 

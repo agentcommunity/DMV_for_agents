@@ -57,6 +57,39 @@ test('CRT and CLI ask for legal name and explain email validation', () => {
   assert.match(cliText, /Verify your email to validate/);
 });
 
+test('canonical agent surfaces use the scoped package command', () => {
+  const report = runAudit();
+  const surfaces = Object.fromEntries(report.surfaces.map((surface) => [surface.id, surface]));
+  const canonicalSurfaceIds = [
+    'web_crt',
+    'web_share',
+    'web_metadata',
+    'root_readme',
+    'llms_manifest',
+    'cli_runtime',
+    'agent_readme',
+    'register_api',
+  ];
+
+  for (const surfaceId of canonicalSurfaceIds) {
+    const text = surfaces[surfaceId]?.combinedText ?? '';
+    assert.doesNotMatch(
+      text,
+      /bunx dmv-agent(?:\s|['"`]|$)/,
+      `${surfaceId} must not present the compatibility alias as the primary command`,
+    );
+    assert.doesNotMatch(
+      text,
+      /"args"\s*:\s*\[\s*"dmv-agent"\s*\]/,
+      `${surfaceId} must not configure the compatibility alias as the primary MCP package`,
+    );
+  }
+
+  assert.match(surfaces.root_readme?.combinedText ?? '', /bunx @agentcommunity\/dmv-agent/);
+  assert.match(surfaces.llms_manifest?.combinedText ?? '', /bunx @agentcommunity\/dmv-agent/);
+  assert.match(surfaces.cli_runtime?.combinedText ?? '', /bunx @agentcommunity\/dmv-agent/);
+});
+
 test('register-agent only treats certificate-id conflicts as pre-registration recovery', () => {
   const source = readFileSync('supabase/functions/register-agent/index.ts', 'utf8');
 

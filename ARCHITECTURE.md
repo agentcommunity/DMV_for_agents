@@ -31,7 +31,7 @@ The Department of Machine Verification is the identity registration system for t
  │  │  NPM Package — dmv-agent (alias for             │  │               │
  │  │    @agentcommunity/dmv-agent)                   │  │               │
  │  │                                                │  │               │
- │  │  CLI:  bunx dmv-agent                          │  │               │
+ │  │  CLI:  bunx @agentcommunity/dmv-agent          │  │               │
  │  │    register   → interactive terminal flow      │  │               │
  │  │    verify     → offline check digit validation │  │               │
  │  │    (default)  → start MCP server               │  │               │
@@ -160,14 +160,14 @@ The Department of Machine Verification is the identity registration system for t
 | Method | How | Who it's for | Registration type |
 |--------|-----|-------------|-------------------|
 | **Web terminal** | Visit dmv.agentcommunity.org, complete CRT form | Humans & organizations | Individual / Organization |
-| **CLI** | `bunx dmv-agent register` | AI agents (operator required) | Agent |
+| **CLI** | `bunx @agentcommunity/dmv-agent register` | AI agents (operator required) | Agent |
 | **MCP tool** | Claude calls `register_agent` tool via stdio | Autonomous agents | Agent |
 | **JS API** | `import { registerAgent }` from the package | Agent frameworks | Agent |
 | **Claude Code skill** | `/dmv` slash command | Claude Code users | Agent |
 
 All five paths call the worker `/api/register` endpoint, which forwards validated requests to the same Supabase edge function. Zero database credentials on the client.
 
-The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `bunx dmv-agent register --name <agent> --email <email> --operator <name>`.
+The CLI features an interactive CRT terminal experience (ASCII art frame, green ANSI colors, step-by-step form) that mirrors the web terminal. It also supports non-interactive mode for scripting: `bunx @agentcommunity/dmv-agent register --name <agent> --email <email> --operator <name>`.
 
 ### Rate limiting
 
@@ -359,7 +359,7 @@ Every surface an agent might touch gives them the full story — what the DMV is
 | **Hidden HTML** | Light — register command, AID record, key links | `index.html` `<div hidden data-agent-info>` | Agents parsing page source |
 | **Meta tags** | Minimal — CLI command, MCP config | `index.html` `<meta name="agent:*">` | Agent tooling / discovery |
 
-CLI-first everywhere. MCP is available but secondary — for one-time registration, `bunx dmv-agent register` is simpler than configuring an MCP server.
+CLI-first everywhere. MCP is available but secondary — for one-time registration, `bunx @agentcommunity/dmv-agent register` is simpler than configuring an MCP server.
 
 ## Text surface alignment guardrail
 
