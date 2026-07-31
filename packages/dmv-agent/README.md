@@ -254,12 +254,11 @@ console.log(verification.issued);    // true | false | null
 - **Content-addressed IDs** — deterministic hashes, not sequential. This makes
   blind guessing harder; the planned lookup rate limit mitigates but does not
   eliminate enumeration risk.
-- **Worker-only lookup (implementation ready; unpublished)** — after Task 8
-  records a deployed SHA and live smoke evidence, public callers will use
-  `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The staged
-  Supabase `lookup-agent` change makes that URL a `DMV_PROXY_SECRET`-gated
-  internal upstream with typed HTTP 200 `issued`/`not_found` envelopes. The
-  Worker applies coarse 60/60 filtering, exact atomic 30/60 accounting through
+- **Worker-only lookup (live)** — public callers use
+  `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. The Supabase
+  `lookup-agent` function is a `DMV_PROXY_SECRET`-gated internal upstream
+  with typed HTTP 200 `issued`/`not_found` envelopes. The Worker applies
+  coarse 60/60 filtering, exact atomic 30/60 accounting through
   `CERT_LOOKUP_LIMITER`, and uses `BADGE_CACHE_KV` only for result caching.
 
 ## API reference
@@ -299,15 +298,17 @@ The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP cl
 
 ### GET /api/lookup
 
-**Status (2026-07-22): implementation-ready but unpublished** on the Supabase
-`lookup-agent` upstream side — see `AGENT_HANDOFF.md` Task 8 for the deploy
-evidence this still needs. The Worker route itself is live and reachable; it
-currently returns `status: "unavailable"` for valid-format IDs until the
-upstream is published. This package's `verifyCertificate()` (and therefore
-`dmv-agent verify` / the `verify_certificate` MCP tool) already call this
-route by default and treat `unavailable` as an inconclusive result — never as
-"not issued" — so no client-side change is needed once Task 8 lands. The only
-public network lookup endpoint is and will remain:
+**Status (2026-08-01, verified live): the Supabase `lookup-agent` upstream is
+published and the route returns real results** — `status: "issued"` for
+issued certificates and `status: "not_found"` for valid-format IDs that
+don't exist, not `status: "unavailable"`. (`AGENT_HANDOFF.md` Task 8 still
+has some record-keeping outstanding — deployed SHA + a full smoke-evidence
+writeup — but the behavior itself is live in production.) This package's
+`verifyCertificate()` (and therefore `dmv-agent verify` / the
+`verify_certificate` MCP tool) call this route by default; `unavailable`
+remains the fallback for genuine failures (network error, timeout, malformed
+response) and is still treated as inconclusive, never as "not issued". The
+only public network lookup endpoint is and will remain:
 
 ```http
 GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J
@@ -332,9 +333,9 @@ seconds per IP before reading its cache. Issued results are cached internally fo
 Those are the only result fields. `issued: true` means a matching DMV
 registration row exists; it does not mean the operator completed email
 verification, the requested `.agent` name was allocated, or DNS delegation
-exists. Domain enumeration is removed from the staged contract. After Task 8,
-the Supabase `lookup-agent` URL will be an internal Worker upstream protected by
-`DMV_PROXY_SECRET`; direct calls will be unsupported and return 403. Only its
+exists. Domain enumeration is not part of the contract. The Supabase
+`lookup-agent` URL is an internal Worker upstream protected by
+`DMV_PROXY_SECRET`; direct calls are unsupported and return 403. Only its
 typed HTTP 200 `not_found` envelope becomes cached public absence; non-200 or
 malformed responses become uncached `unavailable`.
 

@@ -237,9 +237,11 @@ Request arrives at Worker /api/register
                ▼
 ┌─────────────────────────────────┐
 │  Layer 4: KV cooldown           │  CLI/MCP only.
-│  REGISTER_COOLDOWN_KV           │  Threshold-then-hold.
-│  Key: dmv:register:fingerprint: │  DMV-local namespace.
-│       <sha256(fingerprint)>     │  NOT shared with PAGE.
+│  REGISTER_COOLDOWN_KV           │  Success-only counting: checked
+│  Key: dmv:register:fingerprint: │  BEFORE upstream, incremented
+│       <sha256(fingerprint)>     │  only AFTER a real mint.
+│                                 │  DMV-local namespace, NOT
+│                                 │  shared with PAGE.
 └──────────────┬──────────────────┘
                │ pass — forward to Supabase
                ▼
@@ -262,9 +264,9 @@ Request arrives at Worker /api/register
 
 **Cross-repo coupling with `agentCommunity_PAGE`:** the `4005` and `4007` namespace_ids are SHARED at the Cloudflare account level. A signup attempt that consumes email quota on PAGE has less email quota available on DMV. This is intentional — those two counters represent the same abuse surface across both properties. PAGE's `RL_AUTH` (4001) and `RL_OTP_IP` (4006) are NOT shared by DMV; plain-IP limits are too blunt for shared corporate networks and PAGE's live OTP path doesn't use `RL_AUTH` anyway. The coupling matters in three drift scenarios documented in `worker/index.ts` and `CLOUDFLARE.md`.
 
-**KV cooldown key design:** keys are SHA-256 hashed (`dmv:register:fingerprint:<hash>`). Fingerprints are never stored in KV as plaintext. Key prefix does not collide with PAGE's `KV_RATE_LIMIT` namespace because DMV uses a separate, DMV-local KV namespace (`REGISTER_COOLDOWN_KV` id `ec0cdc55c2f94267af84f0218c961a00`). PAGE's OTP cooldown uses `c0e0d88fff1a4c59805ab85c7a03100f` — fully separate.
+**KV cooldown key design:** keys are SHA-256 hashed (`dmv:register:fingerprint:<hash>`). Fingerprints are never stored in KV as plaintext. Key prefix does not collide with PAGE's `KV_RATE_LIMIT` namespace because DMV uses a separate, DMV-local KV namespace (`REGISTER_COOLDOWN_KV` id `ec0cdc55c2f94267af84f0218c961a00`). PAGE's OTP cooldown uses `c0e0d88fff1a4c59805ab85c7a03100f` — fully separate. The stored value is `{ count, firstAt }` JSON (`worker/rate-limit-kv.ts`), not a bare counter: `firstAt` is the epoch-ms timestamp of the first successful mint in the current window, which lets `Retry-After` report the actual remaining window instead of a flat `cooldownSeconds`. Only successful mints (upstream 201, not an `already_recorded` replay) increment `count` — `checkKvCooldown` runs before the upstream call and blocks at `count >= threshold` without writing anything; `incrementKvCooldown` runs after, only on an actual new-certificate mint (`worker/register-fingerprint-cooldown.ts`). `FINGERPRINT_COOLDOWN_THRESHOLD` is `3`: 3 successful mints per machine fingerprint per rolling 24h window, the 4th blocked.
 
-**Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `{ error: 'fingerprint_cooldown', ... }` with the cooldown duration. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
+**Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `429` with `{ error: 'fingerprint_cooldown', message: '...', retry_after_seconds }`, where `Retry-After` reflects the honest remaining time left in that fingerprint's 24h window (derived from `firstAt`), not a flat duration. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
 
 ## Certificate ID System
 
