@@ -135,7 +135,21 @@ function timingSafeStrEqual(a: string | null | undefined, b: string | null | und
   return diff === 0
 }
 
-Deno.serve(async (req) => {
+// SHA-256 hex digest — mirrors worker/index.ts's sha256Hex (used there for every
+// rate-limit key). The client IP must never be stored raw in the shared
+// production DB (PAGE reads this same `registrations` table); this is the only
+// writer that wasn't already hashing it.
+export async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(digest))
+    .map((part) => part.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+export async function handleRegisterAgent(
+  req: Request,
+  dependencies: { createSupabaseClient?: typeof createClient } = {},
+): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: getCorsHeaders(req) })
   }
@@ -207,10 +221,11 @@ Deno.serve(async (req) => {
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     || req.headers.get('cf-connecting-ip')
-    || 'unknown'
+    || null
 
   // Supabase client with service role key (server-side only — created after rate limit check)
-  const supabase = createClient(
+  const createSupabaseClient = dependencies.createSupabaseClient ?? createClient
+  const supabase = createSupabaseClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
@@ -336,7 +351,9 @@ Deno.serve(async (req) => {
       signup_source: signupSource,
       metadata: {
         agent_description: description,
-        client_ip: ip,
+        // Hashed, never raw — see sha256Hex above. `registrations` is the same
+        // production table the PAGE app reads; raw IPs never belong here.
+        client_ip_hash: ip ? await sha256Hex(ip) : null,
       },
     })
 
@@ -419,4 +436,8 @@ Deno.serve(async (req) => {
     }),
     { status: 201, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
   )
-})
+}
+
+if (import.meta.main) {
+  Deno.serve((req) => handleRegisterAgent(req))
+}
