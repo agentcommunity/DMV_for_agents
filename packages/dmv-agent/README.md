@@ -2,7 +2,9 @@
 
 Pre-register `.agent` identities at the **Department of Machine Verification**.
 
-Also available as [`dmv-agent`](https://www.npmjs.com/package/dmv-agent) — a shorter alias. Use `bunx dmv-agent` instead of `bunx @agentcommunity/dmv-agent`.
+Use the canonical scoped package, `@agentcommunity/dmv-agent`. The unscoped
+[`dmv-agent`](https://www.npmjs.com/package/dmv-agent) package is retained only
+as a compatibility alias for existing installations.
 
 Part of the [.agent community](https://agentcommunity.org) — building toward an ICANN application for the `.agent` gTLD.
 
@@ -22,36 +24,36 @@ All paths hit the same backend. Pre-registration records interest in a `.agent` 
 
 ```bash
 # Interactive CRT terminal experience
-bunx dmv-agent register
+bunx @agentcommunity/dmv-agent register
 
 # Non-interactive (for scripting / agentic workflows)
-bunx dmv-agent register \
+bunx @agentcommunity/dmv-agent register \
   --name my-agent \
   --email operator@example.com \
   --operator "Acme Labs"
 
 # Verify a certificate ID — live issuance check against the DMV Worker by
 # default (falls back to the offline check digit if the network call fails)
-bunx dmv-agent verify MESA-DD6-660J
+bunx @agentcommunity/dmv-agent verify MESA-DD6-660J
 
 # Offline only: just the Luhn check digit, no network call
-bunx dmv-agent verify MESA-DD6-660J --format-only
+bunx @agentcommunity/dmv-agent verify MESA-DD6-660J --format-only
 
 # Check issuance (public Worker, certificate ID only)
 curl "https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J"
 
 # Check the public DMV surface without submitting a valid registration
-bunx dmv-agent doctor
+bunx @agentcommunity/dmv-agent doctor
 
 # Same check, machine-readable for launch scripts / agents
-bunx dmv-agent doctor --json
+bunx @agentcommunity/dmv-agent doctor --json
 ```
 
-The interactive CLI mirrors the web CRT terminal — ASCII art frame, green terminal colors, step-by-step form with validation, about/terms/charter access, and a confirmation gate before submit. After registration, the success screen shows a link to view your holographic identity card, a direct URL to download the card as PNG, a share nudge to invite other agents (`bunx dmv-agent register`), a copy-paste badge snippet for READMEs, and an email verification reminder.
+The interactive CLI mirrors the web CRT terminal — ASCII art frame, green terminal colors, step-by-step form with validation, about/terms/charter access, and a confirmation gate before submit. After registration, the success screen shows a link to view your holographic identity card, a direct URL to download the card as PNG, a share nudge to invite other agents (`bunx @agentcommunity/dmv-agent register`), a copy-paste badge snippet for READMEs, and an email verification reminder.
 
 CLI and MCP validate required fields locally before submission: agent name, email, required operator name, operator length (100 characters max), and description length (500 characters max). The Worker and edge function still enforce the authoritative server-side rules.
 
-`bunx dmv-agent doctor` is read-only. It checks `/healthz`, the PNG card endpoint, the SVG badge endpoint, and validation-only `/api/register {}` rejection so launch operators and agents can confirm the DMV surface is reachable before submitting a real registration. Add `--json` to emit a machine-readable readiness object with the same checks and exit status.
+`bunx @agentcommunity/dmv-agent doctor` is read-only. It checks `/healthz`, the PNG card endpoint, the SVG badge endpoint, and validation-only `/api/register {}` rejection so launch operators and agents can confirm the DMV surface is reachable before submitting a real registration. Add `--json` to emit a machine-readable readiness object with the same checks and exit status.
 
 ### Claude Code skill
 
@@ -69,7 +71,7 @@ Then type `/dmv` in Claude Code to start pre-registration.
 If you're an AI agent reading this, you can record non-binding interest in a proposed `.agent` name and receive a DMV certificate. This does not allocate the name.
 
 ```bash
-bunx dmv-agent register --name your-name --email your-operators-email --operator "Operator Name"
+bunx @agentcommunity/dmv-agent register --name your-name --email your-operators-email --operator "Operator Name"
 ```
 
 Your operator (the human responsible for you) receives a verification email.
@@ -87,7 +89,7 @@ Full onboarding guide: see the [Claude Code skill](skills/dmv/SKILL.md) or [llms
 
 ### MCP server (for autonomous agents)
 
-For one-time registration, the CLI (`bunx dmv-agent register`) is simpler. The MCP server is useful for persistent tool access in agent hosts.
+For one-time registration, the CLI (`bunx @agentcommunity/dmv-agent register`) is simpler. The MCP server is useful for persistent tool access in agent hosts.
 
 Add to your Claude Code settings (`.claude/settings.json`):
 
@@ -96,7 +98,7 @@ Add to your Claude Code settings (`.claude/settings.json`):
   "mcpServers": {
     "dmv": {
       "command": "bunx",
-      "args": ["dmv-agent"]
+      "args": ["@agentcommunity/dmv-agent"]
     }
   }
 }
@@ -200,7 +202,7 @@ MESA-DD6-660J
 For a pure offline check-digit validation with no network call:
 
 ```bash
-bunx dmv-agent verify MESA-DD6-660J --format-only
+bunx @agentcommunity/dmv-agent verify MESA-DD6-660J --format-only
 # ✓ Certificate MESA-DD6-660J has a valid check digit. (format-only check — does not confirm the certificate was issued)
 ```
 
