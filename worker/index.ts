@@ -25,6 +25,7 @@ import { CertificateLookupRateLimiter } from './certificate-lookup-rate-limiter'
 import { CONTAINER_INSTANCE_ID } from './container-instance';
 import {
   createFingerprintCooldownGate,
+  fingerprintCooldownResponse,
   runFingerprintGatedUpstream,
 } from './register-fingerprint-cooldown';
 import { RegistrationFingerprintRateLimiter } from './registration-fingerprint-rate-limiter';
@@ -1144,15 +1145,7 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
       fingerprintHash ?? 'unknown',
       Date.now() - startedAt,
     );
-    return jsonResponse(
-      {
-        error: 'fingerprint_cooldown',
-        message: 'Too many registrations from this machine. Please wait before trying again.',
-        retry_after_seconds: gateResult.retryAfterSeconds,
-      },
-      429,
-      { 'Retry-After': String(gateResult.retryAfterSeconds) },
-    );
+    return fingerprintCooldownResponse(gateResult.retryAfterSeconds);
   }
 
   const { upstream, bodyText } = gateResult;

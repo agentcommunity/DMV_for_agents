@@ -281,12 +281,17 @@ remote function. A pending claim is conservatively recovered as a possible
 success at claim time + 600 seconds: the documented 150-second Supabase request
 idle timeout + 400-second Edge Function wall clock + a 50-second safety margin.
 It then expires only after a full 24-hour rolling window from that timestamp.
-This fail-safe prevents a crash between mint and completion
-from reopening a fourth slot. `Retry-After` is derived from the oldest committed
-or conservatively recovered slot. The retained `REGISTER_COOLDOWN_KV` binding is
-unused compatibility state and is not part of enforcement.
+This fail-safe prevents a crash between mint and completion from reopening a
+fourth slot. In this source-ready v3 contract, `Retry-After` is derived from the
+oldest committed success timestamp or, while a claim is still pending, that
+claim's conservative-horizon timestamp (`claimedAt + 600s`). A fresh set of
+pending claims can therefore produce at most 87,000 seconds: the 24-hour rolling
+window plus the 600-second uncertainty horizon. Production is still on the
+pre-v3 cooldown until the forward-only Durable Object migration is deployed.
+The retained `REGISTER_COOLDOWN_KV` binding is unused compatibility state and is
+not part of v3 enforcement.
 
-**Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `429` with `{ error: 'fingerprint_cooldown', message: '...', retry_after_seconds }`, where `Retry-After` reflects the honest remaining time left in that fingerprint's 24h window (derived from `firstAt`), not a flat duration. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
+**Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `429` with `{ error: 'fingerprint_cooldown', message: '...', retry_after_seconds }`, where source-ready v3 `Retry-After` reflects the honest remaining time from the oldest committed success or pending claim's conservative-horizon timestamp, not a flat duration; its maximum is 24 hours + 600 seconds. Production remains pre-v3 until the forward-only migration is deployed. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
 
 ## Certificate ID System
 

@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  createFingerprintCooldownGate,
+  fingerprintCooldownResponse,
   FINGERPRINT_PENDING_HORIZON_SECONDS,
   FINGERPRINT_COOLDOWN_SECONDS,
   FINGERPRINT_COOLDOWN_THRESHOLD,
+  runFingerprintGatedUpstream,
 } from '../worker/register-fingerprint-cooldown.ts';
 import { RegistrationFingerprintRateLimiter } from '../worker/registration-fingerprint-rate-limiter.ts';
 
@@ -81,6 +84,59 @@ test('four simultaneous claims reserve exactly three upstream slots', async (t) 
   };
   assert.equal(state.pending.length, 3);
   assert.deepEqual(state.successes, []);
+});
+
+test('three fresh pending claims compose to the public fingerprint cooldown response', async (t) => {
+  t.mock.method(Date, 'now', () => 1_752_537_600_000);
+  const { limiter } = createLimiter();
+  const namespace = {
+    idFromName(name: string) {
+      return { name };
+    },
+    get() {
+      return {
+        fetch(request: Request) {
+          return limiter.fetch(request);
+        },
+      };
+    },
+  } as unknown as DurableObjectNamespace;
+  const gate = createFingerprintCooldownGate(namespace);
+  let upstreamCalls = 0;
+
+  for (let claim = 0; claim < 3; claim += 1) {
+    const pending = await runFingerprintGatedUpstream(
+      gate,
+      'dmv:register:fingerprint:abc123',
+      async () => {
+        upstreamCalls += 1;
+        return Response.json({ error: 'ambiguous upstream result' }, { status: 503 });
+      },
+    );
+    assert.equal(pending.blocked, false);
+  }
+
+  const blocked = await runFingerprintGatedUpstream(
+    gate,
+    'dmv:register:fingerprint:abc123',
+    async () => {
+      upstreamCalls += 1;
+      return Response.json({ error: 'must not be called' }, { status: 500 });
+    },
+  );
+  assert.equal(blocked.blocked, true);
+  if (!blocked.blocked) assert.fail('expected the fourth claim to be blocked');
+  assert.equal(blocked.retryAfterSeconds, 87_000);
+  assert.equal(upstreamCalls, 3);
+
+  const response = fingerprintCooldownResponse(blocked.retryAfterSeconds);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('Retry-After'), '87000');
+  assert.deepEqual(await json(response), {
+    error: 'fingerprint_cooldown',
+    message: 'Too many registrations from this machine. Please wait before trying again.',
+    retry_after_seconds: 87_000,
+  });
 });
 
 test('failed and non-mint outcomes release their slots for later claims', async (t) => {

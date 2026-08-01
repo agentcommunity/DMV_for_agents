@@ -23,6 +23,8 @@ export const FINGERPRINT_PENDING_HORIZON_SECONDS: number = 600;
 if (FINGERPRINT_PENDING_HORIZON_SECONDS < MINIMUM_PENDING_HORIZON_SECONDS) {
   throw new Error('fingerprint pending horizon does not cover remote execution uncertainty');
 }
+export const FINGERPRINT_MAX_RETRY_AFTER_SECONDS = FINGERPRINT_COOLDOWN_SECONDS
+  + FINGERPRINT_PENDING_HORIZON_SECONDS;
 // Abort only bounds how long the public Worker awaits a response. A timeout is
 // ambiguous, so the claim remains pending until the conservative horizon and
 // is then counted as a possible success for a full rolling 24 hours.
@@ -40,6 +42,20 @@ export interface FingerprintCooldownGate {
 export type FingerprintGatedUpstreamResult =
   | { blocked: true; retryAfterSeconds: number }
   | { blocked: false; upstream: Response; bodyText: string };
+
+export function fingerprintCooldownResponse(retryAfterSeconds: number): Response {
+  return Response.json(
+    {
+      error: 'fingerprint_cooldown',
+      message: 'Too many registrations from this machine. Please wait before trying again.',
+      retry_after_seconds: retryAfterSeconds,
+    },
+    {
+      status: 429,
+      headers: { 'Retry-After': String(retryAfterSeconds) },
+    },
+  );
+}
 
 function hasExactKeys(record: Record<string, unknown>, keys: Array<string>): boolean {
   return Object.keys(record).sort().join(',') === [...keys].sort().join(',');
@@ -61,7 +77,7 @@ function parseClaimDecision(value: unknown): FingerprintClaimDecision | null {
     && record.allowed === false
     && Number.isSafeInteger(record.retry_after_seconds)
     && (record.retry_after_seconds as number) >= 1
-    && (record.retry_after_seconds as number) <= FINGERPRINT_COOLDOWN_SECONDS
+    && (record.retry_after_seconds as number) <= FINGERPRINT_MAX_RETRY_AFTER_SECONDS
   ) {
     return {
       allowed: false,

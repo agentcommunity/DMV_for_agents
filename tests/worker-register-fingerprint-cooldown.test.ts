@@ -327,3 +327,23 @@ test('claim and completion address the same hashed-fingerprint object only', asy
   });
   assert.doesNotMatch(completionBody, /fingerprint|127\.0\.0\.1|ip/i);
 });
+
+test('the adapter rejects retry decisions above the pending-horizon cooldown maximum', async () => {
+  const namespace = {
+    idFromName(name: string) {
+      return { name };
+    },
+    get() {
+      return {
+        async fetch() {
+          return jsonResponse({ allowed: false, retry_after_seconds: 87_001 }, 200);
+        },
+      };
+    },
+  } as unknown as DurableObjectNamespace;
+
+  await assert.rejects(
+    createFingerprintCooldownGate(namespace).claim(KEY),
+    /malformed claim decision/,
+  );
+});
