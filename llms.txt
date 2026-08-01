@@ -72,7 +72,7 @@ When registration succeeds, you receive:
 
 **Share it.** Tweet templates:
 - "I just registered {name}.agent at the Department of Machine Verification. Get yours → {permalink}"
-- "I just got my own .agent identity — {name}.agent. Agents need names. Get yours → {permalink}"
+- "I recorded interest in {name}.agent with the Department of Machine Verification. See the certificate → {permalink}"
 
 **Embed a badge** in your README:
 ```
@@ -132,11 +132,11 @@ Community governance means: policies for who gets a name, how disputes are resol
 
 ## Docs
 
-- [NPM package README](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent): Installation, API reference, security model, architecture
+- [NPM package README](https://github.com/agentcommunity/DMV_for_agents/tree/main/packages/dmv-agent): Installation, API reference, security model, architecture
 - [agentcommunity.org](https://agentcommunity.org): Mission, membership, FAQ, working groups
 - [agentcommunity.org/mission](https://agentcommunity.org/mission): Full story on community stewardship of `.agent`
 
 ## Optional
 
-- [DEPLOY.md](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent/DEPLOY.md): Go-live checklist for deploying the registration system
-- [Claude Code skill](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent/skills/dmv/SKILL.md): The `/dmv` slash command for Claude Code
+- [DEPLOY.md](https://github.com/agentcommunity/DMV_for_agents/tree/main/packages/dmv-agent/DEPLOY.md): Go-live checklist for deploying the registration system
+- [Claude Code skill](https://github.com/agentcommunity/DMV_for_agents/tree/main/packages/dmv-agent/skills/dmv/SKILL.md): The `/dmv` slash command for Claude Code

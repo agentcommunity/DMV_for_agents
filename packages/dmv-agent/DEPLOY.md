@@ -82,7 +82,9 @@ and the Supabase project. Never put its value in `.env.example`, documentation,
 shell history, or client configuration. The Worker also requires
 `RL_CERT_LOOKUP` (coarse 60/60), `CERT_LOOKUP_LIMITER` (exact SQLite DO 30/60),
 and `BADGE_CACHE_KV` (lookup result cache) as configured in `wrangler.jsonc`.
-`REGISTER_COOLDOWN_KV` remains registration-only.
+Registration also requires `REGISTER_FINGERPRINT_LIMITER`, the exact SQLite
+Durable Object budget introduced by forward-only v3. The legacy
+`REGISTER_COOLDOWN_KV` binding is retained but unused during rollout.
 
 Before merging, run these container gates on a Docker-capable machine:
 
@@ -118,9 +120,11 @@ The completed rollout used the order below. Final production results were:
    deployed production Worker SHA/version in the launch notes. In the
    Cloudflare account, confirm that native rate-limit namespace `1002` is
    allocated to `RL_CERT_LOOKUP` and does not collide with another account-wide
-   binding. Confirm `BADGE_CACHE_KV`, `CERT_LOOKUP_LIMITER`, the v1/v2 Durable
-   Object migrations, and the shared `DMV_PROXY_SECRET` are configured without
-   printing the secret.
+   binding. Confirm `BADGE_CACHE_KV`, `CERT_LOOKUP_LIMITER`,
+   `REGISTER_FINGERPRINT_LIMITER`, all forward-only v1/v2/v3 Durable Object
+   migrations, and the shared `DMV_PROXY_SECRET` are configured without
+   printing the secret. The v3 class and binding must deploy together before
+   registration traffic reaches the new Worker.
 2. Merge to `main`, record the resulting merged `main` SHA, and use the Cloudflare
    Git integration's automatic build as the single authoritative Worker deploy
    path. Watch that build and capture its deployed commit SHA/version. If no
@@ -170,13 +174,14 @@ bypass its platform JWT layer because the Worker authenticates with
    and validation-only registration. Record their statuses/results. Only after
    these final smokes pass may the rollout be handed off or declared live.
 
-### v2-safe recovery
+### v3-safe recovery
 
-Cloudflare's v2 SQLite Durable Object migration is forward-only operational
-state. Never use Cloudflare rollback to a pre-v2 Worker: such a version lacks
-the `CertificateLookupRateLimiter` export/binding while the account retains the
-v2 migration. Preserve both v1 and v2 migrations, the class export, and the
-`CERT_LOOKUP_LIMITER` binding in every recovery version.
+Cloudflare's SQLite Durable Object migrations are forward-only operational
+state. Never use Cloudflare rollback to a pre-v3 Worker after v3 deploys: such a
+version lacks the `RegistrationFingerprintRateLimiter` export/binding while the
+account retains the migration. Preserve v1 `CardRenderer`, v2
+`CertificateLookupRateLimiter`, v3 `RegistrationFingerprintRateLimiter`, and
+all corresponding bindings in every recovery version.
 
 Cloudflare's runtime rejects `redirect: 'error'`. Keep the internal upstream
 fetch at `redirect: 'manual'`; any 3xx remains fail-closed and must never be
@@ -423,7 +428,7 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 | `Registration failed (HTTP 500)` | Service role key not set or DB schema mismatch | Check Supabase dashboard → Edge Functions → Logs |
 | `already_recorded=true` | Same user re-registering same agent | Expected — returns cert ID + permalink for recovery |
 | `Rate limited` (429) | Too many registrations from same email or (IP, email) within 60s | Wait 60s. Check shared CF rate limit counters in Cloudflare dashboard. |
-| `fingerprint_cooldown` (429) | CLI/MCP machine fingerprint exceeded local KV cooldown | Wait `retry_after_seconds`. Counter is in DMV-local `REGISTER_COOLDOWN_KV`. |
+| `fingerprint_cooldown` (429) | CLI/MCP machine fingerprint exhausted the exact Durable Object budget | Wait `retry_after_seconds`. Inspect `REGISTER_FINGERPRINT_LIMITER`; never expose object claim IDs or raw fingerprints. |
 | CLI hangs on `bunx` | Package not published or npm registry cache | Try `npx @agentcommunity/dmv-agent` or `bunx --force` |
 
 ---
@@ -459,8 +464,8 @@ User's machine             Cloudflare Worker                  Supabase cloud
  │  /dmv skill        │──▶│ validate JSON        │──forward─▶│ validate (again)      │
  │  MCP tool          │   │ require fingerprint │           │ lifetime cap (DB)     │
  └───────────────────┘    │ shared CF limits     │           │ generate cert, INSERT │
-                          │ DMV-local KV         │           └──────────┬───────────┘
- ┌───────────────────┐    │ cooldown             │                       │
+                          │ exact fingerprint DO │           └──────────┬───────────┘
+ ┌───────────────────┐    │ claim/complete       │                       │
  │ Web UI             │──▶│                      │                       │
  │ js/supabase.js     │   │ (browser path:       │                       │
  └───────────────────┘    │  Turnstile siteverify│                       │

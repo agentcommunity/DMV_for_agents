@@ -33,12 +33,12 @@ The Department of Machine Verification is the identity registration system for t
  │  │                                                │  │               │
  │  │  CLI:  bunx @agentcommunity/dmv-agent          │  │               │
  │  │    register   → interactive terminal flow      │  │               │
- │  │    verify     → offline check digit validation │  │               │
+ │  │    verify     → live lookup; strict fallback   │  │               │
  │  │    (default)  → start MCP server               │  │               │
  │  │                                                │  │               │
  │  │  MCP Server (stdio):                           │  │               │
  │  │    register_agent    → POST /api/register ─────┼──┤               │
- │  │    verify_certificate → offline, no network    │  │               │
+ │  │    verify_certificate → live lookup by default │  │               │
  │  │                                                │  │               │
  │  │  JS API:                                       │  │               │
  │  │    registerAgent()   → POST /api/register ─────┼──┤               │
@@ -75,8 +75,8 @@ The Department of Machine Verification is the identity registration system for t
  │  │    1. validate JSON shape                      │  │               │
  │  │    2. require machine_fingerprint              │  │               │
  │  │    3. shared CF rate limiters (same as above)  │  │               │
- │  │    4. DMV-local KV fingerprint cooldown        │  │               │
- │  │       → REGISTER_COOLDOWN_KV                   │  │               │
+ │  │    4. exact fingerprint claim/mint budget      │  │               │
+ │  │       → REGISTER_FINGERPRINT_LIMITER (DO)      │  │               │
  │  │       (NOT shared with PAGE)                   │  │               │
  │  │    5. forward to Supabase ─────────────────────┼──┤               │
  │  │                                                │  │               │
@@ -186,6 +186,14 @@ are not cached. `lookup-agent` returns typed HTTP 200 `issued`/`not_found`
 envelopes; non-200 or malformed envelopes are unavailable and uncached. Client
 responses remain `Cache-Control: private, no-store`.
 
+Package clients mirror that public contract strictly. They never follow a
+redirect. Only exact HTTP 200 six-field `issued`/`not_found` envelopes are
+conclusive. An exact typed HTTP 503 `unavailable` response and a valid HTTP 429
+rate-limit response remain live but inconclusive. Network errors, timeouts,
+unexpected HTTP/status relationships, and partial, extra-field, mismatched-ID,
+or otherwise inconsistent JSON fall back to explicitly labeled format-only
+validation.
+
 **Register path** (`/api/register`): five layers, ordered cheapest-to-most-expensive.
 
 | Layer | Scope | Limit | Backend | Notes |
@@ -193,7 +201,7 @@ responses remain `Cache-Control: private, no-store`.
 | Client lockfile | Per machine (SHA-256 fingerprint) | 3 per 24h | `~/.dmv-agent/registrations.json` | CLI/MCP only. Advisory — easily bypassed. |
 | Worker: Turnstile | Per browser request | Pass/fail | Cloudflare Turnstile siteverify | Browser path only. Validates `success` + `hostname` + `action: dmv_register`. CAPTCHA runs BEFORE shared counters. |
 | Worker: shared CF | Per email, per IP+email | 5 per 60s, 4 per 60s | CF Workers Rate Limiting API | Bindings `RL_OTP_EMAIL` (ns `4005`) and `RL_OTP_IP_EMAIL` (ns `4007`). Both `namespace_id` values are SHARED at the CF account level with `agentCommunity_PAGE`. |
-| Worker: KV cooldown | Per machine fingerprint | Threshold-then-hold | DMV-local `REGISTER_COOLDOWN_KV` | CLI/MCP only. Key prefix `dmv:register:fingerprint:<sha256>`. Not shared with PAGE. |
+| Worker: exact fingerprint budget | Per SHA-256 machine-fingerprint hash | 3 successful mints per rolling 24h | `REGISTER_FINGERPRINT_LIMITER` SQLite Durable Object | CLI/MCP only. A claim reserves capacity before upstream; fresh mints commit, explicit failures/replays release, and abandoned claims conservatively count until their window expires. Durable Object failure is fail-closed. |
 | DB: lifetime cap | Per email, lifetime | 5 (unendorsed) / 12 (endorsed) | Postgres | Inside `register-agent` edge function. Backstop for slow-burn abuse. |
 | DB: unique constraint | Per cert ID | Deterministic dedup | Postgres | Catches re-registration of identical inputs. |
 
@@ -307,7 +315,7 @@ Database:        RLS denies all anon access
 | Threat | Mitigation |
 |--------|-----------|
 | Spam registrations (browser) | Cloudflare Turnstile (server-side hostname + `dmv_register` action check) + shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared with `agentCommunity_PAGE` at the CF account level) + DB lifetime cap 5/email (12 if endorsed). CAPTCHA always runs before counters. |
-| Spam registrations (CLI/MCP) | Machine fingerprint required + same shared CF rate limits + DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`) + DB lifetime cap. Headless clients can't solve Turnstile, so fingerprint substitutes. |
+| Spam registrations (CLI/MCP) | Machine fingerprint required + same shared CF rate limits + exact `REGISTER_FINGERPRINT_LIMITER` claim/mint budget + DB lifetime cap. Headless clients cannot solve Turnstile, so the hashed fingerprint selects the DMV-local Durable Object. |
 | Name squatting | Pre-registration model — multiple users can claim the same domain. Magic link email verifies identity. |
 | Credential theft | No credentials in client code. Anon key removed. The Worker owns public `/api/register` and `/api/lookup`; `TURNSTILE_SECRET_KEY` and `DMV_PROXY_SECRET` are encrypted Worker secrets, and `SUPABASE_SERVICE_ROLE_KEY` exists only inside Edge Functions. |
 | Data exfil | Worker `/api/lookup` returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`. No email, IP, operator name, domain record, timestamps, description, or metadata. |
@@ -345,7 +353,7 @@ The DMV is one piece of a larger ecosystem:
 | **AID** | DNS-based Agent Identity & Discovery protocol | aid.agentcommunity.org |
 | **DMV** | Pre-registration terminal + badge + API (this repo) | dmv.agentcommunity.org |
 
-The DMV serves as the **identity layer for the pre-ICANN era**. Before `.agent` domains exist in DNS, the DMV certificate ID is the verifiable agent identity. When `.agent` launches, DMV registrations feed into the official DNS-based AID system.
+The DMV provides pre-registration certificates before `.agent` exists in DNS. If `.agent` is approved, DMV registrations could inform future allocation policies submitted for ICANN approval, and an allocated domain could independently publish an AID record. Neither outcome is guaranteed by a DMV certificate.
 
 ## Agent-facing content surfaces
 

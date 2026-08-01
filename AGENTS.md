@@ -2,7 +2,9 @@
 
 Terse docs for agents. File-by-file, function-by-function.
 
-**Deployment:** Cloudflare Workers Static Assets + Cloudflare Container (Skia card renderer). Worker `dmv-agentcommunity` on Taqanu account, instance type `lite`. The live lookup rollout landed on merged `main` `fabafe6` (PR #20, including the `redirect: 'manual'` runtime fix) as Worker version `d9755e66-3883-4970-be84-a59307011f14`, created `2026-07-22T12:01:52.501Z`. Future changes must retain the Durable Object migrations/export/binding in a roll-forward; never roll back to pre-v2. Full evidence and recovery steps: `CLOUDFLARE.md` and `packages/dmv-agent/DEPLOY.md`.
+**Deployment:** Cloudflare Workers Static Assets + Cloudflare Container (Skia card renderer). Worker `dmv-agentcommunity` on Taqanu account, instance type `lite`. The live lookup rollout landed on merged `main` `fabafe6` (PR #20, including the `redirect: 'manual'` runtime fix) as Worker version `d9755e66-3883-4970-be84-a59307011f14`, created `2026-07-22T12:01:52.501Z`. Future changes must retain the Durable Object migrations/exports/bindings in a forward-only roll-forward: CardRenderer v1, CertificateLookupRateLimiter v2, and RegistrationFingerprintRateLimiter v3. Never roll back to a Worker missing an already-deployed class or binding. Full evidence and recovery steps: `CLOUDFLARE.md` and `packages/dmv-agent/DEPLOY.md`.
+
+**Registration fingerprint contract:** CLI/MCP traffic hashes `machine_fingerprint` and selects one `REGISTER_FINGERPRINT_LIMITER` SQLite Durable Object per hash. A transactional claim reserves one of three rolling-24h mint slots before upstream; fresh 201 mints commit, explicit failure/replay outcomes release, and abandoned claims conservatively count until the window expires. Durable Object failure fails closed. Raw IPs/fingerprints and internal claim IDs must never enter object storage, logs, or public responses.
 
 **Certificate lookup contract (live as of 2026-07-22):** The only public network lookup is `GET https://dmv.agentcommunity.org/api/lookup?id=CERT-ID`. Certificate IDs only; domain lookup is removed. The Worker applies coarse `RL_CERT_LOOKUP` at 60/60 and `CERT_LOOKUP_LIMITER` for exact atomic 30/60 accounting, caches issued results for 300s and typed-not-found results for 60s in `BADGE_CACHE_KV`, and returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`. Durable Object failure, non-200 upstream, or malformed typed envelope fails closed as uncached unavailable. `issued: true` means a matching registration row exists, not that operator email verification, `.agent` allocation, or DNS delegation completed. `supabase/functions/lookup-agent` is the deployed `DMV_PROXY_SECRET`-gated internal Worker upstream, not a client API; secretless direct access returns `403 direct_access_deprecated`.
 
@@ -23,6 +25,7 @@ fonts/              → PPSupply font files (4 .otf files)
 models/             → 3D models (tv1.glb)
 worker/certificate-lookup.ts → Public Worker-only certificate lookup policy and response shaping
 worker/certificate-lookup-rate-limiter.ts → Exact SQLite DO lookup counter (v2 migration)
+worker/registration-fingerprint-rate-limiter.ts → Exact claim/mint budget per hashed fingerprint (v3 migration)
 supabase/functions/lookup-agent/index.ts → Secret-gated internal certificate-ID upstream
 ```
 

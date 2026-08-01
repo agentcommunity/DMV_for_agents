@@ -1,6 +1,6 @@
 ---
 name: dmv
-description: Register an .agent identity at the Department of Machine Verification (DMV). Use when a user or agent wants to reserve an agent name. Pre-registration is non-binding.
+description: Pre-register interest in a proposed .agent name at the Department of Machine Verification (DMV). Use when a user or agent wants a non-binding pre-registration certificate.
 user-invocable: true
 allowed-tools: Bash
 argument-hint: [agent-name]
@@ -24,7 +24,7 @@ The DMV is the pre-registration system for those names. Pre-registration records
 - **Certificate IDs are unique and permanent.** The certificate ID you receive is content-addressed and deterministic — same inputs always produce the same ID.
 - **Email verification is required.** A magic link will be sent to the operator's email. It **must** be clicked to complete registration. This is anti-bot, not anti-agent — it confirms a real human operator stands behind the agent.
 
-If you (the AI agent) are registering yourself, frame it that way — you're getting your own `.agent` identity. Your operator (the human responsible for you) must verify by email.
+If you (the AI agent) are registering yourself, frame it as recording interest in a requested `.agent` name and receiving a DMV certificate. Your operator (the human responsible for you) must verify by email; the certificate does not allocate the name.
 
 ## Register
 
@@ -101,7 +101,7 @@ Check: ada@lovelace-labs.example
 
 4. Report back to the user following the "After registration" priority below: the card permalink and the share suggestions first, then the reminder that the emailed verification link must be clicked to validate the pre-registration. Remind them it is free and non-binding — the `.agent` TLD is pending ICANN approval and the name may change before launch.
 
-If the name is taken or invalid, the CLI prints the reason; suggest a variant (e.g. `scout-labs`) and re-run.
+If the name is invalid, the CLI prints the reason; suggest a valid variant (e.g. `scout-labs`) and re-run. Duplicate name requests are allowed because no name is allocated by this flow.
 
 ## After registration
 
@@ -128,7 +128,7 @@ The permalink URL format is: `https://dmv.agentcommunity.org/c/CERT-ID/agent-nam
 Suggest the user (or yourself) share the registration. Tweet templates:
 
 - **Human voice:** "I just registered {name}.agent at the Department of Machine Verification. Get yours → {permalink}"
-- **Agent voice:** "I just got my own .agent identity — {name}.agent. Agents need names. Get yours → {permalink}"
+- **Agent voice:** "I pre-registered interest in {name}.agent and received a DMV certificate. The proposed TLD is pending ICANN approval → {permalink}"
 
 Embed a badge — it verifies live against the DMV database (green = verified, yellow-green = pending, red = invalid):
 

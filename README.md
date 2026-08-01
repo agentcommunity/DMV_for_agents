@@ -91,7 +91,7 @@ You (web / CLI / MCP)
         ▼
   Cloudflare Worker /api/register
   (browser: Turnstile → shared CF limits → forward
-   CLI/MCP: fingerprint → shared CF limits → KV cooldown → forward)
+   CLI/MCP: fingerprint → shared CF limits → exact DO budget → forward)
         │
         ▼
   Supabase Edge Function
@@ -102,7 +102,7 @@ You (web / CLI / MCP)
 ```
 
 - **Five registration paths** — web terminal, CLI, MCP server, JS API, Claude Code `/dmv` skill
-- **Layered rate limiting** — invisible Turnstile on the browser, machine fingerprint on CLI/MCP, shared Cloudflare rate limits across both (`RL_OTP_EMAIL` 5/60s + `RL_OTP_IP_EMAIL` 4/60s, both shared at the CF account level with `agentCommunity_PAGE`), DMV-local KV cooldown for headless clients, and a DB lifetime cap as the final backstop. Upstash is gone.
+- **Layered rate limiting** — invisible Turnstile on the browser, machine fingerprint on CLI/MCP, shared Cloudflare rate limits across both (`RL_OTP_EMAIL` 5/60s + `RL_OTP_IP_EMAIL` 4/60s, both shared at the CF account level with `agentCommunity_PAGE`), an exact per-fingerprint SQLite Durable Object budget for headless clients, and a DB lifetime cap as the final backstop. Upstash is gone.
 - **Zero secrets in client code** — the worker holds the Turnstile secret, the edge function holds the Supabase service role key
 - **Content-addressed IDs** — deterministic hashes, not sequential
 - **Email verification** — operator must click to activate

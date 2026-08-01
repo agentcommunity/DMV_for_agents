@@ -33,8 +33,8 @@ The DMV (Department of Machine Verification) is the identity pre-registration sy
       │  3. Shared CF rate limiters (BOTH paths)            │
       │     ├─ RL_OTP_EMAIL    (5/60s, ns 4005, shared)    │
       │     └─ RL_OTP_IP_EMAIL (4/60s, ns 4007, shared)    │
-      │  4. CLI/MCP only: DMV-local KV cooldown             │
-      │     └─ REGISTER_COOLDOWN_KV (fingerprint hash)      │
+      │  4. CLI/MCP: exact fingerprint mint budget          │
+      │     └─ REGISTER_FINGERPRINT_LIMITER SQLite DO       │
       │  5. Forward to Supabase ────────────────────────────┼──┐
       │                                                     │  │
       │  Anti-abuse always runs BEFORE upstream forward.    │  │
@@ -148,7 +148,9 @@ Exposes `register_agent` and `verify_certificate` tools. `operator_name` is requ
 Both CLI and MCP enforce:
 - Machine fingerprint: SHA-256 of hostname + username + platform
 - Local lockfile: `~/.dmv-agent/registrations.json`, max 3 registrations per 24h
-- Lockfile is advisory — the worker's `REGISTER_COOLDOWN_KV` cooldown plus the shared CF rate limits are the real enforcement
+- Lockfile is advisory — the worker's transactional
+  `REGISTER_FINGERPRINT_LIMITER` budget plus the shared CF rate limits are the
+  real enforcement
 
 ### What agents get back
 
@@ -235,12 +237,12 @@ Request arrives at Worker /api/register
                │ pass
                ▼
 ┌─────────────────────────────────┐
-│  Layer 4: KV cooldown           │  CLI/MCP only.
-│  REGISTER_COOLDOWN_KV           │  Success-only counting: checked
-│  Key: dmv:register:fingerprint: │  BEFORE upstream, incremented
-│       <sha256(fingerprint)>     │  only AFTER a real mint.
-│                                 │  DMV-local namespace, NOT
-│                                 │  shared with PAGE.
+│  Layer 4: exact mint budget     │  CLI/MCP only.
+│  REGISTER_FINGERPRINT_LIMITER   │  One SQLite Durable Object per
+│  Name: SHA-256(fingerprint)     │  fingerprint hash. A slot is claimed
+│                                 │  BEFORE upstream, then committed only
+│                                 │  for a new mint or explicitly released.
+│                                 │  DMV-local, NOT shared with PAGE.
 └──────────────┬──────────────────┘
                │ pass — forward to Supabase
                ▼
@@ -259,11 +261,23 @@ Request arrives at Worker /api/register
          Registration created
 ```
 
-**Why CAPTCHA before counters:** if shared CF limiters ran first, an attacker submitting invalid Turnstile tokens could exhaust the 5/60s email quota for real users. Browser path: validate → Turnstile → counters → forward. CLI/MCP path: validate → fingerprint → counters → KV cooldown → forward. This ordering is non-negotiable per `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4.
+**Why CAPTCHA before counters:** if shared CF limiters ran first, an attacker submitting invalid Turnstile tokens could exhaust the 5/60s email quota for real users. Browser path: validate → Turnstile → counters → forward. CLI/MCP path: validate → fingerprint → counters → Durable Object claim → forward → complete the claim. This ordering is non-negotiable per `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4.
 
 **Cross-repo coupling with `agentCommunity_PAGE`:** the `4005` and `4007` namespace_ids are SHARED at the Cloudflare account level. A signup attempt that consumes email quota on PAGE has less email quota available on DMV. This is intentional — those two counters represent the same abuse surface across both properties. PAGE's `RL_AUTH` (4001) and `RL_OTP_IP` (4006) are NOT shared by DMV; plain-IP limits are too blunt for shared corporate networks and PAGE's live OTP path doesn't use `RL_AUTH` anyway. The coupling matters in three drift scenarios documented in `worker/index.ts` and `CLOUDFLARE.md`.
 
-**KV cooldown key design:** keys are SHA-256 hashed (`dmv:register:fingerprint:<hash>`). Fingerprints are never stored in KV as plaintext. Key prefix does not collide with PAGE's `KV_RATE_LIMIT` namespace because DMV uses a separate, DMV-local KV namespace (`REGISTER_COOLDOWN_KV` id `ec0cdc55c2f94267af84f0218c961a00`). PAGE's OTP cooldown uses `c0e0d88fff1a4c59805ab85c7a03100f` — fully separate. The stored value is `{ count, firstAt }` JSON (`worker/rate-limit-kv.ts`), not a bare counter: `firstAt` is the epoch-ms timestamp of the first successful mint in the current window, which lets `Retry-After` report the actual remaining window instead of a flat `cooldownSeconds`. Only successful mints (upstream 201, not an `already_recorded` replay) increment `count` — `checkKvCooldown` runs before the upstream call and blocks at `count >= threshold` without writing anything; `incrementKvCooldown` runs after, only on an actual new-certificate mint (`worker/register-fingerprint-cooldown.ts`). `FINGERPRINT_COOLDOWN_THRESHOLD` is `3`: 3 successful mints per machine fingerprint per rolling 24h window, the 4th blocked.
+**Exact fingerprint-budget design:** the Worker hashes the machine fingerprint
+with SHA-256 and uses that hash only as the Durable Object name. One
+`RegistrationFingerprintRateLimiter` instance therefore serializes every claim
+for that fingerprint, while its SQLite storage contains only claim IDs and
+timestamps — never a raw fingerprint or IP address. A transaction reserves one
+of exactly three rolling 24-hour slots before the upstream request. A fresh
+`201` mint commits the slot; upstream failures and `already_recorded` replays
+release it. A claim whose completion message is lost is conservatively counted
+as a success after its 60-second lease, then expires on the normal 24-hour
+rolling boundary. This fail-safe prevents a crash between mint and completion
+from reopening a fourth slot. `Retry-After` is derived from the oldest committed
+or conservatively recovered slot. The retained `REGISTER_COOLDOWN_KV` binding is
+unused compatibility state and is not part of enforcement.
 
 **Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `429` with `{ error: 'fingerprint_cooldown', message: '...', retry_after_seconds }`, where `Retry-After` reflects the honest remaining time left in that fingerprint's 24h window (derived from `firstAt`), not a flat duration. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
 
@@ -381,13 +395,13 @@ The deployed `lookup-agent` Edge Function removes permissive public CORS and is 
 |-----------|-----------|-------|
 | Web UI (static) | Cloudflare Workers Static Assets (`dist/`) | index.html + JS/CSS/fonts/models, no SSR |
 | API routes (`/api/card`, `/api/og`) | Cloudflare Worker → L1 (`caches.default`) → R2 → Cloudflare Container | Both served by the same Skia renderer (`@napi-rs/canvas`); container only invoked on first miss |
-| Registration anti-abuse (`/api/register`) | Cloudflare Worker (`handleRegister`) | Turnstile + shared CF rate limits + DMV-local KV cooldown. Forwards to Supabase. |
+| Registration anti-abuse (`/api/register`) | Cloudflare Worker (`handleRegister`) | Turnstile + shared CF rate limits + exact transactional SQLite Durable Object fingerprint budget. Forwards to Supabase. |
 | Certificate verification (`/api/lookup`) | Cloudflare Worker (`handleCertificateLookup`) | Live lookup boundary with format validation, rate limiting, caching, and minimized responses. Forwards certificate IDs only to Supabase. Production evidence: `fabafe6` / Worker `d9755e66-3883-4970-be84-a59307011f14`. |
 | Permalink crawler OG | Cloudflare Worker HTMLRewriter | `worker/index.ts handlePermalink` — streams index.html and injects per-card `og:*` / `twitter:*` tags for crawler UAs |
 | `/badge/*` | Cloudflare Worker proxy → Supabase Edge Function | `handleBadge` forwards with header hygiene + path-traversal defense |
 | Edge functions (register, lookup, badge) | Supabase Edge Functions (Deno) | Holds service role key. `register-agent` and `lookup-agent` are live internal Worker upstreams gated by `DMV_PROXY_SECRET`; lookup returns typed HTTP 200 `issued`/`not_found` envelopes. |
 | Database | Supabase PostgreSQL | RLS denies anon, service key bypasses |
-| Rate limiting (DMV) | Cloudflare Rate Limiting API + SQLite Durable Object + Workers KV | Registration uses `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` shared with PAGE. Lookup uses coarse `RL_CERT_LOOKUP` (60/60) followed by exact `CERT_LOOKUP_LIMITER` (30/60); `BADGE_CACHE_KV` holds lookup results only. Upstash removed. |
+| Rate limiting (DMV) | Cloudflare Rate Limiting API + SQLite Durable Objects + Workers KV cache | Registration uses `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` shared with PAGE followed by exact `REGISTER_FINGERPRINT_LIMITER` (3 successful mints per rolling 24h). Lookup uses coarse `RL_CERT_LOOKUP` (60/60) followed by exact `CERT_LOOKUP_LIMITER` (30/60); `BADGE_CACHE_KV` holds lookup results only. Upstash removed. |
 | NPM package | npm registry | `@agentcommunity/dmv-agent` + `dmv-agent` alias |
 
 ## Security Model
@@ -427,7 +441,7 @@ Everything below is shipped and live where noted:
 | Lookup exact 30/60s/IP + 300s/60s result cache + minimal six-field response | Live | `RL_CERT_LOOKUP`, `CERT_LOOKUP_LIMITER`, `BADGE_CACHE_KV`; calls 1–30 allowed, 31 denied, rollover verified |
 | Cloudflare Turnstile (browser) | Done | `worker/index.ts` `verifyTurnstileToken`, `index.html` widget mount |
 | Shared CF rate limits with PAGE | Done | `wrangler.jsonc` `RL_OTP_EMAIL`/`RL_OTP_IP_EMAIL` (ns 4005/4007) |
-| DMV-local KV fingerprint cooldown | Done | `worker/rate-limit-kv.ts`, `REGISTER_COOLDOWN_KV` binding |
+| Exact DMV-local fingerprint mint budget | Ready to deploy | `worker/registration-fingerprint-rate-limiter.ts`, `worker/register-fingerprint-cooldown.ts`, `REGISTER_FINGERPRINT_LIMITER` v3 SQLite Durable Object binding; old KV binding unused |
 | Upstash Redis REMOVED from edge fn | Done | `supabase/functions/register-agent/index.ts` (-90 lines) |
 | Lifetime cap (5/12 per email) | Done | `supabase/functions/register-agent/index.ts` |
 | `x-dmv-proxy` shared-secret gate on `register-agent` | Done | Live Edge Function requires the worker-set `DMV_PROXY_SECRET` value (constant-time compared, fail-closed); direct function URL returns 403 |
@@ -459,8 +473,8 @@ Supabase project without writing it to source. On a Docker-capable deployment
 host, require `docker info` and `pnpm cf:container:build`; the current
 2026-07-22 implementation host cannot satisfy this gate. Confirm account-wide
 namespace `1002` is assigned only to `RL_CERT_LOOKUP`, and confirm
-`CERT_LOOKUP_LIMITER`, `BADGE_CACHE_KV`, the v1/v2 migrations, and the shared
-secret binding.
+`CERT_LOOKUP_LIMITER`, `REGISTER_FINGERPRINT_LIMITER`, `BADGE_CACHE_KV`, the
+v1/v2/v3 migrations, and the shared secret binding.
 
 The completed rollout merged `main` `fabafe6` and observed Worker version
 `d9755e66-3883-4970-be84-a59307011f14` at `2026-07-22T12:01:52.501Z`, then
@@ -469,8 +483,9 @@ results, invalid `400`, direct secretless Edge `403`, exact 31st-call `429`, and
 next-minute recovery. `REEF-068-BD0Q` is the issued fixture; `ZZZZ-FFF-FFFD`
 is generated valid-but-absent. Retain this ordering for future changes.
 
-Never use Cloudflare rollback to a pre-v2 Worker. Retain both migrations, the
-Durable Object class export, and its binding in a compatible roll-forward. Edge
+After v3 deploys, never use Cloudflare rollback to a pre-v3 Worker. Retain all
+v1/v2/v3 migrations, Durable Object class exports, and their bindings in a
+compatible roll-forward. Edge
 failure stays fail-closed (`503`) while the Edge function rolls forward; do not
 restore direct access. After any future rollout, update the canonical status
 surfaces listed in `packages/dmv-agent/DEPLOY.md`, commit, and push that
@@ -525,13 +540,22 @@ Historical, captured after the 2026-04-08 shipping sprint:
 3. `supabase functions deploy badge` — already deployed historically
 4. **Provision worker secrets** in the Cloudflare dashboard for `dmv-agentcommunity`:
    - `TURNSTILE_SECRET_KEY` (encrypted secret) — `wrangler secret put` is currently blocked on this worker by a version-mismatch guard, see `docs/plans/2026-04-08-handoff-prompt.md` §69 for the operational workaround
-5. **Provision worker bindings** (one-time, done 2026-04-08):
-   - `REGISTER_COOLDOWN_KV` namespace via `pnpm wrangler kv namespace create REGISTER_COOLDOWN_KV` (+ `--preview`), ids pasted into `wrangler.jsonc`
-6. `pnpm cf:deploy` (or git auto-deploy via Cloudflare git integration on main) — frontend + worker + container: security headers + `/api/register` + Turnstile + shared CF rate limits + KV cooldown
-7. **Publish `@agentcommunity/dmv-agent@0.2.0` to npm** so `bunx dmv-agent register` fetches the worker-proxied version. Done 2026-04-08.
+5. **Preserve and provision worker bindings/migrations:** keep the existing v1
+   `CardRenderer` and v2 `CertificateLookupRateLimiter` migrations, then deploy
+   the forward-only v3 `RegistrationFingerprintRateLimiter` SQLite class and
+   `REGISTER_FINGERPRINT_LIMITER` binding together. The old
+   `REGISTER_COOLDOWN_KV` binding may remain during rollout but is unused.
+6. `pnpm cf:deploy` (or git auto-deploy via Cloudflare git integration on main)
+   — frontend + worker + container: security headers + `/api/register` +
+   Turnstile + shared CF rate limits + exact fingerprint Durable Object budget
+7. **Publish `@agentcommunity/dmv-agent@0.2.0` to npm** so the canonical scoped CLI fetches the worker-proxied version. Done 2026-04-08.
 8. **First-submission smoke test:** open `pnpm cf:tail` in another shell and submit a real browser registration. If Turnstile siteverify rejects with `invalid-input-secret`, the dashboard-pasted secret has a typo or trailing whitespace.
 
-All of the above is **complete as of 2026-04-08**. PAGE-side follow-ups (member count hygiene, members dashboard flag) are not blockers — the DMV registration flow works end-to-end without them.
+Steps 1–4 and the historical registration flow are complete. The v3
+registration-fingerprint Durable Object and binding in Steps 5–6 are code-ready
+on this branch but are not live until an authorized Cloudflare deployment is
+completed and verified. PAGE-side follow-ups (member count hygiene, members
+dashboard flag) are not blockers.
 
 ## Testing the Full Flow
 

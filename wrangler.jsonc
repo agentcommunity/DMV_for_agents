@@ -85,6 +85,10 @@
 			{
 				"name": "CERT_LOOKUP_LIMITER",
 				"class_name": "CertificateLookupRateLimiter"
+			},
+			{
+				"name": "REGISTER_FINGERPRINT_LIMITER",
+				"class_name": "RegistrationFingerprintRateLimiter"
 			}
 		]
 	},
@@ -99,6 +103,12 @@
 			"tag": "v2",
 			"new_sqlite_classes": [
 				"CertificateLookupRateLimiter"
+			]
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"RegistrationFingerprintRateLimiter"
 			]
 		}
 	],
@@ -121,8 +131,9 @@
 	// ──────────────────────────────────────────────────────────────────────────
 	// BADGE_CACHE_KV stores badge responses and prefixed certificate lookup cache
 	// entries.
-	// REGISTER_COOLDOWN_KV stores registration cooldowns only. Kept LOCAL to DMV
-	// — not shared with PAGE.
+	// REGISTER_COOLDOWN_KV is a retained legacy binding. Registration enforcement
+	// moved to REGISTER_FINGERPRINT_LIMITER (SQLite Durable Object, v3). No current
+	// request path reads or writes this namespace; keep it during the roll-forward.
 	"kv_namespaces": [
 		{
 			"binding": "BADGE_CACHE_KV",

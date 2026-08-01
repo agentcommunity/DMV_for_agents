@@ -101,11 +101,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         '60s per IP): it confirms whether a matching registration row actually exists in ' +
         'the database, not merely whether the ID is well-formed. "issued: true" means a ' +
         'registration row exists — it does NOT mean the operator completed email ' +
-        'verification or that DNS delegation exists. If the live check cannot complete ' +
-        '(network error, timeout, or the lookup service being unavailable), this tool ' +
-        'automatically falls back to an offline check-digit-only validation and clearly ' +
+        'verification or that DNS delegation exists. Network errors, timeouts, unexpected ' +
+        'HTTP statuses, and malformed/partial/inconsistent JSON cause this tool to ' +
+        'fall back to an offline check-digit-only validation and clearly ' +
         'labels the result as format-only — a network failure is never reported as ' +
-        '"not issued". Set format_only: true to skip the network call entirely and only ' +
+        '"not issued". An exact typed HTTP 503 unavailable response and a valid HTTP 429 ' +
+        'remain live but inconclusive; neither falls back or becomes a negative result. ' +
+        'Set format_only: true to skip the network call entirely and only ' +
         'validate the Luhn mod-36 check digit offline (fast, no rate limit, but does not ' +
         'confirm the certificate exists).',
       inputSchema: {

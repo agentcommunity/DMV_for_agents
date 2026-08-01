@@ -74,8 +74,7 @@ function installTarball(tarball) {
 function runInstalledVerify() {
   // --format-only: this smoke test proves the packed binary works end-to-end
   // (pack, install, invoke), not that dmv.agentcommunity.org/api/lookup is
-  // reachable or has published the lookup upstream (see AGENT_HANDOFF.md
-  // Task 8). The default live-check path is covered against a local mock
+  // reachable. The default live-check path is covered against a local mock
   // server in tests/dmv-agent-cli.test.mjs.
   const result = runSyncWithTimeout(installedBin(), ['verify', 'MESA-DD6-660J', '--format-only'], {
     cwd: projectDir,

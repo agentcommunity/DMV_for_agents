@@ -23,12 +23,11 @@ import { Container, getContainer } from '@cloudflare/containers';
 import { handleCertificateLookup } from './certificate-lookup';
 import { CertificateLookupRateLimiter } from './certificate-lookup-rate-limiter';
 import { CONTAINER_INSTANCE_ID } from './container-instance';
-import { checkKvCooldown, incrementKvCooldown } from './rate-limit-kv';
 import {
-  FINGERPRINT_COOLDOWN_SECONDS,
-  FINGERPRINT_COOLDOWN_THRESHOLD,
+  createFingerprintCooldownGate,
   runFingerprintGatedUpstream,
 } from './register-fingerprint-cooldown';
+import { RegistrationFingerprintRateLimiter } from './registration-fingerprint-rate-limiter';
 import { fetchRegistrationUpstream } from './registration-upstream';
 import { normalizeAgentName, validateRegistrationFields } from '../supabase/functions/_shared/registration-validation.ts';
 
@@ -54,7 +53,7 @@ export class CardRenderer extends Container {
   }
 }
 
-export { CertificateLookupRateLimiter };
+export { CertificateLookupRateLimiter, RegistrationFingerprintRateLimiter };
 
 // Ambient type for the Workers Rate Limiting API binding. Not exported by
 // @cloudflare/workers-types at all versions; define locally.
@@ -65,6 +64,7 @@ interface RateLimit {
 interface Env {
   CARD_RENDERER: DurableObjectNamespace<CardRenderer>;
   CERT_LOOKUP_LIMITER: DurableObjectNamespace;
+  REGISTER_FINGERPRINT_LIMITER: DurableObjectNamespace;
   CARD_CACHE: R2Bucket;
   // Workers Static Assets binding — points at the dist/ directory built by
   // scripts/build-cf.mjs. Used for: (1) crawler middleware HTMLRewriter
@@ -94,9 +94,6 @@ interface Env {
   // BADGE_CACHE_KV stores badge responses and prefixed certificate lookup cache
   // entries. Badge values are raw bytes with content-type stored in KV metadata.
   BADGE_CACHE_KV: KVNamespace;
-  // REGISTER_COOLDOWN_KV stores registration cooldowns only. Intentionally not
-  // shared with PAGE.
-  REGISTER_COOLDOWN_KV: KVNamespace;
   TURNSTILE_SECRET_KEY: string;
   // Shared secret sent to register-agent as the `x-dmv-proxy` header value;
   // register-agent accepts ONLY this secret (the legacy public `v1` constant was
@@ -1110,29 +1107,34 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
     machine_fingerprint: parsedBody.machine_fingerprint,
   };
 
-  // Gates the upstream call behind the fingerprint cooldown: check-only
-  // BEFORE calling upstream (a request already over budget never reaches
-  // register-agent), increment AFTER, and only for an actual new-certificate
-  // mint — never for a 4xx/5xx failure, and never for an `already_recorded`
-  // replay (which mints nothing). See worker/register-fingerprint-cooldown.ts
-  // for why this ordering is pulled into its own (unit-tested) module.
-  const gateResult = await runFingerprintGatedUpstream(
-    {
-      check: (key, threshold, cooldownSeconds) =>
-        checkKvCooldown(env.REGISTER_COOLDOWN_KV, key, threshold, cooldownSeconds),
-      increment: (key, threshold, cooldownSeconds) =>
-        incrementKvCooldown(env.REGISTER_COOLDOWN_KV, key, threshold, cooldownSeconds),
-    },
-    fingerprintCooldownKey,
-    FINGERPRINT_COOLDOWN_THRESHOLD,
-    FINGERPRINT_COOLDOWN_SECONDS,
-    () =>
-      fetchRegistrationUpstream(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
-        method: 'POST',
-        headers: upstreamHeaders,
-        body: JSON.stringify(upstreamBody),
-      }),
-  );
+  // Gates the upstream call behind an exact transactional fingerprint budget:
+  // claim one of three slots BEFORE calling upstream, then commit only an
+  // actual new-certificate mint or release a 4xx/5xx/`already_recorded`
+  // non-mint. See worker/register-fingerprint-cooldown.ts for why this ordering
+  // is pulled into its own unit-tested module.
+  let gateResult;
+  try {
+    gateResult = await runFingerprintGatedUpstream(
+      createFingerprintCooldownGate(env.REGISTER_FINGERPRINT_LIMITER),
+      fingerprintCooldownKey,
+      () =>
+        fetchRegistrationUpstream(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
+          method: 'POST',
+          headers: upstreamHeaders,
+          body: JSON.stringify(upstreamBody),
+        }),
+    );
+  } catch (error) {
+    console.error('[register] exact fingerprint limiter failed', { error });
+    emitRegisterAnalytics(env, 'fingerprint_limiter_unavailable', fingerprintHash ?? 'unknown', Date.now() - startedAt);
+    return jsonResponse(
+      {
+        error: 'registration_unavailable',
+        message: 'Registration is temporarily unavailable. Please try again shortly.',
+      },
+      503,
+    );
+  }
 
   if (gateResult.blocked) {
     emitRegisterAnalytics(

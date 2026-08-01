@@ -83,7 +83,7 @@ being served.
 | `/models/tv1.glb`, `/audio/*`, `/css/*`, `/js/*`, etc. | Workers Static Assets | Direct edge cache, free egress |
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
-| `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint for browser, CLI, MCP, and JS API. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (server-side hostname + `dmv_register` action check) → shared CF rate limiters → forward to Supabase. CLI/MCP path: validate JSON → require `machine_fingerprint` → shared CF rate limiters → DMV-local KV fingerprint cooldown → forward. Anti-abuse ordering matches `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md` §3, §4 — CAPTCHA always runs before shared counters |
+| `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint. Browser path: validate → Turnstile → shared CF limits → forward. CLI/MCP path: validate → require `machine_fingerprint` → shared CF limits → exact `REGISTER_FINGERPRINT_LIMITER` SQLite Durable Object claim → forward → commit only a fresh mint or release an explicit non-mint. Pending claims count toward the three-slot rolling-24h budget; abandoned claims conservatively count, and Durable Object failure fails closed. |
 | `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | **Live 2026-07-22:** merged `main` `fabafe6` (PR #20) is deployed as version `d9755e66-3883-4970-be84-a59307011f14` created `2026-07-22T12:01:52.501Z`. The only public certificate lookup; certificate IDs only and domain lookup is removed. `RL_CERT_LOOKUP` is a coarse 60/60 filter; `CERT_LOOKUP_LIMITER` is the exact 30/60 authority before the KV result cache. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
@@ -129,9 +129,10 @@ eyeball the bake-off output (`pnpm cf:test:render` — see below).
 | `worker/index.ts` | Worker entry — routes, L1/R2/container cache hierarchy, HTMLRewriter permalink middleware, public `/api/register` and `/api/lookup`, `/badge/*` Supabase proxy, cron prewarm |
 | `worker/certificate-lookup.ts` | Worker-only public lookup policy: certificate-ID validation, coarse-filter/exact-DO ordering, result cache, upstream secret, typed envelope validation, minimal response shaping |
 | `worker/certificate-lookup-rate-limiter.ts` | SQLite Durable Object for atomic fixed-minute 30/60 accounting per SHA-256 hashed IP; v2 migration |
-| `worker/rate-limit-kv.ts` | DMV-local KV helper used only for the CLI/MCP registration fingerprint cooldown in `REGISTER_COOLDOWN_KV` |
+| `worker/registration-fingerprint-rate-limiter.ts` | SQLite Durable Object for exact per-hashed-fingerprint claim/mint accounting; v3 migration |
+| `worker/register-fingerprint-cooldown.ts` | Worker/DO composition: claim before upstream, commit fresh mint, release explicit non-mint, fail closed |
 | `worker/container-instance.ts` | **Generated** by `scripts/build-cf.mjs` — content-hash of container sources that doubles as the Durable Object instance ID |
-| `wrangler.jsonc` | Static Assets + Container/R2 bindings, unchanged CardRenderer v1 plus CertificateLookupRateLimiter v2 migration, cron, registration bindings, coarse `RL_CERT_LOOKUP`, and result-cache KV |
+| `wrangler.jsonc` | Static Assets + Container/R2 bindings; preserved CardRenderer v1 and CertificateLookupRateLimiter v2 plus forward-only RegistrationFingerprintRateLimiter v3; cron, shared limits, and caches |
 | `tsconfig.json` | TypeScript config for the worker |
 | `container/Dockerfile` | Node 20 Alpine + `@napi-rs/canvas` |
 | `container/package.json` | Container runtime deps (Hono + `@napi-rs/canvas`) |
@@ -198,8 +199,9 @@ gate for future rollouts.
 The completed rollout order was deliberately Worker first, then Edge. Configure the same generated
 `DMV_PROXY_SECRET` on Cloudflare and Supabase without printing it. Confirm
 account-wide native namespace `1002` is allocated to `RL_CERT_LOOKUP` without a
-collision, plus `CERT_LOOKUP_LIMITER`, `BADGE_CACHE_KV`, and unchanged v1/new v2
-migrations. Merge to `main` and treat the Cloudflare Git automatic build as the
+collision, plus `CERT_LOOKUP_LIMITER`, `REGISTER_FINGERPRINT_LIMITER`,
+`BADGE_CACHE_KV`, and unchanged v1/v2/v3 migrations. Merge to `main` and treat
+the Cloudflare Git automatic build as the
 single authoritative Worker deployment. Record the previous version, merged
 SHA, and deployed version. Use manual `pnpm cf:deploy` only if automatic deploy
 did not start and the dashboard confirms no deploy is active; never run both.
@@ -215,9 +217,10 @@ badge, permalink, and validation-only registration also passed. No Supabase
 registration or member rows were deleted or mutated during verification; the
 limiter/cache smokes intentionally wrote Durable Object/KV operational state.
 
-The v2 SQLite migration is forward-only operational state. Never roll back to a
-pre-v2 Worker. Preserve the v1/v2 migrations, `CertificateLookupRateLimiter`
-export, and binding in a compatible roll-forward. If Worker smokes fail, stop
+The v2/v3 SQLite migrations are forward-only operational state. After v3 is
+deployed, never roll back to a pre-v3 Worker. Preserve v1 `CardRenderer`, v2
+`CertificateLookupRateLimiter`, v3 `RegistrationFingerprintRateLimiter`, and
+all corresponding bindings in a compatible roll-forward. If Worker smokes fail, stop
 before Edge and ship a new compatible Worker. If Edge fails after gating, leave
 the Worker's fail-closed 503 in place and roll Edge forward; never reopen legacy
 direct access. Full recovery and evidence steps are in
@@ -284,8 +287,11 @@ fail-closed without following a redirect that could receive the shared secret.
   (4 req/60s, namespace `4007`). Both `namespace_id` values are shared at
   the Cloudflare account level with `agentCommunity_PAGE`, so a single
   attacker spending email-keyed quota on PAGE has less of it available on
-  DMV. Plus the DMV-local KV cooldown via `REGISTER_COOLDOWN_KV` for
-  CLI/MCP machine fingerprints (`dmv:register:fingerprint:<sha256>`).
+  DMV. CLI/MCP traffic additionally uses one exact
+  `REGISTER_FINGERPRINT_LIMITER` SQLite Durable Object per SHA-256 fingerprint
+  hash. Claims reserve in-flight capacity before upstream; only fresh mints
+  commit, explicit failures/replays release, abandoned claims conservatively
+  count, and any Durable Object failure fails closed.
   CAPTCHA (Turnstile) runs BEFORE both shared counters on the browser
   path so invalid tokens cannot exhaust quota for real users. PAGE's
   `RL_AUTH` (4001) and `RL_OTP_IP` (4006) are intentionally NOT bound by

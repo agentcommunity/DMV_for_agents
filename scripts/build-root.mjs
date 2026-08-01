@@ -23,6 +23,12 @@ function runStep(label, command, args, options = {}) {
 runStep('Running root checks', process.execPath, ['--test', 'tests/text-surfaces.test.mjs']);
 runStep('Running web registration client tests', process.execPath, ['--test', 'tests/web-registration-client.test.mjs']);
 
+runStep(
+  'Running DMV lookup source contract tests',
+  process.execPath,
+  ['--import', 'tsx', '--test', 'tests/dmv-agent-lookup.test.ts'],
+);
+
 let tscBin;
 try {
   tscBin = requireFromCliPkg.resolve('typescript/bin/tsc');

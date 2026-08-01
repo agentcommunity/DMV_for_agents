@@ -23,10 +23,11 @@ package's tool to the same live lookup the main site uses.
 - Added a `format_only: true` argument (MCP) / `--format-only` flag (CLI) to
   skip the network call and only validate the offline Luhn check digit —
   this is the full extent of what the tool checked before this release.
-- If the live call fails for any reason (network error, timeout, malformed
-  response, or the lookup service reporting itself unavailable), the tool
-  **automatically falls back** to the offline check-digit validation instead
-  of erroring out. The response text always states plainly which check
+- Network errors, timeouts, unexpected HTTP statuses, and malformed, partial,
+  extra-field, mismatched-ID, or otherwise inconsistent JSON **automatically
+  fall back** to offline check-digit validation. An exact typed HTTP 503
+  `unavailable` envelope remains a live inconclusive result; it does not fall
+  back. The response text always states plainly which check
   actually ran (`(live check)` vs. `(format-only ...)`) — a network failure
   is never reported as "not issued".
 - CLI exit codes for `dmv-agent verify` changed: `0` = confirmed good
@@ -48,12 +49,23 @@ per-IP Durable Object one) has no `status` field, so it was falling into the
 generic JSON-shape check and being reported as "lookup returned a malformed
 response (HTTP 429)" — misleading, since the response was well-formed, and
 `retry_after_seconds` was silently dropped. `verifyCertificate()` now checks
-`response.status === 429` before the shape check and returns a distinct
+an exact HTTP 429 `{error, retry_after_seconds}` envelope before the result
+shape check and returns a distinct
 `rateLimited: true` result (plus `retryAfterSeconds` when the Worker's body
 included it). `formatVerificationResult()` reports it plainly ("live
 issuance check is rate limited right now... Retry after Ns.") and treats it
 as inconclusive, not a negative result — exit code stays `2`, and the MCP
 tool does not set `isError`.
+
+### Fixed — live lookup response validation is fail-safe
+
+The client now sends `redirect: "manual"` and requires the Worker's exact
+HTTP/body/ID/canonical-certificate-URL relationships. HTTP 200 accepts only
+the exact six-field `issued` or `not_found` union; HTTP 503 accepts only the
+exact six-field `unavailable` union as live/inconclusive; HTTP 429 accepts only
+the exact rate-limit envelope as live/inconclusive. Every unexpected status,
+redirect, partial object, extra field, mismatched ID, invalid canonical URL,
+or inconsistent boolean/status combination is inconclusive and format-only.
 
 ### Compatibility
 

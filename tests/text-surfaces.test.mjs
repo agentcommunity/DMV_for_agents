@@ -117,3 +117,44 @@ test('register-agent recovers exact existing certificates before lifetime-cap ch
     'exact existing certificate recovery must run before lifetime cap enforcement',
   );
 });
+
+test('active DMV copy keeps proposed .agent names conditional and AID non-binding', () => {
+  const skill = readFileSync('packages/dmv-agent/skills/dmv/SKILL.md', 'utf8');
+  const aboutPoster = readFileSync('js/AboutPoster.js', 'utf8');
+  const architecture = readFileSync('ARCHITECTURE.md', 'utf8');
+
+  assert.doesNotMatch(skill, /reserve an agent name/i);
+  assert.doesNotMatch(skill, /(?:your|their) own [`"]?\.agent(?:`|")? identity/i);
+  assert.doesNotMatch(aboutPoster, /pre-registrations[\s\S]{0,80}feed into the official/i);
+  assert.doesNotMatch(architecture, /registrations feed into the official DNS-based AID system/i);
+  assert.match(skill, /requested .*\.agent.*does not allocate/i);
+  assert.match(aboutPoster, /if \.agent is approved/i);
+  assert.match(architecture, /if `?\.agent`? is approved/i);
+});
+
+test('llms.txt repository links use the canonical DMV_for_agents repository', () => {
+  const llms = readFileSync('llms.txt', 'utf8');
+
+  assert.doesNotMatch(llms, /github\.com\/agentcommunity\/dmv(?:\/|\))/i);
+  assert.match(
+    llms,
+    /github\.com\/agentcommunity\/DMV_for_agents\/tree\/main\/packages\/dmv-agent/,
+  );
+});
+
+test('package docs distinguish fallback from typed live unavailability and rate limits', () => {
+  const docs = [
+    readFileSync('AGENT_HANDOFF.md', 'utf8'),
+    readFileSync('packages/dmv-agent/CHANGELOG.md', 'utf8'),
+    readFileSync('packages/dmv-agent/README.md', 'utf8'),
+    readFileSync('ARCHITECTURE.md', 'utf8'),
+  ].join('\n');
+
+  assert.match(docs, /typed HTTP 503 [`"]?unavailable[`"]?.*live.*inconclusive/is);
+  assert.match(docs, /HTTP 429.*live.*inconclusive/is);
+  assert.match(docs, /unexpected HTTP.*partial.*inconsistent.*format-only/is);
+  assert.doesNotMatch(
+    docs,
+    /(?:service|Worker) (?:reporting itself )?unavailable[^.]{0,120}falls? back/is,
+  );
+});

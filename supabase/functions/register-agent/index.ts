@@ -109,7 +109,8 @@ function existingRegistrationPayload(args: {
 // Proxy header gate — only the DMV worker at dmv.agentcommunity.org/api/register
 // is allowed to call this function (it is deployed with --no-verify-jwt, so this
 // header is its ONLY defense against direct internet callers who would bypass the
-// worker's Turnstile + rate limits + KV cooldown). The worker sets the shared
+// worker's Turnstile + shared limits + exact fingerprint Durable Object budget).
+// The worker sets the shared
 // secret `DMV_PROXY_SECRET` as the `x-dmv-proxy` header on every forwarded request
 // (see worker/index.ts handleRegister). Any direct POST to this Supabase URL
 // without a matching header value is rejected with 403.
