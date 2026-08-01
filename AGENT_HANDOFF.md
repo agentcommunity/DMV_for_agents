@@ -53,9 +53,13 @@ give a conclusive live-check result rather than the inconclusive
 `unavailable` fallback described above when this section was first written
 earlier the same day. Nothing was published to npm as part of the
 `verify_certificate` wiring change itself; `packages/dmv-agent/package.json`
-was bumped to `0.3.0` and the `dmv-agent` alias package's dependency range
-updated to `^0.3.0`, but both remain unpublished until someone explicitly
-runs `npm publish --access public` from `packages/dmv-agent`.
+was bumped to `0.3.0`, still unpublished until someone explicitly runs
+`npm publish --access public` from `packages/dmv-agent`. The `dmv-agent`
+alias still declares `@agentcommunity/dmv-agent@^0.2.1` in-tree — a `^0.3.0`
+range breaks `pnpm install --frozen-lockfile` (which the Cloudflare build
+uses) because `0.3.0` is not yet on the registry. Publish order: publish
+`@agentcommunity/dmv-agent@0.3.0` first, then bump the alias dependency to
+`^0.3.0` and publish the alias. See `packages/dmv-agent/CHANGELOG.md`.
 
 ## Current production state — registration and lookup live
 
