@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -79,7 +80,7 @@ test('four simultaneous claims reserve exactly three upstream slots', async (t) 
   assert.equal(decisions.filter((decision) => decision.allowed === true).length, 3);
   assert.equal(decisions.filter((decision) => decision.allowed === false).length, 1);
   const state = storage.values.get(STATE_KEY) as {
-    pending: Array<{ claimId: string; claimedAt: number }>;
+    pending: Array<{ claimDigest: string; claimedAt: number }>;
     successes: Array<number>;
   };
   assert.equal(state.pending.length, 3);
@@ -180,7 +181,7 @@ test('committed successes consume the rolling budget and expire after 24 hours',
   const afterWindow = await json(await limiter.fetch(request('/claim')));
   assert.equal(afterWindow.allowed, true);
   const state = storage.values.get(STATE_KEY) as {
-    pending: Array<{ claimId: string; claimedAt: number }>;
+    pending: Array<{ claimDigest: string; claimedAt: number }>;
     successes: Array<number>;
   };
   assert.deepEqual(state.successes, []);
@@ -201,7 +202,7 @@ test('malformed completion cannot release another request reservation', async ()
     assert.ok(response.status >= 400);
   }
 
-  const state = storage.values.get(STATE_KEY) as { pending: Array<{ claimId: string }> };
+  const state = storage.values.get(STATE_KEY) as { pending: Array<{ claimDigest: string }> };
   assert.equal(state.pending.length, 1);
 });
 
@@ -337,10 +338,20 @@ test('a delayed alarm preserves the horizon timestamp and a late completion cann
   );
 });
 
-test('stored state contains only claim ids and timestamps, never caller identity material', async () => {
+test('stored state contains only claim digests and timestamps, never raw claim tokens or caller identity', async () => {
   const { limiter, storage } = createLimiter();
-  await limiter.fetch(request('/claim'));
+  const claim = await json(await limiter.fetch(request('/claim')));
+  assert.equal(typeof claim.claim_id, 'string');
+  if (typeof claim.claim_id !== 'string') assert.fail('expected an opaque claim token');
 
-  const serialized = JSON.stringify(storage.values.get(STATE_KEY));
+  const state = storage.values.get(STATE_KEY) as {
+    pending: Array<{ claimDigest: string; claimedAt: number }>;
+  };
+  const expectedDigest = createHash('sha256').update(claim.claim_id).digest('hex');
+  assert.deepEqual(Object.keys(state.pending[0]).sort(), ['claimDigest', 'claimedAt']);
+  assert.equal(state.pending[0].claimDigest, expectedDigest);
+
+  const serialized = JSON.stringify(state);
+  assert.doesNotMatch(serialized, new RegExp(claim.claim_id));
   assert.doesNotMatch(serialized, /127\.0\.0\.1|cf-connecting-ip|machine_fingerprint/i);
 });

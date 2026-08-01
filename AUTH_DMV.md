@@ -269,9 +269,12 @@ Request arrives at Worker /api/register
 **Exact fingerprint-budget design:** the Worker hashes the machine fingerprint
 with SHA-256 and uses that hash only as the Durable Object name. One
 `RegistrationFingerprintRateLimiter` instance therefore serializes every claim
-for that fingerprint, while its SQLite storage contains only claim IDs and
-timestamps — never a raw fingerprint or IP address. A transaction reserves one
-of exactly three rolling 24-hour slots before the upstream request. A fresh
+for that fingerprint. It returns a random opaque completion token only across
+the internal Worker-to-object response, persists only that token's one-way
+SHA-256 digest and its timestamp, and hashes the token again before matching a
+completion. SQLite storage therefore never contains the raw completion token,
+fingerprint, or IP address. A transaction reserves one of exactly three rolling
+24-hour slots before the upstream request. A fresh
 well-formed `201` mint commits the slot. Only audited, well-formed pre-INSERT
 `400`/`403`/`409` responses and exact `200 already_recorded` replays release it.
 Every 5xx/546, malformed or unexpected response, body-read failure,

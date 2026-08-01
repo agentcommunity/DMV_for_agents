@@ -7,10 +7,11 @@ import {
 const STATE_KEY = 'fingerprint-budget';
 const WINDOW_MILLISECONDS = FINGERPRINT_COOLDOWN_SECONDS * 1_000;
 const PENDING_HORIZON_MILLISECONDS = FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000;
+const CLAIM_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 
 interface FingerprintBudgetState {
   successes: Array<number>;
-  pending: Array<{ claimId: string; claimedAt: number }>;
+  pending: Array<{ claimDigest: string; claimedAt: number }>;
 }
 
 function hasExactKeys(record: Record<string, unknown>, keys: Array<string>): boolean {
@@ -27,15 +28,22 @@ function isBudgetState(value: unknown): value is FingerprintBudgetState {
     && record.pending.every((claim) => {
       if (!claim || typeof claim !== 'object') return false;
       const pending = claim as Record<string, unknown>;
-      return hasExactKeys(pending, ['claimId', 'claimedAt'])
-        && typeof pending.claimId === 'string'
-        && pending.claimId.length > 0
+      return hasExactKeys(pending, ['claimDigest', 'claimedAt'])
+        && typeof pending.claimDigest === 'string'
+        && CLAIM_DIGEST_PATTERN.test(pending.claimDigest)
         && Number.isSafeInteger(pending.claimedAt)
         && (pending.claimedAt as number) >= 0;
     })
     && new Set(
-      (record.pending as Array<{ claimId: string }>).map((claim) => claim.claimId),
+      (record.pending as Array<{ claimDigest: string }>).map((claim) => claim.claimDigest),
     ).size === record.pending.length;
+}
+
+async function digestClaimToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function pruneSuccesses(successes: Array<number>, now: number): Array<number> {
@@ -121,9 +129,10 @@ export class RegistrationFingerprintRateLimiter {
       }
 
       const claimId = crypto.randomUUID();
+      const claimDigest = await digestClaimToken(claimId);
       await this.persist(transaction, {
         successes: current.successes,
-        pending: [...current.pending, { claimId, claimedAt: now }],
+        pending: [...current.pending, { claimDigest, claimedAt: now }],
       });
       return { allowed: true, claim_id: claimId } as const;
     });
@@ -149,11 +158,12 @@ export class RegistrationFingerprintRateLimiter {
       return badRequest();
     }
 
+    const claimDigest = await digestClaimToken(record.claim_id);
     const completed = await this.state.storage.transaction(async (transaction) => {
       const stored = await transaction.get<unknown>(STATE_KEY);
       if (stored === undefined || !isBudgetState(stored)) return false;
       const current = reconcileState(stored, Date.now());
-      if (!current.pending.some((claim) => claim.claimId === record.claim_id)) {
+      if (!current.pending.some((claim) => claim.claimDigest === claimDigest)) {
         await this.persist(transaction, current);
         return false;
       }
@@ -163,7 +173,7 @@ export class RegistrationFingerprintRateLimiter {
       if (record.minted === true) successes.push(now);
       await this.persist(transaction, {
         successes,
-        pending: current.pending.filter((claim) => claim.claimId !== record.claim_id),
+        pending: current.pending.filter((claim) => claim.claimDigest !== claimDigest),
       });
       return true;
     });
