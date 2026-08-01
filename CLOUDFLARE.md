@@ -83,7 +83,7 @@ being served.
 | `/models/tv1.glb`, `/audio/*`, `/css/*`, `/js/*`, etc. | Workers Static Assets | Direct edge cache, free egress |
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
-| `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint. Browser path: validate → Turnstile → shared CF limits → forward. The source-ready, not-yet-deployed v3 CLI/MCP path validates `machine_fingerprint`, applies shared limits, then claims `REGISTER_FINGERPRINT_LIMITER` before upstream. Explicit responses commit/release; ambiguous failures remain pending and abandoned claims count for 24 hours from lease expiry. Production remains on the pre-v3 KV cooldown until rollout verification. |
+| `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint. Browser path: validate → Turnstile → shared CF limits → forward. The source-ready, not-yet-deployed v3 CLI/MCP path validates `machine_fingerprint`, applies shared limits, then claims `REGISTER_FINGERPRINT_LIMITER` before upstream. A well-formed fresh 201 commits; only audited pre-INSERT 400/403/409 responses and exact 200 replays release. All uncertainty stays pending for a conservative 600-second remote-execution horizon, then counts for 24 hours. Production remains on the pre-v3 KV cooldown until rollout verification. |
 | `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | **Live 2026-07-22:** merged `main` `fabafe6` (PR #20) is deployed as version `d9755e66-3883-4970-be84-a59307011f14` created `2026-07-22T12:01:52.501Z`. The only public certificate lookup; certificate IDs only and domain lookup is removed. `RL_CERT_LOOKUP` is a coarse 60/60 filter; `CERT_LOOKUP_LIMITER` is the exact 30/60 authority before the KV result cache. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
@@ -130,7 +130,7 @@ eyeball the bake-off output (`pnpm cf:test:render` — see below).
 | `worker/certificate-lookup.ts` | Worker-only public lookup policy: certificate-ID validation, coarse-filter/exact-DO ordering, result cache, upstream secret, typed envelope validation, minimal response shaping |
 | `worker/certificate-lookup-rate-limiter.ts` | SQLite Durable Object for atomic fixed-minute 30/60 accounting per SHA-256 hashed IP; v2 migration |
 | `worker/registration-fingerprint-rate-limiter.ts` | SQLite Durable Object for exact per-hashed-fingerprint claim/mint accounting; v3 migration |
-| `worker/register-fingerprint-cooldown.ts` | Worker/DO composition: claim before upstream, commit fresh mint, release explicit non-mint, fail closed |
+| `worker/register-fingerprint-cooldown.ts` | Worker/DO composition: claim before upstream, classify closed outcomes, preserve every ambiguous claim, fail closed |
 | `worker/container-instance.ts` | **Generated** by `scripts/build-cf.mjs` — content-hash of container sources that doubles as the Durable Object instance ID |
 | `wrangler.jsonc` | Static Assets + Container/R2 bindings; preserved CardRenderer v1 and CertificateLookupRateLimiter v2 plus forward-only RegistrationFingerprintRateLimiter v3; cron, shared limits, and caches |
 | `tsconfig.json` | TypeScript config for the worker |
@@ -291,12 +291,16 @@ fail-closed without following a redirect that could receive the shared secret.
   attacker spending email-keyed quota on PAGE has less of it available on
   DMV. CLI/MCP traffic additionally uses one exact
   `REGISTER_FINGERPRINT_LIMITER` SQLite Durable Object per SHA-256 fingerprint
-  hash. Claims reserve in-flight capacity before upstream; only fresh mints
-  commit, explicit failures/replays release, abandoned claims conservatively
-  count from lease expiry for a full 24 hours, and any Durable Object failure
-  fails closed. Upstream has a 45-second deadline inside the 60-second claim
-  lease; ambiguous timeout/transport failures remain pending rather than being
-  released. Production continues to use the pre-v3 KV cooldown until this
+  hash. Claims reserve in-flight capacity before upstream. Only a well-formed
+  fresh `201` commits; only well-formed pre-INSERT `400`/`403`/`409` responses
+  and exact `200 already_recorded` replays release. Every 5xx/546,
+  malformed/unexpected response, body-read failure, timeout/abort, or transport
+  failure stays pending. The 45-second local response deadline does not cancel
+  remote execution. The conservative pending horizon is 600 seconds: the
+  documented 150-second Supabase request-idle timeout plus its 400-second Edge
+  Function wall clock plus a 50-second safety margin. At that horizon an
+  abandoned claim becomes a possible success and counts for a full 24 hours;
+  any Durable Object failure fails closed. Production continues to use the pre-v3 KV cooldown until this
   branch is deployed and verified.
   CAPTCHA (Turnstile) runs BEFORE both shared counters on the browser
   path so invalid tokens cannot exhaust quota for real users. PAGE's

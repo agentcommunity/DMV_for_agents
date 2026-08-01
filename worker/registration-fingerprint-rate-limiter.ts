@@ -1,12 +1,12 @@
 import {
-  FINGERPRINT_CLAIM_LEASE_SECONDS,
+  FINGERPRINT_PENDING_HORIZON_SECONDS,
   FINGERPRINT_COOLDOWN_SECONDS,
   FINGERPRINT_COOLDOWN_THRESHOLD,
 } from './register-fingerprint-cooldown';
 
 const STATE_KEY = 'fingerprint-budget';
 const WINDOW_MILLISECONDS = FINGERPRINT_COOLDOWN_SECONDS * 1_000;
-const CLAIM_LEASE_MILLISECONDS = FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
+const PENDING_HORIZON_MILLISECONDS = FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000;
 
 interface FingerprintBudgetState {
   successes: Array<number>;
@@ -44,13 +44,13 @@ function pruneSuccesses(successes: Array<number>, now: number): Array<number> {
 }
 
 function reconcileState(state: FingerprintBudgetState, now: number): FingerprintBudgetState {
-  const claimCutoff = now - CLAIM_LEASE_MILLISECONDS;
+  const claimCutoff = now - PENDING_HORIZON_MILLISECONDS;
   const abandoned = state.pending.filter((claim) => claim.claimedAt <= claimCutoff);
   return {
     successes: pruneSuccesses(
       [
         ...state.successes,
-        ...abandoned.map((claim) => claim.claimedAt + CLAIM_LEASE_MILLISECONDS),
+        ...abandoned.map((claim) => claim.claimedAt + PENDING_HORIZON_MILLISECONDS),
       ],
       now,
     ),
@@ -112,7 +112,7 @@ export class RegistrationFingerprintRateLimiter {
             [
               ...current.successes,
               ...current.pending.map(
-                (claim) => claim.claimedAt + CLAIM_LEASE_MILLISECONDS,
+                (claim) => claim.claimedAt + PENDING_HORIZON_MILLISECONDS,
               ),
             ].sort((left, right) => left - right),
             now,
@@ -189,7 +189,7 @@ export class RegistrationFingerprintRateLimiter {
       : Number.POSITIVE_INFINITY;
     const nextClaimExpiry = state.pending.length > 0
       ? Math.min(...state.pending.map(
-        (claim) => claim.claimedAt + FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000,
+        (claim) => claim.claimedAt + FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000,
       ))
       : Number.POSITIVE_INFINITY;
     const nextAlarm = Math.min(nextSuccessExpiry, nextClaimExpiry);

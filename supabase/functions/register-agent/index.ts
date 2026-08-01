@@ -420,14 +420,19 @@ export async function handleRegisterAgent(
   // Counted after the insert so the new row is included (#1 for the first
   // registrant). Approximate under concurrent inserts, which is fine for a
   // cosmetic counter. Fail OPEN: the registration already succeeded, so a
-  // count error just omits the field rather than failing the request.
+  // structured error or rejected query just omits the field rather than
+  // turning a committed INSERT into an ambiguous 5xx response.
   let queueNumber: number | null = null
-  const { count: globalCount, error: queueCountError } = await supabase
-    .from('registrations')
-    .select('*', { count: 'exact', head: true })
-    .not('certificate_id', 'is', null)
-  if (!queueCountError && typeof globalCount === 'number' && globalCount > 0) {
-    queueNumber = globalCount
+  try {
+    const { count: globalCount, error: queueCountError } = await supabase
+      .from('registrations')
+      .select('*', { count: 'exact', head: true })
+      .not('certificate_id', 'is', null)
+    if (!queueCountError && typeof globalCount === 'number' && globalCount > 0) {
+      queueNumber = globalCount
+    }
+  } catch {
+    queueNumber = null
   }
 
   return new Response(

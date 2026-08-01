@@ -21,6 +21,7 @@ interface MockResponse {
   data?: unknown
   error?: { message: string; code?: string; details?: string } | null
   count?: number | null
+  reject?: Error
 }
 
 interface QueryStep {
@@ -72,6 +73,7 @@ function createSupabaseMock(responses: Array<MockResponse>) {
             reject: (reason: unknown) => void,
           ) {
             record()
+            if (response.reject) return Promise.reject(response.reject).then(resolve, reject)
             return Promise.resolve({
               data: response.data ?? null,
               error: response.error ?? null,
@@ -261,6 +263,31 @@ Deno.test('stores a hashed client IP and never the raw value', async () => {
     assert.ok(typeof metadata.client_ip_hash === 'string', 'metadata.client_ip_hash must be a string')
     assert.match(metadata.client_ip_hash as string, HASH_RE, 'metadata.client_ip_hash')
     assert.equal(metadata.client_ip_hash, await sha256Hex(rawIp))
+  })
+})
+
+Deno.test('a rejected nonessential queue count still returns the committed 201 mint', async () => {
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+  }, async () => {
+    const mock = createSupabaseMock([
+      { data: null, error: null },
+      { count: 0, error: null },
+      { error: null },
+      { reject: new Error('queue count transport failed') },
+    ])
+
+    const response = await handleRegisterAgent(
+      registerRequest(validBody({ agent_name: 'queue-failure-agent' })),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+
+    assert.equal(response.status, 201)
+    assert.equal(mock.insertedRows.length, 1)
+    const payload = await response.json()
+    assert.equal(payload.queue_number, null)
   })
 })
 

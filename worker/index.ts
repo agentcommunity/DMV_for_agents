@@ -1108,10 +1108,10 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
   };
 
   // Gates the upstream call behind an exact transactional fingerprint budget:
-  // claim one of three slots BEFORE calling upstream, then commit only an
-  // actual new-certificate mint or release a 4xx/5xx/`already_recorded`
-  // non-mint. See worker/register-fingerprint-cooldown.ts for why this ordering
-  // is pulled into its own unit-tested module.
+  // claim one of three slots BEFORE calling upstream, then commit only a
+  // well-formed fresh 201. Release only an audited pre-INSERT 400/403/409 or
+  // exact 200 `already_recorded` replay; every 5xx/546 or malformed/unexpected
+  // outcome stays pending. See worker/register-fingerprint-cooldown.ts.
   let gateResult;
   try {
     gateResult = await runFingerprintGatedUpstream(

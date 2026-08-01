@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  FINGERPRINT_CLAIM_LEASE_SECONDS,
+  FINGERPRINT_PENDING_HORIZON_SECONDS,
   FINGERPRINT_COOLDOWN_SECONDS,
   FINGERPRINT_COOLDOWN_THRESHOLD,
 } from '../worker/register-fingerprint-cooldown.ts';
@@ -173,13 +173,13 @@ test('an abandoned claim is conservatively counted, then recovers after its 24h 
   const { limiter, storage } = createLimiter();
   const abandoned = await json(await limiter.fetch(request('/claim')));
 
-  now += FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
+  now += FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000;
   await limiter.alarm();
   let state = storage.values.get(STATE_KEY) as {
     successes: Array<number>;
     pending: Array<unknown>;
   };
-  const recoveredAt = 1_752_537_600_000 + FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
+  const recoveredAt = 1_752_537_600_000 + FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000;
   assert.deepEqual(state.successes, [recoveredAt]);
   assert.deepEqual(state.pending, []);
   assert.equal(
@@ -196,7 +196,7 @@ test('an abandoned claim is conservatively counted, then recovers after its 24h 
   assert.equal(state.pending.length, 1);
 });
 
-test('an abandoned claim cannot reopen a slot before 24 hours after its lease expires', async (t) => {
+test('an abandoned claim cannot reopen a slot before 24 hours after its pending horizon', async (t) => {
   const claimedAt = 1_752_537_600_000;
   let now = claimedAt;
   t.mock.method(Date, 'now', () => now);
@@ -207,29 +207,58 @@ test('an abandoned claim cannot reopen a slot before 24 hours after its lease ex
   );
 
   // The old claimedAt-based recovery incorrectly reopened all three slots here,
-  // up to one full lease before the latest possible mint's 24-hour window.
+  // before the latest possible mint's full 24-hour window.
   now = claimedAt + FINGERPRINT_COOLDOWN_SECONDS * 1_000;
   const tooEarly = await json(await limiter.fetch(request('/claim')));
   assert.equal(tooEarly.allowed, false);
-  assert.equal(tooEarly.retry_after_seconds, FINGERPRINT_CLAIM_LEASE_SECONDS);
+  assert.equal(tooEarly.retry_after_seconds, FINGERPRINT_PENDING_HORIZON_SECONDS);
 
   now = claimedAt
-    + FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000
+    + FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000
     + FINGERPRINT_COOLDOWN_SECONDS * 1_000;
   const afterFullWindow = await json(await limiter.fetch(request('/claim')));
   assert.equal(afterFullWindow.allowed, true);
 });
 
-test('a delayed alarm preserves the lease-expiry timestamp and a late completion cannot shorten or double count it', async (t) => {
+test('a timed-out caller remains reserved through the latest conservative remote mint horizon', async (t) => {
+  const claimedAt = 1_752_537_600_000;
+  let now = claimedAt;
+  t.mock.method(Date, 'now', () => now);
+  const { limiter, storage } = createLimiter();
+
+  await Promise.all(
+    Array.from({ length: FINGERPRINT_COOLDOWN_THRESHOLD }, () => limiter.fetch(request('/claim'))),
+  );
+
+  now = claimedAt + 599_999;
+  const beforeRemoteExecutionBound = await json(await limiter.fetch(request('/claim')));
+  assert.equal(beforeRemoteExecutionBound.allowed, false);
+  assert.equal(beforeRemoteExecutionBound.retry_after_seconds, 86_401);
+
+  now = claimedAt + 600_000;
+  await limiter.alarm();
+  assert.deepEqual(storage.values.get(STATE_KEY), {
+    successes: [claimedAt + 600_000, claimedAt + 600_000, claimedAt + 600_000],
+    pending: [],
+  });
+
+  now = claimedAt + 600_000 + FINGERPRINT_COOLDOWN_SECONDS * 1_000 - 1;
+  assert.equal((await json(await limiter.fetch(request('/claim')))).allowed, false);
+
+  now += 1;
+  assert.equal((await json(await limiter.fetch(request('/claim')))).allowed, true);
+});
+
+test('a delayed alarm preserves the horizon timestamp and a late completion cannot shorten or double count it', async (t) => {
   const claimedAt = 1_752_537_600_000;
   let now = claimedAt;
   t.mock.method(Date, 'now', () => now);
   const { limiter, storage } = createLimiter();
   const claim = await json(await limiter.fetch(request('/claim')));
 
-  now = claimedAt + (FINGERPRINT_CLAIM_LEASE_SECONDS + 600) * 1_000;
+  now = claimedAt + (FINGERPRINT_PENDING_HORIZON_SECONDS + 600) * 1_000;
   await limiter.alarm();
-  const recoveredAt = claimedAt + FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
+  const recoveredAt = claimedAt + FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000;
   assert.deepEqual(storage.values.get(STATE_KEY), {
     successes: [recoveredAt],
     pending: [],

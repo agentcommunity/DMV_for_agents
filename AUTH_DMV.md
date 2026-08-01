@@ -240,8 +240,9 @@ Request arrives at Worker /api/register
 │  Layer 4: exact mint budget     │  CLI/MCP only.
 │  REGISTER_FINGERPRINT_LIMITER   │  One SQLite Durable Object per
 │  Name: SHA-256(fingerprint)     │  fingerprint hash. A slot is claimed
-│                                 │  BEFORE upstream, then committed only
-│                                 │  for a new mint or explicitly released.
+│                                 │  BEFORE upstream. Closed response
+│                                 │  classification commits/releases only
+│                                 │  proven outcomes; uncertainty stays pending.
 │                                 │  DMV-local, NOT shared with PAGE.
 └──────────────┬──────────────────┘
                │ pass — forward to Supabase
@@ -271,12 +272,16 @@ with SHA-256 and uses that hash only as the Durable Object name. One
 for that fingerprint, while its SQLite storage contains only claim IDs and
 timestamps — never a raw fingerprint or IP address. A transaction reserves one
 of exactly three rolling 24-hour slots before the upstream request. A fresh
-`201` mint commits the slot; explicit upstream failure responses and
-`already_recorded` replays release it. Upstream has a 45-second deadline inside
-the 60-second lease. A timeout, transport error, or lost completion is
-ambiguous and never releases the claim. It is conservatively recovered as a
-success at lease expiry, then expires after a full 24-hour rolling window from
-that timestamp. This fail-safe prevents a crash between mint and completion
+well-formed `201` mint commits the slot. Only audited, well-formed pre-INSERT
+`400`/`403`/`409` responses and exact `200 already_recorded` replays release it.
+Every 5xx/546, malformed or unexpected response, body-read failure,
+timeout/abort, transport error, or lost completion is ambiguous and never
+releases the claim. The 45-second local response deadline does not cancel the
+remote function. A pending claim is conservatively recovered as a possible
+success at claim time + 600 seconds: the documented 150-second Supabase request
+idle timeout + 400-second Edge Function wall clock + a 50-second safety margin.
+It then expires only after a full 24-hour rolling window from that timestamp.
+This fail-safe prevents a crash between mint and completion
 from reopening a fourth slot. `Retry-After` is derived from the oldest committed
 or conservatively recovered slot. The retained `REGISTER_COOLDOWN_KV` binding is
 unused compatibility state and is not part of enforcement.

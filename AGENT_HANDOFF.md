@@ -17,13 +17,16 @@ requests could all observe spare capacity and mint more than the documented
 three certificates. This branch replaces it with one SQLite Durable Object per SHA-256
 machine-fingerprint hash (`REGISTER_FINGERPRINT_LIMITER`, forward-only v3
 migration). A transaction reserves a claim before upstream work, so pending
-claims and committed successes jointly occupy the three slots. A fresh 201
-mint commits its timestamp; explicit failures and `already_recorded` replays
-release. Upstream work has a 45-second deadline inside the 60-second claim
-lease. A timeout or other ambiguous transport failure never releases the
-claim. If COMPLETE never arrives, the claim is conservatively recovered as a
-possible success at lease expiry and remains counted for a full rolling 24
-hours from that timestamp. This avoids reopening a fourth mint while still
+claims and committed successes jointly occupy the three slots. A well-formed
+fresh `201` commits; only audited, well-formed pre-INSERT `400`/`403`/`409`
+responses and exact `200 already_recorded` replays release. Every 5xx/546,
+malformed/unexpected response, body-read failure, timeout/abort, and transport
+failure stays pending. The Worker's 45-second local response timeout does not
+claim to cancel Supabase execution. If COMPLETE never arrives, the claim stays
+pending for a conservative 600-second horizon: Supabase's documented 150-second
+request-idle timeout plus its 400-second Edge Function wall clock plus a
+50-second safety margin. It then becomes a possible success and remains counted
+for a full rolling 24 hours from the horizon timestamp. This avoids reopening a fourth mint while still
 recovering automatically. Durable Object failure fails closed with a generic 503; public
 responses never expose claim IDs, raw fingerprints, or raw IPs. Concurrent,
 abandoned-claim, duplicate-token, malformed-token, release, and rollover
@@ -108,7 +111,7 @@ PAGE main          shared Supabase project                 hardened independentl
 
 ## The hardening arc, in one paragraph
 
-Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentcommunity_PAGE`) → forward to Supabase `register-agent` with `DMV_PROXY_SECRET`. Production CLI/MCP traffic currently uses the older DMV-local KV cooldown after the shared limits. This branch changes that step to one exact SQLite Durable Object budget per hashed fingerprint: claim before upstream, commit only a fresh mint, release only an explicit non-mint, and fail closed. Supabase validates again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set while omitting `status` so the DB default applies.
+Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentcommunity_PAGE`) → forward to Supabase `register-agent` with `DMV_PROXY_SECRET`. Production CLI/MCP traffic currently uses the older DMV-local KV cooldown after the shared limits. This branch changes that step to one exact SQLite Durable Object budget per hashed fingerprint: claim before upstream, commit only a well-formed fresh mint, release only an audited pre-INSERT response or exact replay, leave every uncertain outcome pending, and fail closed. Supabase validates again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set while omitting `status` so the DB default applies. Its nonessential post-INSERT queue count cannot turn a committed mint into a 5xx; structured errors and rejected queries both yield a `201` with `queue_number: null`.
 
 The live certificate-verification boundary follows the same model. Public
 clients use only
@@ -265,11 +268,11 @@ fa22190  Merge PR #7 (the main hardening PR)
 
 - `worker/index.ts` — worker entry, `/api/register` handler at `handleRegister()`, Turnstile verification at `verifyTurnstileToken()`, forward logic with `x-dmv-proxy` header set at `:1091`
 - `worker/registration-fingerprint-rate-limiter.ts` — transactional SQLite
-  Durable Object that reserves, commits, and releases exact fingerprint-budget
-  slots without storing raw fingerprints or IP addresses
-- `worker/register-fingerprint-cooldown.ts` — Worker-side adapter that hashes the
-  fingerprint, talks to the same per-hash Durable Object for claim/completion,
-  and wraps the registration upstream call
+  Durable Object that reserves, commits, releases, and conservatively recovers
+  exact fingerprint-budget slots without storing raw fingerprints or IP addresses
+- `worker/register-fingerprint-cooldown.ts` — Worker-side adapter that talks to
+  the per-hash Durable Object for claim/completion, applies the closed upstream
+  outcome classification, and keeps ambiguous results pending
 - `supabase/functions/register-agent/index.ts` — Supabase upstream, the `x-dmv-proxy` gate, no status field on INSERT
 - `packages/dmv-agent/src/register.ts` — CLI/MCP client, POSTs to `https://dmv.agentcommunity.org/api/register`
 - `js/supabase.js` — browser client, same-origin `/api/register`

@@ -92,6 +92,19 @@ evidence below proves the lookup v2 rollout, not the v3 registration limiter.
 The first v3 rollout must follow the future order below and record a new Worker
 version plus registration-specific smokes before any document calls it live.
 
+The v3 source uses a closed completion classification. Only a well-formed fresh
+`201` commits a fingerprint claim. Only well-formed pre-INSERT `400`/`403`/`409`
+responses and an exact `200 already_recorded` replay release one. Every 5xx/546,
+unexpected or malformed response, body-read failure, timeout/abort, or transport
+failure stays pending. The 45-second Worker response timeout is local only and
+does not claim to cancel Supabase execution. A pending claim is converted to a
+possible-success timestamp at claim time + 600 seconds, then held for the full
+24-hour rolling window. That 600-second horizon covers Supabase's documented
+150-second request-idle timeout, 400-second Edge Function wall-clock duration,
+and a 50-second safety margin. Current primary references:
+[`functions/limits`](https://supabase.com/docs/guides/functions/limits) and
+[`Workers Request.signal`](https://developers.cloudflare.com/workers/runtime-apis/request/#properties).
+
 Before merging, run these container gates on a Docker-capable machine:
 
 ```bash

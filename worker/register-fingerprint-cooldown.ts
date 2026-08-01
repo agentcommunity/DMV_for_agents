@@ -1,21 +1,31 @@
 // Coordinates registration upstream calls with one exact Durable Object budget
 // per SHA-256 machine-fingerprint hash. The object reserves a slot before any
 // upstream work begins, so concurrent requests cannot all observe the same
-// pre-increment count. Every claimed slot is then committed for a fresh mint or
-// released for a failed/non-mint outcome.
+// pre-increment count. A claim is completed only for a well-formed fresh mint
+// or an audited pre-INSERT/replay outcome; every uncertain result stays pending.
 
-import { isNewCertificateMint } from './registration-upstream';
+import { classifyRegistrationOutcome } from './registration-upstream';
 
 export const FINGERPRINT_COOLDOWN_THRESHOLD = 3;
 export const FINGERPRINT_COOLDOWN_SECONDS = 24 * 60 * 60;
-// A completion normally arrives in the same Worker request. If it never does
-// (process reset/caller disconnect), the claim becomes a conservative success
-// after this lease rather than being released: the upstream may already have
-// minted, so release would permit a fourth possible success.
-export const FINGERPRINT_CLAIM_LEASE_SECONDS = 60;
-// Abort the upstream attempt before the claim lease can expire. A timeout is
-// ambiguous because the upstream may have minted before the connection was
-// aborted, so the claim remains pending and later reconciles conservatively.
+// Current hosted Supabase limits are 150 seconds before an idle request gets a
+// 504 and up to 400 seconds of Edge Function wall-clock runtime. The Worker
+// may stop awaiting after 45 seconds, but that local abort does not prove the
+// remote function stopped. Reserve enough time for the full gateway/queue
+// allowance, a fresh remote isolate's full wall clock, and an explicit margin.
+export const SUPABASE_REQUEST_IDLE_TIMEOUT_SECONDS = 150;
+export const SUPABASE_EDGE_FUNCTION_WALL_CLOCK_SECONDS = 400;
+export const FINGERPRINT_REMOTE_EXECUTION_SAFETY_MARGIN_SECONDS = 50;
+const MINIMUM_PENDING_HORIZON_SECONDS = SUPABASE_REQUEST_IDLE_TIMEOUT_SECONDS
+  + SUPABASE_EDGE_FUNCTION_WALL_CLOCK_SECONDS
+  + FINGERPRINT_REMOTE_EXECUTION_SAFETY_MARGIN_SECONDS;
+export const FINGERPRINT_PENDING_HORIZON_SECONDS: number = 600;
+if (FINGERPRINT_PENDING_HORIZON_SECONDS < MINIMUM_PENDING_HORIZON_SECONDS) {
+  throw new Error('fingerprint pending horizon does not cover remote execution uncertainty');
+}
+// Abort only bounds how long the public Worker awaits a response. A timeout is
+// ambiguous, so the claim remains pending until the conservative horizon and
+// is then counted as a possible success for a full rolling 24 hours.
 export const FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS = 45_000;
 
 export type FingerprintClaimDecision =
@@ -116,9 +126,9 @@ export async function runFingerprintGatedUpstream(
   if (
     !Number.isSafeInteger(deadlineMilliseconds)
     || deadlineMilliseconds < 1
-    || deadlineMilliseconds > FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000
+    || deadlineMilliseconds > SUPABASE_REQUEST_IDLE_TIMEOUT_SECONDS * 1_000
   ) {
-    throw new Error('fingerprint upstream deadline must fit within the claim lease');
+    throw new Error('fingerprint upstream response deadline must fit within the request idle timeout');
   }
 
   const controller = new AbortController();
@@ -136,8 +146,10 @@ export async function runFingerprintGatedUpstream(
       deadline,
     ]);
     const bodyText = await upstream.clone().text();
-    const minted = isNewCertificateMint(upstream.status, bodyText);
-    await gate.complete(cooldownKey, claim.claimId, minted);
+    const outcome = classifyRegistrationOutcome(upstream.status, bodyText);
+    if (outcome !== 'ambiguous') {
+      await gate.complete(cooldownKey, claim.claimId, outcome === 'minted');
+    }
     return { blocked: false, upstream, bodyText };
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
   createFingerprintCooldownGate,
-  FINGERPRINT_CLAIM_LEASE_SECONDS,
+  FINGERPRINT_PENDING_HORIZON_SECONDS,
   FINGERPRINT_COOLDOWN_SECONDS,
   FINGERPRINT_COOLDOWN_THRESHOLD,
   FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS,
@@ -18,6 +18,21 @@ function jsonResponse(body: unknown, status: number): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function registrationPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    certificate_id: 'MESA-DD6-660J',
+    agent_name: 'mesa-agent',
+    domain: 'mesa-agent.agent',
+    registration_type: 'AGENT',
+    queue_number: 42,
+    permalink_url: 'https://dmv.agentcommunity.org/c/MESA-DD6-660J/mesa-agent',
+    badge_url: 'https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J',
+    badge_card_url: 'https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card',
+    message: 'Certificate MESA-DD6-660J issued for mesa-agent.agent.',
+    ...overrides,
+  };
 }
 
 function createGate(options: {
@@ -64,7 +79,7 @@ test('a fresh mint commits its reservation after upstream', async () => {
 
   const result = await runFingerprintGatedUpstream(gate, KEY, async () => {
     order.push('upstream');
-    return jsonResponse({ certificate_id: 'MESA-DD6-660J' }, 201);
+    return jsonResponse(registrationPayload(), 201);
   });
 
   assert.equal(result.blocked, false);
@@ -72,10 +87,23 @@ test('a fresh mint commits its reservation after upstream', async () => {
 });
 
 for (const [label, upstream] of [
-  ['an upstream failure', () => jsonResponse({ error: 'Registration failed.' }, 500)],
+  ['a validation rejection', () => jsonResponse({ error: 'agent_name is required' }, 400)],
+  ['an email quota rejection', () => jsonResponse({
+    error: "You've maxed out your quota on this email: up to 5 agent identities. Members who've signed the endorsement letter can pre-register up to 12.",
+    current: 5,
+    limit: 5,
+    endorsed: false,
+  }, 403)],
+  ['a proven certificate collision', () => jsonResponse({
+    error: 'Certificate ID collision. Please retry with a different name.',
+  }, 409)],
   [
     'an already-recorded replay',
-    () => jsonResponse({ certificate_id: 'X', already_recorded: true }, 200),
+    () => jsonResponse(registrationPayload({
+      queue_number: null,
+      message: 'Pre-registration already recorded for mesa-agent.agent.',
+      already_recorded: true,
+    }), 200),
   ],
 ] as const) {
   test(`${label} releases its reservation`, async () => {
@@ -91,6 +119,59 @@ for (const [label, upstream] of [
     assert.deepEqual(order, ['claim', 'upstream', 'complete:claim-1:released']);
   });
 }
+
+for (const status of [500, 503, 504, 546]) {
+  test(`an HTTP ${status} response remains pending because the upstream may have inserted`, async () => {
+    const order: Array<string> = [];
+    const { gate } = createGate({ order });
+
+    const result = await runFingerprintGatedUpstream(
+      gate,
+      KEY,
+      async () => jsonResponse({ error: 'upstream failed after an unknown stage' }, status),
+    );
+
+    assert.equal(result.blocked, false);
+    assert.deepEqual(order, ['claim']);
+  });
+}
+
+for (const [label, upstream] of [
+  ['malformed JSON on a nominal pre-insert status', () => new Response('not json', { status: 400 })],
+  ['an unexpected success shape', () => jsonResponse({ ok: true }, 200)],
+  ['a malformed fresh-mint response', () => jsonResponse({ ok: true }, 201)],
+  ['an unexpected empty response', () => new Response(null, { status: 204 })],
+] as const) {
+  test(`${label} remains pending`, async () => {
+    const order: Array<string> = [];
+    const { gate } = createGate({ order });
+
+    const result = await runFingerprintGatedUpstream(gate, KEY, upstream);
+
+    assert.equal(result.blocked, false);
+    assert.deepEqual(order, ['claim']);
+  });
+}
+
+test('a body-read failure remains pending before propagating', async () => {
+  const order: Array<string> = [];
+  const { gate } = createGate({ order });
+  const brokenBody = new ReadableStream({
+    pull(controller) {
+      controller.error(new Error('body read failed'));
+    },
+  });
+
+  await assert.rejects(
+    runFingerprintGatedUpstream(
+      gate,
+      KEY,
+      async () => new Response(brokenBody, { status: 201 }),
+    ),
+    /body read failed/,
+  );
+  assert.deepEqual(order, ['claim']);
+});
 
 test('an ambiguous thrown upstream call leaves its reservation pending before propagating', async () => {
   const order: Array<string> = [];
@@ -169,11 +250,11 @@ test('a late upstream settlement after the deadline never completes the claim', 
   assert.deepEqual(order, ['claim', 'upstream-settled-late']);
 });
 
-test('the upstream deadline is bounded by the abandoned-claim lease', () => {
+test('the local upstream response deadline is separate from the conservative pending horizon', () => {
   assert.ok(FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS > 0);
-  assert.ok(
-    FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS <= FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000,
-  );
+  assert.equal(FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS, 45_000);
+  assert.equal(FINGERPRINT_PENDING_HORIZON_SECONDS, 600);
+  assert.ok(FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS < FINGERPRINT_PENDING_HORIZON_SECONDS * 1_000);
 });
 
 test('UI traffic without a fingerprint bypasses the fingerprint object', async () => {
