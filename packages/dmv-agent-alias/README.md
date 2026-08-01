@@ -1,21 +1,21 @@
 # dmv-agent
 
-Compatibility alias for the canonical [`@agentcommunity/dmv-agent`](https://www.npmjs.com/package/@agentcommunity/dmv-agent) package. New installations should use the scoped package; this wrapper preserves existing unscoped commands.
+Compatibility alias for the canonical [`@agentcommunity/dmv-agent`](https://www.npmjs.com/package/@agentcommunity/dmv-agent) package. New installations should use the scoped package; this wrapper preserves existing unscoped installations and is not a separate SDK or capability.
 
 ## Usage
 
 ```bash
 # Register an .agent identity (interactive CRT terminal)
-bunx dmv-agent register
+bunx @agentcommunity/dmv-agent register
 
 # Non-interactive (for scripting / agentic workflows)
-bunx dmv-agent register --name my-agent --email operator@example.com --operator "Operator Name"
+bunx @agentcommunity/dmv-agent register --name my-agent --email operator@example.com --operator "Operator Name"
 
 # Verify a certificate ID offline
-bunx dmv-agent verify MESA-DD6-660J --format-only
+bunx @agentcommunity/dmv-agent verify MESA-DD6-660J --format-only
 
 # Start the MCP server (for AI agent hosts)
-bunx dmv-agent
+bunx @agentcommunity/dmv-agent
 ```
 
 ## MCP server config
@@ -27,7 +27,7 @@ Add to your Claude Code or MCP host config:
   "mcpServers": {
     "dmv": {
       "command": "bunx",
-      "args": ["dmv-agent"]
+      "args": ["@agentcommunity/dmv-agent"]
     }
   }
 }
@@ -42,7 +42,7 @@ documentation.
 
 ## What is the DMV?
 
-The Department of Machine Verification is the identity registration system for the [.agent community](https://agentcommunity.org) — a coalition applying for the proposed `.agent` top-level domain through ICANN's community application process.
+The Department of Machine Verification is the identity pre-registration system for the [.agent community](https://agentcommunity.org) — a coalition applying for the proposed `.agent` top-level domain through ICANN's community application process.
 
 Pre-registration is **non-binding** — it records interest in a `.agent` domain name but does not guarantee assignment. Certificate IDs, however, are **unique and permanent**.
 

@@ -26,5 +26,6 @@
     "cli"
   ],
   "license": "MIT",
-  "files": ["bin/"]
+  "engines": { "node": ">=22" },
+  "files": ["bin/", "README.md", "LICENSE"]
 }

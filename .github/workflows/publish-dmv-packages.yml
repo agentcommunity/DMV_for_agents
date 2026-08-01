@@ -1,0 +1,90 @@
+name: Publish DMV npm packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type publish-0.3.0-and-0.1.3 to publish canonical first, then its compatibility alias'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-dmv-packages
+  cancel-in-progress: false
+
+jobs:
+  maintained-node-gate:
+    name: Node ${{ matrix.node }} package gate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.22.3', '24.18.1']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.12.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm cf:build
+      - run: pnpm exec tsc --noEmit
+      - run: git diff --check
+      - run: test -z "$(git status --short)"
+
+  publish:
+    name: Trusted publish canonical, then alias
+    needs: maintained-node-gate
+    if: inputs.confirmation == 'publish-0.3.0-and-0.1.3'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.1'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.12.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Bind both verified tarballs to the release commit
+        run: |
+          npm pkg set gitHead="$GITHUB_SHA" --workspace=@agentcommunity/dmv-agent
+          npm pkg set gitHead="$GITHUB_SHA" --workspace=dmv-agent
+      - name: Build, pack, scan, install, exercise, and verify current registry truth
+        run: pnpm verify:packages -- --registry-mode=current --pack-output=.release-artifacts
+      - name: Publish canonical scoped package
+        run: npm publish .release-artifacts/agentcommunity-dmv-agent-0.3.0.tgz --access public
+      - name: Require canonical registry integrity, gitHead, and provenance
+        run: |
+          for attempt in 1 2 3 4; do
+            if pnpm verify:packages -- --registry-mode=canonical-release --expected-git-head="$GITHUB_SHA"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+      - name: Publish compatibility alias only after canonical verification
+        run: npm publish .release-artifacts/dmv-agent-0.1.3.tgz --access public
+      - name: Require both registry artifacts, exact alias mapping, and provenance
+        run: |
+          for attempt in 1 2 3 4; do
+            if pnpm verify:packages -- --registry-mode=release --expected-git-head="$GITHUB_SHA"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done

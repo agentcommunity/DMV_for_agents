@@ -369,20 +369,31 @@ to format-only validation with an explicit reason.
 ## Development
 
 ```bash
-cd packages/dmv-agent
-pnpm install
-pnpm build        # compile TypeScript → dist/
-pnpm dev          # watch mode
+# Install once from the repository root. The root pnpm-lock.yaml is the sole
+# lockfile authority for all workspaces.
+pnpm install --frozen-lockfile
+pnpm --dir packages/dmv-agent build
+pnpm --dir packages/dmv-agent dev
 
 # Test locally
-node dist/cli.js register
-node dist/cli.js verify MESA-DD6-660J
+node packages/dmv-agent/dist/cli.js register
+node packages/dmv-agent/dist/cli.js verify MESA-DD6-660J
 ```
 
-Before publishing, run `pnpm build` from the DMV repo root. The root build
-compiles this package, runs the dist-level CLI smoke tests, and packs/installs
-the npm tarball in a temporary consumer project to prove the published-style
-`dmv-agent` binary works.
+The package supports maintained Node LTS releases 22 and 24 (`engines.node` is
+`>=22`). Before publication, `pnpm verify:packages -- --registry-mode=current`
+builds from a clean tree, checks exact canonical and alias archive allow-lists,
+proves README/CHANGELOG/LICENSE bytes, scans for secrets, installs with scripts
+disabled, invokes installed CLI/MCP contracts, validates the current registry,
+and runs read-only production doctor/lookup plus secretless-gate checks. It removes generated
+`packages/dmv-agent/dist` even when verification fails.
+
+Publication is only through the GitHub-hosted trusted-publisher workflow in
+`.github/workflows/publish-dmv-packages.yml`. The currently published releases
+remain canonical `0.2.2` and compatibility alias `0.1.2`; source `0.3.0` and
+alias `0.1.3` remain unpublished until an npm owner configures and authorizes
+that workflow. The alias is published only after the canonical artifact's
+integrity, commit, and provenance have been verified.
 
 ### Deploying the lookup boundary
 

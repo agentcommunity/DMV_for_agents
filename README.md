@@ -229,12 +229,18 @@ pnpm dev
 pnpm build
 # or: bun run build
 
+# Reproducible canonical + compatibility-alias package proof. This builds from
+# clean source, packs exact allow-lists, clean-installs with scripts disabled,
+# runs CLI/MCP contracts, checks the current registry, and performs only
+# read-only production doctor/lookup and secretless-gate operations.
+pnpm verify:packages -- --registry-mode=current
+
 # Minimal static server (no SPA fallback for /c/... routes)
 uv run python -m http.server 8080
 
-# CLI
-cd packages/dmv-agent && pnpm build
-node dist/cli.js register
+# CLI (the repo-root pnpm-lock.yaml is the only dependency lock authority)
+pnpm --dir packages/dmv-agent build
+node packages/dmv-agent/dist/cli.js register
 
 # Production rollout is Worker first, then the secret-gated Edge upstream.
 # Merge to main and observe the Cloudflare Git integration's automatic Worker build.

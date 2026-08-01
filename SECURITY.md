@@ -24,6 +24,18 @@ We'll acknowledge your report within 48 hours and work with you on a fix before 
 - Certificate ID generation and verification logic
 - Cloudflare Turnstile integration on the browser registration flow
 
+## Package supply chain
+
+- `@agentcommunity/dmv-agent` is the one canonical capability; `dmv-agent` is
+  compatibility-only and must depend exactly on the released canonical version.
+- The package verifier uses explicit archive allow-lists, exact license/docs
+  bytes, secret scans, script-disabled clean installs, bounded registry and
+  production requests, and SRI checks. It never performs a live registration.
+- npm publication is restricted to the GitHub-hosted OIDC workflow, canonical
+  first. Registry signatures are not provenance; post-publish evidence requires
+  npm provenance attestations. Trusted-publisher configuration remains an npm
+  owner action, and no long-lived npm release token belongs in this repository.
+
 ## What's out of scope
 
 - Denial of service attacks

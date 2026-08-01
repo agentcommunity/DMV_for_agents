@@ -30,7 +30,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
 **Edge functions** — Requires a Supabase project. Copy `.env.example` to `.env` and fill in your credentials. Deploy with `supabase functions deploy`.
 
-**npm package** — `cd packages/dmv-agent && pnpm install && pnpm build`. Test locally with `node dist/cli.js register`.
+**npm package** — install once from the repository root with
+`pnpm install --frozen-lockfile`; root `pnpm-lock.yaml` is the only lockfile.
+Build with `pnpm --dir packages/dmv-agent build`, and run the clean reproducible
+package gate with `pnpm verify:packages -- --registry-mode=current`.
 
 ## Pull Requests
 

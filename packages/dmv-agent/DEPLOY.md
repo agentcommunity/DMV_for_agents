@@ -9,7 +9,8 @@ Step-by-step guide to take the DMV agent registration system from dev to product
 - [ ] Supabase CLI installed (`brew install supabase/tap/supabase`)
 - [ ] Logged in to Supabase (`supabase login`)
 - [ ] Linked to the agentcommunity project (`supabase link --project-ref tcymqfwwphacnosnnzxl`)
-- [ ] npm account with publish access to `@agentcommunity` scope
+- [ ] npm owner access for both `@agentcommunity/dmv-agent` and the existing
+      `dmv-agent` compatibility alias
 
 ---
 
@@ -372,22 +373,59 @@ Then bump the cache-busting version:
 
 ## 4. NPM Package — Publish
 
-```bash
-# From repo root: run the full release gate first.
-pnpm build
+The registry currently contains canonical `@agentcommunity/dmv-agent@0.2.2`
+and compatibility alias `dmv-agent@0.1.2`. Source `0.3.0` and alias `0.1.3`
+are release candidates, not published releases. npm versions are immutable, so
+do not publish either candidate manually or before all gates pass.
 
-# Then publish the package.
-cd packages/dmv-agent
-npm publish --access public
+An npm owner must configure the exact GitHub trusted publisher
+`agentcommunity/DMV_for_agents` + `publish-dmv-packages.yml` for **each**
+package and allow `npm publish`. The workflow runs only on a GitHub-hosted
+runner with `id-token: write`, exact Node `24.18.1` and npm `12.0.2`, and no
+dependency cache. npm's current trusted-publishing minimums are Node 22.14 and
+npm 11.5.1. Do not add `NPM_TOKEN` or `NODE_AUTH_TOKEN`.
+
+Before authorizing the workflow, run from the repository root:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm test
+pnpm build
+pnpm cf:build
+pnpm exec tsc --noEmit
+pnpm verify:packages -- --registry-mode=current
 ```
 
-Repo-root `pnpm build` runs text-surface checks, compiles
-`@agentcommunity/dmv-agent`, runs `tests/dmv-agent-cli.test.mjs` against the
-built CLI, and runs `tests/dmv-agent-packed-cli.test.mjs`, which packs the npm
-tarball, installs it into a temporary consumer project, and exercises the
-installed `dmv-agent` binary against a local capture server. Package-level
-`pnpm build` from `packages/dmv-agent/` only runs `tsc`; use it for a quick
-compile check, not as the pre-publish smoke gate.
+`pnpm verify:packages` is the executable package evidence gate. It reads both
+source manifests, rejects package-local lockfiles (the root
+`pnpm-lock.yaml` is the sole authority), builds from clean source, compares
+`npm pack --dry-run --json` with actual canonical/alias archives, enforces
+exact allow-lists, exact README/CHANGELOG/LICENSE bytes, and no secret/source/
+test leakage. It clean-installs with scripts disabled, invokes both aliases of
+the CLI plus the canonical MCP server, checks bounded registry requests and
+tarball integrity, and performs only read-only production doctor/issued-lookup
+and secretless registration/lookup-gate operations. It never submits a valid registration and always removes its
+generated package `dist`.
+
+Dispatch `Publish DMV npm packages` only with the exact confirmation string.
+The workflow produces two verified tarballs, publishes the scoped canonical
+one first, then requires its exact version, `gitHead`, SRI integrity, downloaded
+tarball integrity, and provenance attestation. Only after that succeeds can it
+publish the alias. The final gate requires the alias to depend exactly on
+`@agentcommunity/dmv-agent@^0.3.0` and verifies the same evidence for both.
+Registry signatures are not accepted as provenance.
+
+Trusted-publisher setup and workflow dispatch are external owner actions. No
+package is published merely by merging this source. After the first successful
+OIDC release, restrict traditional token publication and revoke obsolete
+automation tokens only after confirming the trusted publisher works.
+
+Primary release references checked 2026-08-01:
+
+- [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+- [npm publish and pack contents](https://docs.npmjs.com/cli/publish/)
+- [Node.js release status](https://nodejs.org/en/about/previous-releases)
+- [GitHub `setup-node`](https://github.com/actions/setup-node/blob/main/README.md)
 
 ### Verify it works
 

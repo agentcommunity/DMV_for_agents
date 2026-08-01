@@ -71,7 +71,10 @@ source change: the published packages remain
 `@agentcommunity/dmv-agent@0.2.2` and the compatibility alias
 `dmv-agent@0.1.2`. The canonical source manifest is `0.3.0`, the compatibility
 alias source is `0.1.3`, and publication remains an explicit package-owner
-action after the release gates pass.
+action after the release gates pass. The source now includes a GitHub-hosted
+OIDC workflow and reproducibility verifier, but npm trusted-publisher
+configuration and workflow dispatch have not occurred. No provenance is
+claimed for the current `0.2.2`/`0.1.2` releases.
 
 Production was re-verified on 2026-08-01: normal requests return real `issued`
 or `not_found` results, while `unavailable` remains reserved for genuine
@@ -241,7 +244,9 @@ Update all status surfaces in DEPLOY.md after any future evidence-backed rollout
 - Don't run `ALTER TYPE registration_status ADD VALUE 'provisional_dmv'` (see quirk #2)
 - Don't deploy `register-agent` without `--no-verify-jwt` (see quirk #1)
 - Don't `wrangler secret put` on `dmv-agentcommunity` (see quirk #3) — use the dashboard
-- Don't `npm publish` from the DMV repo root (see quirk #7) — always `cd packages/dmv-agent` first
+- Don't publish either npm package manually. Use the owner-authorized
+  `publish-dmv-packages.yml` workflow, which publishes the exact verified
+  canonical tarball first and blocks the alias until canonical provenance passes.
 - Don't push PAGE changes to main without reviewing them — PAGE auto-deploys via CF git integration
 - Don't remove the `x-dmv-proxy` gate or weaken it back to a public constant — it's now secret-backed (`DMV_PROXY_SECRET`, constant-time compared, fail-closed) and is the only thing closing the direct-Supabase bypass
 - Don't call or document `lookup-agent` as a public API, restore domain lookup, or deploy the lookup Edge Function before the Worker replacement
