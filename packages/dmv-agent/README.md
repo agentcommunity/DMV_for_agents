@@ -306,10 +306,10 @@ published and the route returns real results** — `status: "issued"` for
 issued certificates and `status: "not_found"` for valid-format IDs that
 don't exist, not `status: "unavailable"`. Deployed since `main` `fabafe6`
 (PR #20, manual-redirect runtime fix), Worker version
-`d9755e66-3883-4970-be84-a59307011f14` (`2026-07-22`). (`AGENT_HANDOFF.md`
-Task 8 still has some record-keeping outstanding — deployed SHA + a full
-smoke-evidence writeup — but the behavior itself is live in production.) This
-package's `verifyCertificate()` (and therefore `dmv-agent verify` / the
+`d9755e66-3883-4970-be84-a59307011f14` (`2026-07-22`). The issued, not-found,
+invalid-ID, direct-Edge-403, and rate-limit smoke evidence is recorded in
+`AGENT_HANDOFF.md`. This package's `verifyCertificate()` (and therefore
+`dmv-agent verify` / the
 `verify_certificate` MCP tool) call this route by default; `unavailable`
 remains the fallback for genuine failures (network error, timeout, malformed
 response) and is still treated as inconclusive, never as "not issued". The

@@ -90,6 +90,67 @@ test('canonical agent surfaces use the scoped package command', () => {
   assert.match(surfaces.cli_runtime?.combinedText ?? '', /bunx @agentcommunity\/dmv-agent/);
 });
 
+test('operator authentication docs use the canonical scoped package', () => {
+  const authDmv = readFileSync('AUTH_DMV.md', 'utf8');
+
+  assert.match(authDmv, /bunx @agentcommunity\/dmv-agent register/);
+  assert.match(authDmv, /"args"\s*:\s*\["@agentcommunity\/dmv-agent"\]/);
+  assert.doesNotMatch(authDmv, /bunx dmv-agent(?:\s|['"`]|$)/);
+  assert.doesNotMatch(authDmv, /"args"\s*:\s*\["dmv-agent"\]/);
+});
+
+test('package release docs distinguish registry releases from source versions', () => {
+  const canonicalManifest = JSON.parse(
+    readFileSync('packages/dmv-agent/package.json', 'utf8'),
+  );
+  const aliasManifest = JSON.parse(
+    readFileSync('packages/dmv-agent-alias/package.json', 'utf8'),
+  );
+  const releaseDocs = [
+    readFileSync('packages/dmv-agent/CHANGELOG.md', 'utf8'),
+    readFileSync('AGENT_HANDOFF.md', 'utf8'),
+  ].join('\n');
+
+  assert.equal(canonicalManifest.version, '0.3.0');
+  assert.equal(aliasManifest.version, '0.1.3');
+  assert.equal(aliasManifest.dependencies['@agentcommunity/dmv-agent'], '^0.3.0');
+  assert.match(releaseDocs, /published[\s\S]{0,80}@agentcommunity\/dmv-agent@0\.2\.2/i);
+  assert.match(releaseDocs, /published[\s\S]{0,80}dmv-agent@0\.1\.2/i);
+  assert.match(releaseDocs, /source[\s\S]{0,80}0\.3\.0/i);
+  assert.match(releaseDocs, /alias source[\s\S]{0,80}0\.1\.3/i);
+  assert.doesNotMatch(releaseDocs, /@agentcommunity\/dmv-agent@0\.2\.1/);
+  assert.doesNotMatch(releaseDocs, /dmv-agent@0\.1\.1/);
+  assert.doesNotMatch(releaseDocs, /@agentcommunity\/dmv-agent@\^0\.2\.1/);
+});
+
+test('live lookup docs retain evidence without stale Task 8 work', () => {
+  const lookupDocs = [
+    readFileSync('AGENT_HANDOFF.md', 'utf8'),
+    readFileSync('README.md', 'utf8'),
+    readFileSync('packages/dmv-agent/README.md', 'utf8'),
+  ].join('\n');
+
+  assert.doesNotMatch(lookupDocs, /Task 8/i);
+  assert.doesNotMatch(lookupDocs, /record-keeping outstanding/i);
+  assert.match(lookupDocs, /fabafe6/);
+  assert.match(lookupDocs, /d9755e66-3883-4970-be84-a59307011f14/);
+  assert.match(lookupDocs, /v3/i);
+  assert.match(lookupDocs, /(?:source-ready|ready-to-deploy source)/i);
+  assert.match(lookupDocs, /not deployed/i);
+});
+
+test('database guidance permits only hashed client IP metadata', () => {
+  const databaseDocs = [
+    readFileSync('AUTH_DMV.md', 'utf8'),
+    readFileSync('packages/dmv-agent/DEPLOY.md', 'utf8'),
+  ].join('\n');
+
+  assert.match(databaseDocs, /client_ip_hash/);
+  assert.doesNotMatch(databaseDocs, /metadata[^\n]*\bclient_ip\b/);
+  assert.doesNotMatch(databaseDocs, /metadata->>'client_ip'/);
+  assert.doesNotMatch(databaseDocs, /idx_registrations_client_ip/);
+});
+
 test('register-agent only treats certificate-id conflicts as pre-registration recovery', () => {
   const source = readFileSync('supabase/functions/register-agent/index.ts', 'utf8');
 

@@ -113,9 +113,8 @@ You (web / CLI / MCP)
 **Status (2026-08-01, verified live):** the Worker and Edge changes are
 deployed and returning real results — `status: "issued"` for issued
 certificates and `status: "not_found"` for valid-format IDs that don't
-exist, not `status: "unavailable"`. Task 8's remaining scope is
-record-keeping only (deployed DMV commit SHA + a full smoke-evidence
-writeup), not the behavior itself — see `AGENT_HANDOFF.md`.
+exist, not `status: "unavailable"`. The live commit, Worker version, and smoke
+evidence are recorded below and in `AGENT_HANDOFF.md`.
 
 **Production evidence (2026-07-22):** merged `main` commit `fabafe6` (PR #20,
 including the manual-redirect runtime fix) is deployed as Worker version

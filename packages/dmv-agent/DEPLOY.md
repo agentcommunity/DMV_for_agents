@@ -28,7 +28,7 @@ certificate_id      TEXT        -- UNIQUE partial index (WHERE certificate_id IS
 signup_source       TEXT        -- 'ui' | 'cli' | 'mcp' | 'api'
 status              ENUM        -- NOT set by register-agent; uses DB default 'pending_profile'
 user_id             UUID        -- nullable (set by trigger, NOT by register-agent)
-metadata            JSONB       -- { agent_description, client_ip }
+metadata            JSONB       -- { agent_description, client_ip_hash }; raw IPs are never stored
 created_at          TIMESTAMPTZ -- default now()
 ```
 
@@ -38,6 +38,8 @@ created_at          TIMESTAMPTZ -- default now()
 - `certificate_id` has a UNIQUE partial index — prevents same user re-registering the same agent
 - `user_id` is nullable — register-agent INSERTs with NULL, the `on_dmv_registration` trigger fills it in
 - CHECK constraints enforce `full_name` for INDIVIDUAL/ORGANIZATION and `organization_name` for ORGANIZATION
+- `metadata.client_ip_hash`, when present, is one-way SHA-256 hex. Never add a
+  raw client IP field or use the shared database as an IP-rate-limit fallback.
 
 ### Trigger chain (managed by agentcommunity.org)
 

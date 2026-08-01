@@ -113,12 +113,12 @@ If you need to exclude DMV rows from a query, use `WHERE certificate_id IS NULL`
 
 ## The CLI-First Agent Flow
 
-The CLI (`bunx dmv-agent register`) is designed as the primary path for AI agents. It's fast, scriptable, and doesn't require a browser.
+The CLI (`bunx @agentcommunity/dmv-agent register`) is designed as the primary path for AI agents. It's fast, scriptable, and doesn't require a browser. The unscoped `dmv-agent` package is a compatibility alias for existing installations, not the canonical command for new setup.
 
 ### Interactive mode
 
 ```
-$ bunx dmv-agent register
+$ bunx @agentcommunity/dmv-agent register
 ```
 
 Presents a CRT-style terminal: boot screen → about/terms/charter menu → step-by-step form (agent name → operator name [required] → email → description) → confirmation → submit → success screen with card link, share commands, badge markdown.
@@ -126,7 +126,7 @@ Presents a CRT-style terminal: boot screen → about/terms/charter menu → step
 ### Non-interactive mode (for scripting / CI)
 
 ```
-$ bunx dmv-agent register --name my-agent --email operator@example.com --operator "Jane Doe"
+$ bunx @agentcommunity/dmv-agent register --name my-agent --email operator@example.com --operator "Jane Doe"
 ```
 
 All fields validated client-side before network call. Exit codes today: 0 = success, 1 = validation, rate-limit, server, or network error.
@@ -136,7 +136,7 @@ All fields validated client-side before network call. Exit codes today: 0 = succ
 ```json
 {
   "mcpServers": {
-    "dmv": { "command": "bunx", "args": ["dmv-agent"] }
+    "dmv": { "command": "bunx", "args": ["@agentcommunity/dmv-agent"] }
   }
 }
 ```
@@ -334,7 +334,7 @@ Multiple users CAN pre-register interest in the same `.agent` domain. `domain_re
 | `email` | TEXT | User's email | Max 254 chars |
 | `certificate_id` | TEXT | `WORD-XXX-XXXC` | Unique partial index (`certificate_id IS NOT NULL`). Also the DMV-vs-non-DMV marker PAGE keys off. |
 | `signup_source` | TEXT | ui / cli / mcp / api | Tracks which entry point |
-| `metadata` | JSONB | `{ agent_description, client_ip }` | Description max 500 chars |
+| `metadata` | JSONB | `{ agent_description, client_ip_hash }` | Description max 500 chars. `client_ip_hash` is SHA-256 hex when an IP is available; raw IPs are never stored. |
 
 **Columns DMV does NOT set** (and relies on the DB to fill in):
 
@@ -357,11 +357,11 @@ Multiple users CAN pre-register interest in the same `.agent` domain. `domain_re
 CREATE INDEX IF NOT EXISTS idx_registrations_email
   ON registrations (email);
 
--- For IP-based rate limiting fallback (if DB fallback is ever needed)
-CREATE INDEX IF NOT EXISTS idx_registrations_client_ip
-  ON registrations ((metadata->>'client_ip'))
-  WHERE metadata->>'client_ip' IS NOT NULL;
 ```
+
+The database is not an IP-rate-limit fallback. Public Worker enforcement uses
+hashed identifiers, and registration metadata may contain only the one-way
+`client_ip_hash`; it must never contain a raw client IP.
 
 ## Registration Types
 
@@ -571,7 +571,7 @@ dashboard flag) are not blockers.
 
 ## Testing the Full Flow
 
-1. Register via CLI: `bunx dmv-agent register --name test-agent --email you@example.com --operator "Your Name"`
+1. Register via CLI: `bunx @agentcommunity/dmv-agent register --name test-agent --email you@example.com --operator "Your Name"`
 2. Verify in DB: `certificate_id IS NOT NULL`, `status = 'pending_profile'` (the DB default — not set by DMV), `user_id` populated by `handle-dmv-registration`. In `email_queue`, the `dmv_certificate` row should reach `status = 'sent'` within seconds (auto-sent via `process_email_queue_immediate` — it must NOT be left `pending`; if it is, check `FEATURE_DMV_REGISTRATION_ENABLED`).
 3. Check email: the **certificate email** arrives (holographic card + share CTAs, no sign-in link). **New users** also get a **verify email** — click its **magic link** (`agentcommunity.org/api/auth/magiclink/verify?token_hash=…`, a real link on our domain, not a 6-digit code) to sign in. **Existing users** sign in normally with the same email.
 4. Verify in DB: `user_id` is set (if it wasn't already), normal PAGE auth flow applied

@@ -93,15 +93,16 @@ DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate acti
                                                            status NOT set on INSERT (DB default applies)
                                                            MUST be deployed with --no-verify-jwt
 
-npm                @agentcommunity/dmv-agent@0.2.1         published, routes through /api/register
-                   dmv-agent@0.1.1 alias                  depends on @agentcommunity/dmv-agent ^0.2.1
+npm registry       @agentcommunity/dmv-agent@0.2.2         published canonical package
+                   dmv-agent@0.1.2                         published compatibility alias
+
+npm source         @agentcommunity/dmv-agent@0.3.0         source-ready, not published
+                   dmv-agent@0.1.3                         source-ready, depends on canonical ^0.3.0
 
 Lookup boundary    GET /api/lookup + lookup-agent          LIVE — deployed on main fabafe6 (PR #20), Worker
                                                            d9755e66-3883-4970-be84-a59307011f14 (2026-07-22),
                                                            direct Edge gate verified 403. Re-verified live
                                                            2026-08-01: real issued/not_found, not "unavailable".
-                                                           Task 8 paperwork (deployed SHA + full smoke record)
-                                                           still outstanding.
 
 DMV main           latest as of this handoff               see `git log` for the current HEAD
 
@@ -204,12 +205,6 @@ Update all status surfaces in DEPLOY.md after any future evidence-backed rollout
 
 ### High (bug/incident risk)
 
-1. **Close out Task 8's paperwork.** `GET /api/lookup` is confirmed live in
-   production as of 2026-08-01 (real `issued`/`not_found`, not `unavailable`
-   — see the 2026-08-01 section above). What's still outstanding is the
-   record-keeping: capture the deployed DMV commit SHA and full smoke
-   evidence for issued/not-found/invalid outcomes and the direct Edge 403
-   boundary.
 1. **Preserve the live lookup boundary.** Future changes must retain public
    certificate-ID-only lookup, exact 30/60 enforcement, the direct Edge 403
    gate, and the no-data-mutation verification discipline.

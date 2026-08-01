@@ -69,14 +69,13 @@ or inconsistent boolean/status combination is inconclusive and format-only.
 
 ### Compatibility
 
-No wire-protocol changes to `/api/register`. `packages/dmv-agent` is at the
-locally-bumped `0.3.0`, pending an explicit `npm publish --access public`.
-The unscoped alias (`dmv-agent`) still declares `@agentcommunity/dmv-agent@^0.2.1`
-in-tree, because `0.3.0` is not yet on the registry and a `^0.3.0` range breaks
-`pnpm install --frozen-lockfile` (which CI/Cloudflare builds use). **Publish
-order:** publish `@agentcommunity/dmv-agent@0.3.0` first, then bump the alias's
-dependency to `^0.3.0`, bump the alias to `0.1.2`, and publish it.
+No wire-protocol changes to `/api/register`. The registry releases remain
+published `@agentcommunity/dmv-agent@0.2.2` and published compatibility alias
+`dmv-agent@0.1.2`. This source tree prepares canonical source `0.3.0` and alias
+source `0.1.3`; the alias already depends on `@agentcommunity/dmv-agent@^0.3.0`.
+Neither source version is published. Release owners must publish the canonical
+package first, verify it from the registry, and only then publish the alias.
 
-## 0.2.1 and earlier
+## 0.2.2 and earlier
 
 See git history — no changelog was kept before 0.3.0.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,6 +28,7 @@ try {
   mkdirSync(homeDir, { recursive: true });
   const tarball = packTarball();
   installTarball(tarball);
+  assertInstalledPackageDocs();
   runInstalledVerify();
   await runInstalledDoctor();
   await runInstalledRegistration();
@@ -69,6 +70,15 @@ function installTarball(tarball) {
     env: process.env,
     timeoutMs: PACKED_SMOKE_NPM_TIMEOUT_MS,
   });
+}
+
+function assertInstalledPackageDocs() {
+  const changelog = readFileSync(
+    path.join(projectDir, 'node_modules', '@agentcommunity', 'dmv-agent', 'CHANGELOG.md'),
+    'utf8',
+  );
+  assert.match(changelog, /^# Changelog/m);
+  assert.match(changelog, /^## 0\.3\.0$/m);
 }
 
 function runInstalledVerify() {
