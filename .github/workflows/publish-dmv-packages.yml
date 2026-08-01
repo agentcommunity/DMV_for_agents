@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-dmv-packages
@@ -40,51 +39,169 @@ jobs:
       - run: git diff --check
       - run: test -z "$(git status --short)"
 
-  publish:
-    name: Trusted publish canonical, then alias
+  prepare-release-artifacts:
+    name: Prepare exact verified release artifacts
     needs: maintained-node-gate
-    if: inputs.confirmation == 'publish-0.3.0-and-0.1.3'
+    if: inputs.confirmation == 'publish-0.3.0-and-0.1.3' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '24.18.1'
-          registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
       - run: npm install --global npm@12.0.2
       - run: corepack enable
       - run: corepack prepare pnpm@10.12.1 --activate
       - run: pnpm install --frozen-lockfile
-      - name: Bind both verified tarballs to the release commit
+      - name: Bind both candidate tarballs to the release commit
         run: |
           npm pkg set gitHead="$GITHUB_SHA" --workspace=@agentcommunity/dmv-agent
           npm pkg set gitHead="$GITHUB_SHA" --workspace=dmv-agent
-      - name: Build, pack, scan, install, exercise, and verify current registry truth
+      - name: Build, pack, scan, install, exercise, and prove current registry truth
         run: pnpm verify:packages -- --registry-mode=current --pack-output=.release-artifacts
-      - name: Publish canonical scoped package
-        run: npm publish .release-artifacts/agentcommunity-dmv-agent-0.3.0.tgz --access public
-      - name: Require canonical registry integrity, gitHead, and provenance
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmv-release-artifacts-${{ github.sha }}
+          path: .release-artifacts/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  canonical-state:
+    name: Classify canonical version as absent or exact
+    needs: prepare-release-artifacts
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmv-release-artifacts-${{ github.sha }}
+          path: .release-artifacts
+      - id: state
+        run: node scripts/check-dmv-release-state.mjs --package=canonical --artifact-dir=.release-artifacts --expected-git-head="$GITHUB_SHA" --state-output="$GITHUB_OUTPUT"
+
+  publish-canonical:
+    name: Trusted publish exact canonical tarball
+    needs: canonical-state
+    if: inputs.confirmation == 'publish-0.3.0-and-0.1.3' && github.ref == 'refs/heads/main' && needs.canonical-state.outputs.state == 'absent'
+    runs-on: ubuntu-latest
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.1'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmv-release-artifacts-${{ github.sha }}
+          path: .release-artifacts
+      - run: npm publish .release-artifacts/agentcommunity-dmv-agent-0.3.0.tgz --access public --provenance
+
+  canonical-proof:
+    name: Prove canonical bytes and provenance
+    needs: [canonical-state, publish-canonical]
+    if: always() && github.ref == 'refs/heads/main' && needs.canonical-state.result == 'success' && (needs.publish-canonical.result == 'success' || needs.publish-canonical.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmv-release-artifacts-${{ github.sha }}
+          path: .release-artifacts
+      - name: Require cryptographically verified canonical release
         run: |
           for attempt in 1 2 3 4; do
-            if pnpm verify:packages -- --registry-mode=canonical-release --expected-git-head="$GITHUB_SHA"; then
+            if node scripts/check-dmv-release-state.mjs --package=canonical --artifact-dir=.release-artifacts --expected-git-head="$GITHUB_SHA" --require=exact; then
               exit 0
             fi
-            if [ "$attempt" -eq 4 ]; then
-              exit 1
-            fi
+            if [ "$attempt" -eq 4 ]; then exit 1; fi
             sleep $((attempt * 5))
           done
-      - name: Publish compatibility alias only after canonical verification
-        run: npm publish .release-artifacts/dmv-agent-0.1.3.tgz --access public
-      - name: Require both registry artifacts, exact alias mapping, and provenance
+
+  alias-state:
+    name: Classify compatibility alias as absent or exact
+    needs: canonical-proof
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmv-release-artifacts-${{ github.sha }}
+          path: .release-artifacts
+      - id: state
+        run: node scripts/check-dmv-release-state.mjs --package=alias --artifact-dir=.release-artifacts --expected-git-head="$GITHUB_SHA" --state-output="$GITHUB_OUTPUT"
+
+  publish-alias:
+    name: Trusted publish exact compatibility tarball
+    needs: alias-state
+    if: inputs.confirmation == 'publish-0.3.0-and-0.1.3' && github.ref == 'refs/heads/main' && needs.alias-state.outputs.state == 'absent'
+    runs-on: ubuntu-latest
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.1'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmv-release-artifacts-${{ github.sha }}
+          path: .release-artifacts
+      - run: npm publish .release-artifacts/dmv-agent-0.1.3.tgz --access public --provenance
+
+  final-proof:
+    name: Prove canonical and alias bytes and provenance
+    needs: [alias-state, publish-alias]
+    if: always() && github.ref == 'refs/heads/main' && needs.alias-state.result == 'success' && (needs.publish-alias.result == 'success' || needs.publish-alias.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.0.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmv-release-artifacts-${{ github.sha }}
+          path: .release-artifacts
+      - name: Require cryptographically verified canonical and alias releases
         run: |
           for attempt in 1 2 3 4; do
-            if pnpm verify:packages -- --registry-mode=release --expected-git-head="$GITHUB_SHA"; then
+            if node scripts/check-dmv-release-state.mjs --package=canonical --artifact-dir=.release-artifacts --expected-git-head="$GITHUB_SHA" --require=exact \
+              && node scripts/check-dmv-release-state.mjs --package=alias --artifact-dir=.release-artifacts --expected-git-head="$GITHUB_SHA" --require=exact; then
               exit 0
             fi
-            if [ "$attempt" -eq 4 ]; then
-              exit 1
-            fi
+            if [ "$attempt" -eq 4 ]; then exit 1; fi
             sleep $((attempt * 5))
           done

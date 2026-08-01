@@ -19,6 +19,7 @@
     "test:agent:dist": "node scripts/test-dmv-agent-dist.mjs",
     "test:package-reproducibility": "node --test tests/dmv-package-reproducibility.test.mjs tests/dmv-package-verifier.test.mjs tests/dmv-package-workflow.test.mjs",
     "verify:packages": "node scripts/verify-dmv-packages.mjs",
+    "verify:package-release-state": "node scripts/check-dmv-release-state.mjs",
     "test:edge": "deno test --allow-env --allow-net supabase/functions/register-agent/index.test.ts",
     "test": "pnpm check && pnpm test:web && pnpm test:worker && pnpm test:agent:source && pnpm test:agent:dist && node --test tests/dmv-package-reproducibility.test.mjs tests/dmv-package-workflow.test.mjs && pnpm test:edge",
     "text:audit": "node scripts/text-surfaces/run-audit.mjs",

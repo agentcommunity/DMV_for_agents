@@ -231,9 +231,13 @@ pnpm build
 
 # Reproducible canonical + compatibility-alias package proof. This builds from
 # clean source, packs exact allow-lists, clean-installs with scripts disabled,
-# runs CLI/MCP contracts, checks the current registry, and performs only
-# read-only production doctor/lookup and secretless-gate operations.
+# runs CLI/MCP contracts, and checks the current registry. It performs no
+# production operation unless the explicit production-smoke flag is present.
 pnpm verify:packages -- --registry-mode=current
+
+# Separate non-registration production smoke. This creates no business row,
+# but consumes live lookup/rate-limit quota and may populate caches.
+pnpm verify:packages -- --registry-mode=current --production-smoke
 
 # Minimal static server (no SPA fallback for /c/... routes)
 uv run python -m http.server 8080

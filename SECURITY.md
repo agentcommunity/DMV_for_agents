@@ -27,14 +27,21 @@ We'll acknowledge your report within 48 hours and work with you on a fix before 
 ## Package supply chain
 
 - `@agentcommunity/dmv-agent` is the one canonical capability; `dmv-agent` is
-  compatibility-only and must depend exactly on the released canonical version.
+  compatibility-only, and alias source `0.1.3` must use the exact approved
+  dependency range `@agentcommunity/dmv-agent@^0.3.0`.
 - The package verifier uses explicit archive allow-lists, exact license/docs
-  bytes, secret scans, script-disabled clean installs, bounded registry and
-  production requests, and SRI checks. It never performs a live registration.
-- npm publication is restricted to the GitHub-hosted OIDC workflow, canonical
-  first. Registry signatures are not provenance; post-publish evidence requires
-  npm provenance attestations. Trusted-publisher configuration remains an npm
-  owner action, and no long-lived npm release token belongs in this repository.
+  bytes, exact dependency/lifecycle/publish configuration, secret scans,
+  script-disabled clean installs, bounded registry requests, and SRI checks.
+  Production operations are opt-in via `--production-smoke`; they never perform
+  a registration or business-data write, but do consume quota and may populate
+  caches.
+- npm publication is restricted to the main-only GitHub-hosted OIDC workflow,
+  canonical first. Candidate code never receives OIDC authority. Registry
+  signatures are not provenance; post-publish evidence separately requires
+  `npm audit signatures` cryptographic verification and exact SLSA source,
+  workflow, ref, commit, builder, and artifact bindings. Trusted-publisher and
+  protected-environment configuration remains an npm/GitHub owner action, and
+  no long-lived npm release token belongs in this repository.
 
 ## What's out of scope
 

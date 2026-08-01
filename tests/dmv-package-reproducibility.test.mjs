@@ -6,7 +6,11 @@ import {
   assertAliasRegistryContract,
   assertArtifactEntries,
   assertCanonicalRegistryContract,
+  classifyReleasePackageState,
+  classifyReleaseSequence,
+  createVerifierChildEnvironment,
   assertNoSensitiveArtifact,
+  assertNoProvenanceDisablingNpmConfig,
   assertIssuedCliOutput,
   assertProvenanceBundle,
   assertSourceContracts,
@@ -78,6 +82,18 @@ test('artifact validation rejects secret-bearing content without echoing the sec
       assert.doesNotMatch(error.message, new RegExp(secret));
       return true;
     },
+  );
+});
+
+test('npm configuration cannot disable or replace workflow-generated provenance', () => {
+  assert.doesNotThrow(() => assertNoProvenanceDisablingNpmConfig('audit=false\nfund=false\n', '.npmrc'));
+  assert.throws(
+    () => assertNoProvenanceDisablingNpmConfig('provenance=false\n', '.npmrc'),
+    /provenance-disabling/i,
+  );
+  assert.throws(
+    () => assertNoProvenanceDisablingNpmConfig('provenance-file=attestation.json\n', '.npmrc'),
+    /provenance-disabling/i,
   );
 });
 
@@ -217,6 +233,34 @@ test('source manifests define one scoped capability and one exact compatibility 
     () => assertSourceContracts(canonical, alias, { expectedGitHead: 'a'.repeat(40) }),
     /gitHead/i,
   );
+  assert.throws(
+    () => assertSourceContracts({
+      ...canonical,
+      dependencies: { '@modelcontextprotocol/sdk': '^1.0.1' },
+    }, alias),
+    /runtime dependency map/i,
+  );
+  assert.throws(
+    () => assertSourceContracts({
+      ...canonical,
+      scripts: { install: 'node surprise.js' },
+    }, alias),
+    /lifecycle script/i,
+  );
+  assert.throws(
+    () => assertSourceContracts({
+      ...canonical,
+      scripts: { prepublishOnly: 'node candidate-code-with-oidc.js' },
+    }, alias),
+    /lifecycle script/i,
+  );
+  assert.throws(
+    () => assertSourceContracts({
+      ...canonical,
+      publishConfig: { provenance: false },
+    }, alias),
+    /provenance/i,
+  );
 });
 
 test('tarball integrity uses npm sha512 SRI format', () => {
@@ -241,6 +285,7 @@ test('production lookup evidence requires an issued live-check result', () => {
 });
 
 test('provenance validation binds the package digest to the trusted workflow', () => {
+  const commit = 'a'.repeat(40);
   const payload = {
     _type: 'https://in-toto.io/Statement/v1',
     predicateType: 'https://slsa.dev/provenance/v1',
@@ -250,12 +295,22 @@ test('provenance validation binds the package digest to the trusted workflow', (
     }],
     predicate: {
       buildDefinition: {
+        buildType: 'https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1',
         externalParameters: {
           workflow: {
             repository: 'https://github.com/agentcommunity/DMV_for_agents',
             path: '.github/workflows/publish-dmv-packages.yml',
+            ref: 'refs/heads/main',
           },
         },
+        internalParameters: { github: { runner_environment: 'github-hosted' } },
+        resolvedDependencies: [{
+          uri: 'git+https://github.com/agentcommunity/DMV_for_agents@refs/heads/main',
+          digest: { gitCommit: commit },
+        }],
+      },
+      runDetails: {
+        builder: { id: 'https://github.com/actions/runner/github-hosted' },
       },
     },
   };
@@ -264,6 +319,7 @@ test('provenance validation binds the package digest to the trusted workflow', (
       predicateType: 'https://slsa.dev/provenance/v1',
       bundle: {
         dsseEnvelope: {
+          payloadType: 'application/vnd.in-toto+json',
           payload: Buffer.from(JSON.stringify(payload)).toString('base64'),
         },
       },
@@ -274,21 +330,157 @@ test('provenance validation binds the package digest to the trusted workflow', (
     packageName: '@agentcommunity/dmv-agent',
     version: '0.3.0',
     integrity: `sha512-${Buffer.from('ab'.repeat(64), 'hex').toString('base64')}`,
+    expectedGitHead: commit,
   }));
   assert.throws(
     () => assertProvenanceBundle(response, {
       packageName: '@agentcommunity/dmv-agent',
       version: '0.3.0',
       integrity: `sha512-${Buffer.from('cd'.repeat(64), 'hex').toString('base64')}`,
+      expectedGitHead: commit,
     }),
     /subject digest/i,
   );
+  const wrongRef = structuredClone(response);
+  const wrongStatement = JSON.parse(Buffer.from(
+    wrongRef.attestations[0].bundle.dsseEnvelope.payload,
+    'base64',
+  ).toString('utf8'));
+  wrongStatement.predicate.buildDefinition.externalParameters.workflow.ref = 'refs/heads/feature';
+  wrongRef.attestations[0].bundle.dsseEnvelope.payload = Buffer.from(
+    JSON.stringify(wrongStatement),
+  ).toString('base64');
+  assert.throws(
+    () => assertProvenanceBundle(wrongRef, {
+      packageName: '@agentcommunity/dmv-agent',
+      version: '0.3.0',
+      integrity: `sha512-${Buffer.from('ab'.repeat(64), 'hex').toString('base64')}`,
+      expectedGitHead: commit,
+    }),
+    /main ref/i,
+  );
+
+  const invalidCases = [
+    ['statement type', (statement) => { statement._type = 'https://example.test/Statement'; }, /statement type/i],
+    ['build type', (statement) => { statement.predicate.buildDefinition.buildType = 'https://example.test/build'; }, /build type/i],
+    ['runner', (statement) => { statement.predicate.buildDefinition.internalParameters.github.runner_environment = 'self-hosted'; }, /runner environment/i],
+    ['builder', (statement) => { statement.predicate.runDetails.builder.id = 'https://example.test/builder'; }, /release builder/i],
+    ['commit', (statement) => { statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit = 'b'.repeat(40); }, /gitCommit/i],
+  ];
+  for (const [label, mutate, expectedError] of invalidCases) {
+    const candidate = structuredClone(response);
+    const statement = JSON.parse(Buffer.from(
+      candidate.attestations[0].bundle.dsseEnvelope.payload,
+      'base64',
+    ).toString('utf8'));
+    mutate(statement);
+    candidate.attestations[0].bundle.dsseEnvelope.payload = Buffer.from(
+      JSON.stringify(statement),
+    ).toString('base64');
+    assert.throws(
+      () => assertProvenanceBundle(candidate, {
+        packageName: '@agentcommunity/dmv-agent',
+        version: '0.3.0',
+        integrity: `sha512-${Buffer.from('ab'.repeat(64), 'hex').toString('base64')}`,
+        expectedGitHead: commit,
+      }),
+      expectedError,
+      label,
+    );
+  }
 });
 
-test('secretless upstream verification accepts only the closed 403 gate', () => {
-  assert.doesNotThrow(() => assertSecretlessGateResponse(403, 'registration'));
+test('secretless upstream verification accepts only the exact typed 403 envelope', () => {
+  assert.doesNotThrow(() => assertSecretlessGateResponse({
+    status: 403,
+    contentType: 'application/json',
+    body: { error: 'direct_access_deprecated' },
+  }, 'lookup'));
   assert.throws(
-    () => assertSecretlessGateResponse(200, 'registration'),
-    /registration.*expected 403.*HTTP 200/i,
+    () => assertSecretlessGateResponse({
+      status: 403,
+      contentType: 'text/html',
+      body: { error: 'direct_access_deprecated' },
+    }, 'lookup'),
+    /media type/i,
   );
+  assert.throws(
+    () => assertSecretlessGateResponse({
+      status: 403,
+      contentType: 'application/json',
+      body: { error: 'jwt_required' },
+    }, 'lookup'),
+    /direct_access_deprecated/i,
+  );
+  assert.throws(
+    () => assertSecretlessGateResponse({
+      status: 403,
+      contentType: 'application/json',
+      body: { error: 'direct_access_deprecated', extra: true },
+    }, 'lookup'),
+    /exact JSON envelope/i,
+  );
+  assert.doesNotThrow(() => assertSecretlessGateResponse({
+    status: 403,
+    contentType: 'application/json',
+    body: {
+      error: 'direct_access_deprecated',
+      message:
+        'Direct access to this edge function is no longer supported. Use '
+        + 'https://dmv.agentcommunity.org/api/register (the DMV worker proxy) '
+        + 'or update @agentcommunity/dmv-agent to the latest version via '
+        + '`bunx @agentcommunity/dmv-agent register`.',
+    },
+  }, 'registration'));
+});
+
+test('release state is absent, exact, or a version-bump-required mismatch', () => {
+  assert.equal(classifyReleasePackageState(null, {
+    packageName: '@agentcommunity/dmv-agent',
+    expectedIntegrity: 'sha512-local',
+  }), 'absent');
+  assert.equal(classifyReleasePackageState({ dist: { integrity: 'sha512-local' } }, {
+    packageName: '@agentcommunity/dmv-agent',
+    expectedIntegrity: 'sha512-local',
+  }), 'exact');
+  assert.throws(
+    () => classifyReleasePackageState({ dist: { integrity: 'sha512-other' } }, {
+      packageName: '@agentcommunity/dmv-agent',
+      expectedIntegrity: 'sha512-local',
+    }),
+    /version bump required/i,
+  );
+});
+
+test('release sequence resumes only through absent, canonical-only, or alias-complete states', () => {
+  assert.equal(classifyReleaseSequence('absent', 'absent'), 'publish-canonical');
+  assert.equal(classifyReleaseSequence('exact', 'absent'), 'publish-alias');
+  assert.equal(classifyReleaseSequence('exact', 'exact'), 'complete');
+  assert.throws(
+    () => classifyReleaseSequence('absent', 'exact'),
+    /ambiguous.*version bump required/i,
+  );
+});
+
+test('verifier child processes cannot inherit release credentials or GitHub OIDC request authority', () => {
+  const environment = createVerifierChildEnvironment('/tmp/npm-home', {
+    PATH: '/usr/bin',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'oidc-token',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://oidc.example.test',
+    NPM_TOKEN: 'npm-token',
+    NODE_AUTH_TOKEN: 'node-token',
+    NPM_ID_TOKEN: 'npm-id-token',
+    npm_config__auth: 'auth',
+  });
+  assert.equal(environment.PATH, '/usr/bin');
+  for (const key of [
+    'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+    'ACTIONS_ID_TOKEN_REQUEST_URL',
+    'NPM_TOKEN',
+    'NODE_AUTH_TOKEN',
+    'NPM_ID_TOKEN',
+    'npm_config__auth',
+  ]) {
+    assert.equal(environment[key], undefined, `${key} must be scrubbed`);
+  }
 });

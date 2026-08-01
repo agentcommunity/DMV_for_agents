@@ -384,16 +384,24 @@ The package supports maintained Node LTS releases 22 and 24 (`engines.node` is
 `>=22`). Before publication, `pnpm verify:packages -- --registry-mode=current`
 builds from a clean tree, checks exact canonical and alias archive allow-lists,
 proves README/CHANGELOG/LICENSE bytes, scans for secrets, installs with scripts
-disabled, invokes installed CLI/MCP contracts, validates the current registry,
-and runs read-only production doctor/lookup plus secretless-gate checks. It removes generated
-`packages/dmv-agent/dist` even when verification fails.
+disabled, invokes installed CLI/MCP contracts, and validates the current
+registry. It performs no production operation by default and removes generated
+`packages/dmv-agent/dist` even when verification fails. The separate
+`--production-smoke` opt-in runs doctor, an issued lookup, and exact secretless
+upstream gates. It never registers or writes business data, but it consumes live
+lookup/rate-limit quota and may populate caches.
 
-Publication is only through the GitHub-hosted trusted-publisher workflow in
-`.github/workflows/publish-dmv-packages.yml`. The currently published releases
+Publication is only through the main-only GitHub-hosted trusted-publisher
+workflow in `.github/workflows/publish-dmv-packages.yml`. Unprivileged jobs
+prepare and prove exact artifacts; only protected `npm-production` jobs receive
+OIDC and publish those downloaded tarballs with explicit provenance. The
+currently published releases
 remain canonical `0.2.2` and compatibility alias `0.1.2`; source `0.3.0` and
 alias `0.1.3` remain unpublished until an npm owner configures and authorizes
-that workflow. The alias is published only after the canonical artifact's
-integrity, commit, and provenance have been verified.
+that workflow. Absent candidates publish; exact candidates are cryptographically
+re-proved and skipped; mismatches require a version bump. The alias is published
+only after the canonical artifact's integrity, commit, SLSA identity, and
+Sigstore transparency evidence have been verified.
 
 ### Deploying the lookup boundary
 

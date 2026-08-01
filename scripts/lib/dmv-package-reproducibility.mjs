@@ -5,6 +5,26 @@ const REPOSITORY_URL = 'git+https://github.com/agentcommunity/DMV_for_agents.git
 const HOMEPAGE = 'https://dmv.agentcommunity.org';
 const BUGS_URL = 'https://github.com/agentcommunity/DMV_for_agents/issues';
 const NODE_ENGINE = '>=22';
+const CANONICAL_RUNTIME_DEPENDENCIES = { '@modelcontextprotocol/sdk': '^1.0.0' };
+const PROHIBITED_LIFECYCLE_SCRIPTS = [
+  'preinstall',
+  'install',
+  'postinstall',
+  'prepublish',
+  'prepublishOnly',
+  'prepack',
+  'prepare',
+  'postpack',
+  'publish',
+  'postpublish',
+];
+const SLSA_BUILD_TYPES = new Set([
+  'https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1',
+  'https://actions.github.io/buildtypes/workflow/v1',
+]);
+const REPOSITORY_HTTPS_URL = 'https://github.com/agentcommunity/DMV_for_agents';
+const RELEASE_WORKFLOW_PATH = '.github/workflows/publish-dmv-packages.yml';
+const RELEASE_REF = 'refs/heads/main';
 
 export function assertArtifactEntries(entries, expectedPaths, packageName) {
   const actualPaths = entries.map((entry) => normalizeArtifactPath(entry.path));
@@ -38,6 +58,12 @@ export function assertNoSensitiveArtifact(artifactPath, content) {
   }
 }
 
+export function assertNoProvenanceDisablingNpmConfig(content, configName) {
+  if (/^\s*(?:provenance\s*=\s*false|provenance-file\s*=)/im.test(content)) {
+    throw new Error(`${configName} contains provenance-disabling npm configuration`);
+  }
+}
+
 export function assertSourceContracts(canonical, alias, { expectedGitHead } = {}) {
   assert.equal(canonical.name, '@agentcommunity/dmv-agent', 'canonical source package name');
   assertCommonRegistryMetadata(canonical, 'packages/dmv-agent');
@@ -49,12 +75,19 @@ export function assertSourceContracts(canonical, alias, { expectedGitHead } = {}
     ['dist/', 'skills/', 'README.md', 'CHANGELOG.md', 'LICENSE'],
     'canonical files allow-list',
   );
+  assert.deepEqual(
+    canonical.dependencies,
+    CANONICAL_RUNTIME_DEPENDENCIES,
+    'canonical runtime dependency map',
+  );
+  assertSafePackagePublishConfiguration(canonical, 'canonical');
 
   assert.equal(alias.name, 'dmv-agent', 'alias source package name');
   assert.match(alias.description ?? '', /^Compatibility alias for the canonical /);
   assertCommonRegistryMetadata(alias, 'packages/dmv-agent-alias');
   assert.deepEqual(alias.bin, { 'dmv-agent': 'bin/dmv-agent.js' }, 'alias source binary');
   assert.deepEqual(alias.files, ['bin/', 'README.md', 'LICENSE'], 'alias files allow-list');
+  assertSafePackagePublishConfiguration(alias, 'alias');
   const expectedRange = `^${canonical.version}`;
   if (
     Object.keys(alias.dependencies ?? {}).length !== 1
@@ -138,6 +171,44 @@ export function sha512Integrity(content) {
   return `sha512-${createHash('sha512').update(content).digest('base64')}`;
 }
 
+export function classifyReleasePackageState(metadata, { packageName, expectedIntegrity }) {
+  if (metadata === null) {
+    return 'absent';
+  }
+  if (metadata?.dist?.integrity !== expectedIntegrity) {
+    throw new Error(
+      `${packageName} already exists with different or ambiguous bytes; version bump required`,
+    );
+  }
+  return 'exact';
+}
+
+export function classifyReleaseSequence(canonicalState, aliasState) {
+  if (canonicalState === 'absent' && aliasState === 'absent') return 'publish-canonical';
+  if (canonicalState === 'exact' && aliasState === 'absent') return 'publish-alias';
+  if (canonicalState === 'exact' && aliasState === 'exact') return 'complete';
+  throw new Error('Ambiguous release sequence; version bump required');
+}
+
+export function createVerifierChildEnvironment(npmHome, sourceEnvironment = process.env) {
+  const userConfig = `${npmHome}/.npmrc`;
+  const environment = {
+    ...sourceEnvironment,
+    HOME: npmHome,
+    USERPROFILE: npmHome,
+    npm_config_userconfig: userConfig,
+  };
+  for (const key of Object.keys(environment)) {
+    if (
+      /^(?:ACTIONS_ID_TOKEN_REQUEST_TOKEN|ACTIONS_ID_TOKEN_REQUEST_URL|NPM_ID_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN)$/i.test(key)
+      || /^npm_config_(?:.*auth.*|.*token.*)$/i.test(key)
+    ) {
+      delete environment[key];
+    }
+  }
+  return environment;
+}
+
 export function assertIssuedCliOutput(output, certificateId) {
   const escapedCertificateId = certificateId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const issuedPattern = new RegExp(
@@ -149,12 +220,22 @@ export function assertIssuedCliOutput(output, certificateId) {
   }
 }
 
-export function assertProvenanceBundle(response, { packageName, version, integrity }) {
+export function assertProvenanceBundle(response, {
+  packageName,
+  version,
+  integrity,
+  expectedGitHead,
+}) {
   const provenance = response?.attestations?.find(
     (attestation) => attestation.predicateType === 'https://slsa.dev/provenance/v1',
   );
   assert.ok(provenance, 'SLSA provenance attestation');
   const encodedPayload = provenance.bundle?.dsseEnvelope?.payload;
+  assert.equal(
+    provenance.bundle?.dsseEnvelope?.payloadType,
+    'application/vnd.in-toto+json',
+    'provenance DSSE payload type',
+  );
   assert.equal(typeof encodedPayload, 'string', 'provenance DSSE payload');
   let statement;
   try {
@@ -162,6 +243,7 @@ export function assertProvenanceBundle(response, { packageName, version, integri
   } catch {
     throw new Error('Provenance DSSE payload is not valid JSON');
   }
+  assert.equal(statement._type, 'https://in-toto.io/Statement/v1', 'provenance statement type');
   assert.equal(statement.predicateType, 'https://slsa.dev/provenance/v1', 'provenance predicate type');
   const packagePurl = `pkg:npm/${packageName.replace('@', '%40')}@${version}`;
   const expectedDigest = Buffer.from(integrity.replace(/^sha512-/, ''), 'base64').toString('hex');
@@ -169,19 +251,66 @@ export function assertProvenanceBundle(response, { packageName, version, integri
   if (subject?.digest?.sha512 !== expectedDigest) {
     throw new Error(`Provenance subject digest does not match ${packageName}@${version}`);
   }
-  const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
+  const buildDefinition = statement.predicate?.buildDefinition;
+  if (!SLSA_BUILD_TYPES.has(buildDefinition?.buildType)) {
+    throw new Error('Provenance build type is not an approved GitHub Actions SLSA workflow type');
+  }
+  const workflow = buildDefinition?.externalParameters?.workflow;
+  if (workflow?.ref !== RELEASE_REF) {
+    throw new Error('Provenance must bind the intended main ref');
+  }
   assert.deepEqual(workflow && {
     repository: workflow.repository,
     path: workflow.path,
+    ref: workflow.ref,
   }, {
-    repository: 'https://github.com/agentcommunity/DMV_for_agents',
-    path: '.github/workflows/publish-dmv-packages.yml',
+    repository: REPOSITORY_HTTPS_URL,
+    path: RELEASE_WORKFLOW_PATH,
+    ref: RELEASE_REF,
   }, 'trusted publishing workflow identity');
+  const runnerEnvironment = buildDefinition?.internalParameters?.github?.runner_environment;
+  if (runnerEnvironment !== undefined) {
+    assert.equal(runnerEnvironment, 'github-hosted', 'GitHub-hosted runner environment');
+  }
+  const builderId = statement.predicate?.runDetails?.builder?.id;
+  if (builderId !== 'https://github.com/actions/runner/github-hosted') {
+    throw new Error('Provenance builder is not the approved GitHub-hosted release builder');
+  }
+  if (expectedGitHead !== undefined) {
+    const resolvedSource = buildDefinition?.resolvedDependencies?.find(
+      (dependency) => dependency?.uri === `git+${REPOSITORY_HTTPS_URL}@${RELEASE_REF}`,
+    );
+    assert.equal(
+      resolvedSource?.digest?.gitCommit,
+      expectedGitHead,
+      'resolved source gitCommit',
+    );
+  }
 }
 
-export function assertSecretlessGateResponse(status, gateName) {
-  if (status !== 403) {
-    throw new Error(`${gateName} secretless gate expected 403, received HTTP ${status}`);
+export function assertSecretlessGateResponse(response, gateName) {
+  if (response.status !== 403) {
+    throw new Error(`${gateName} secretless gate expected 403, received HTTP ${response.status}`);
+  }
+  if (response.contentType !== 'application/json') {
+    throw new Error(`${gateName} secretless gate expected exact application/json media type`);
+  }
+  const expectedBody = gateName === 'registration'
+    ? {
+        error: 'direct_access_deprecated',
+        message:
+          'Direct access to this edge function is no longer supported. Use '
+          + 'https://dmv.agentcommunity.org/api/register (the DMV worker proxy) '
+          + 'or update @agentcommunity/dmv-agent to the latest version via '
+          + '`bunx @agentcommunity/dmv-agent register`.',
+      }
+    : { error: 'direct_access_deprecated' };
+  try {
+    assert.deepEqual(response.body, expectedBody);
+  } catch {
+    throw new Error(
+      `${gateName} secretless gate requires the exact JSON envelope with direct_access_deprecated and no extra fields`,
+    );
   }
 }
 
@@ -199,6 +328,21 @@ function assertCommonRegistryMetadata(metadata, directory) {
   assert.deepEqual(metadata.bugs, { url: BUGS_URL }, 'bugs metadata');
   assert.equal(metadata.license, 'MIT', 'license metadata');
   assert.deepEqual(metadata.engines, { node: NODE_ENGINE }, 'Node engine metadata');
+}
+
+function assertSafePackagePublishConfiguration(manifest, label) {
+  for (const script of PROHIBITED_LIFECYCLE_SCRIPTS) {
+    if (Object.hasOwn(manifest.scripts ?? {}, script)) {
+      throw new Error(`${label} package contains prohibited ${script} lifecycle script`);
+    }
+  }
+  if (
+    manifest.publishConfig?.provenance === false
+    || Object.hasOwn(manifest.publishConfig ?? {}, 'provenanceFile')
+    || Object.hasOwn(manifest.publishConfig ?? {}, 'provenance-file')
+  ) {
+    throw new Error(`${label} package contains provenance-disabling publish configuration`);
+  }
 }
 
 function assertRegistryReleaseEvidence(metadata, { expectedGitHead, requireProvenance }) {

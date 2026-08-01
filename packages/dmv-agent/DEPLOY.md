@@ -378,12 +378,22 @@ and compatibility alias `dmv-agent@0.1.2`. Source `0.3.0` and alias `0.1.3`
 are release candidates, not published releases. npm versions are immutable, so
 do not publish either candidate manually or before all gates pass.
 
-An npm owner must configure the exact GitHub trusted publisher
-`agentcommunity/DMV_for_agents` + `publish-dmv-packages.yml` for **each**
-package and allow `npm publish`. The workflow runs only on a GitHub-hosted
-runner with `id-token: write`, exact Node `24.18.1` and npm `12.0.2`, and no
-dependency cache. npm's current trusted-publishing minimums are Node 22.14 and
-npm 11.5.1. Do not add `NPM_TOKEN` or `NODE_AUTH_TOKEN`.
+An npm owner must configure the same exact GitHub trusted publisher for **each**
+package: organization `agentcommunity`, repository `DMV_for_agents`, workflow
+filename `publish-dmv-packages.yml`, environment `npm-production`, and allowed
+action `npm publish`. In GitHub, create that exact protected environment with
+required reviewers and a deployment branch rule allowing `main` only. The
+workflow also enforces `refs/heads/main`. Keep these repository, workflow, and
+environment values identical for both packages.
+
+Unprivileged jobs run all candidate checkout/build/test/pack/state/proof code.
+Only the two minimal publish jobs receive `id-token: write`; they use the
+protected environment, download the already-verified run artifact, and execute
+one exact `npm publish <tgz> --access public --provenance` command. Verifier
+child processes scrub GitHub OIDC request variables and npm credential
+variables. The workflow uses GitHub-hosted runners, exact Node `24.18.1` and npm
+`12.0.2`, and no dependency cache. npm's current trusted-publishing minimums are
+Node 22.14 and npm 11.5.1. Do not add `NPM_TOKEN` or `NODE_AUTH_TOKEN`.
 
 Before authorizing the workflow, run from the repository root:
 
@@ -403,17 +413,26 @@ source manifests, rejects package-local lockfiles (the root
 exact allow-lists, exact README/CHANGELOG/LICENSE bytes, and no secret/source/
 test leakage. It clean-installs with scripts disabled, invokes both aliases of
 the CLI plus the canonical MCP server, checks bounded registry requests and
-tarball integrity, and performs only read-only production doctor/issued-lookup
-and secretless registration/lookup-gate operations. It never submits a valid registration and always removes its
-generated package `dist`.
+tarball integrity. Its default mode performs no production operation. Run
+`pnpm verify:packages -- --registry-mode=current --production-smoke` separately
+only when live evidence is intended. That opt-in performs doctor, issued lookup,
+and exact secretless registration/lookup-gate checks. It never submits a
+registration or writes business data, but it consumes live rate-limit/lookup
+quota and may populate caches. Every mode removes its generated package `dist`.
 
 Dispatch `Publish DMV npm packages` only with the exact confirmation string.
-The workflow produces two verified tarballs, publishes the scoped canonical
-one first, then requires its exact version, `gitHead`, SRI integrity, downloaded
-tarball integrity, and provenance attestation. Only after that succeeds can it
-publish the alias. The final gate requires the alias to depend exactly on
-`@agentcommunity/dmv-agent@^0.3.0` and verifies the same evidence for both.
-Registry signatures are not accepted as provenance.
+The workflow produces and uploads two verified tarballs once. For each immutable
+version, a registry `404` is absent and publishes; a present candidate must match
+the exact local SRI and pass full proof, then skips safely. A different or
+ambiguous result fails with `version bump required`. This makes reruns safe after
+canonical-only publication and after alias completion without repacking inside
+an OIDC job. Canonical exact proof completes before alias state or publication.
+The final gate requires the alias dependency range to be exactly
+`@agentcommunity/dmv-agent@^0.3.0` and proves SRI/downloaded bytes, `gitHead`,
+DSSE/in-toto/SLSA type, GitHub-hosted builder, exact repo/workflow/main ref,
+resolved source commit, and package subject digest. `npm audit signatures`
+cryptographically verifies signatures, attestations, and transparency evidence;
+registry signatures remain distinct from provenance.
 
 Trusted-publisher setup and workflow dispatch are external owner actions. No
 package is published merely by merging this source. After the first successful
@@ -424,6 +443,8 @@ Primary release references checked 2026-08-01:
 
 - [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
 - [npm publish and pack contents](https://docs.npmjs.com/cli/publish/)
+- [GitHub deployment environments and protection rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+- [GitHub OIDC job permissions](https://docs.github.com/en/actions/reference/security/oidc)
 - [Node.js release status](https://nodejs.org/en/about/previous-releases)
 - [GitHub `setup-node`](https://github.com/actions/setup-node/blob/main/README.md)
 

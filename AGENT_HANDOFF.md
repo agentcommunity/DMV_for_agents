@@ -76,6 +76,15 @@ OIDC workflow and reproducibility verifier, but npm trusted-publisher
 configuration and workflow dispatch have not occurred. No provenance is
 claimed for the current `0.2.2`/`0.1.2` releases.
 
+The release workflow now confines OIDC to two main-only, protected
+`npm-production` publish jobs; candidate code runs only in unprivileged jobs.
+It resumes through absent-or-exact canonical and alias states, cryptographically
+verifies provenance with `npm audit signatures`, and requires a version bump on
+any mismatch or ambiguous state. The default package verifier performs no
+production operation. Its explicit non-registration `--production-smoke` does
+consume live quota and may populate caches. External owner setup for both npm
+trusted publishers and the protected GitHub environment remains outstanding.
+
 Production was re-verified on 2026-08-01: normal requests return real `issued`
 or `not_found` results, while `unavailable` remains reserved for genuine
 failures.
@@ -246,7 +255,8 @@ Update all status surfaces in DEPLOY.md after any future evidence-backed rollout
 - Don't `wrangler secret put` on `dmv-agentcommunity` (see quirk #3) — use the dashboard
 - Don't publish either npm package manually. Use the owner-authorized
   `publish-dmv-packages.yml` workflow, which publishes the exact verified
-  canonical tarball first and blocks the alias until canonical provenance passes.
+  canonical tarball first, blocks the alias until canonical provenance passes,
+  and requires the protected `npm-production` environment on `main`.
 - Don't push PAGE changes to main without reviewing them — PAGE auto-deploys via CF git integration
 - Don't remove the `x-dmv-proxy` gate or weaken it back to a public constant — it's now secret-backed (`DMV_PROXY_SECRET`, constant-time compared, fail-closed) and is the only thing closing the direct-Supabase bypass
 - Don't call or document `lookup-agent` as a public API, restore domain lookup, or deploy the lookup Edge Function before the Worker replacement

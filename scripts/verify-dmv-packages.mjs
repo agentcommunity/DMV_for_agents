@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -26,7 +27,9 @@ import {
   assertProvenanceBundle,
   assertSecretlessGateResponse,
   assertNoSensitiveArtifact,
+  assertNoProvenanceDisablingNpmConfig,
   assertSourceContracts,
+  createVerifierChildEnvironment,
   fetchJsonWithDeadline,
   sha512Integrity,
 } from './lib/dmv-package-reproducibility.mjs';
@@ -76,14 +79,13 @@ const canonicalExpectedFiles = [
 const aliasExpectedFiles = ['LICENSE', 'README.md', 'bin/dmv-agent.js', 'package.json'];
 
 const options = parseOptions(process.argv.slice(2));
+if (existsSync(DIST_DIR)) {
+  throw new Error('Refusing to verify with a pre-existing packages/dmv-agent/dist; remove stale output first');
+}
 const tempRoot = mkdtempSync(path.join(tmpdir(), 'dmv-package-verifier-'));
 const npmEnvironment = createIsolatedNpmEnvironment(tempRoot);
 let canonicalPack;
 let aliasPack;
-
-if (existsSync(DIST_DIR)) {
-  throw new Error('Refusing to verify with a pre-existing packages/dmv-agent/dist; remove stale output first');
-}
 
 try {
   const canonicalManifest = readJson(path.join(CANONICAL_DIR, 'package.json'));
@@ -94,6 +96,7 @@ try {
       : undefined,
   });
   assertLockfileAuthority();
+  assertNpmConfiguration();
   assertLicenseCopies();
 
   run('pnpm', ['--dir', CANONICAL_DIR, 'build'], { env: npmEnvironment });
@@ -129,17 +132,7 @@ try {
   await runInstalledMcpContract(canonicalConsumer, npmEnvironment);
 
   if (options.packOutput) {
-    mkdirSync(options.packOutput, { recursive: true });
-    copyFileSync(
-      canonicalPack.tarball,
-      path.join(options.packOutput, path.basename(canonicalPack.tarball)),
-      fsConstants.COPYFILE_EXCL,
-    );
-    copyFileSync(
-      aliasPack.tarball,
-      path.join(options.packOutput, path.basename(aliasPack.tarball)),
-      fsConstants.COPYFILE_EXCL,
-    );
+    exportVerifiedPacks(options.packOutput, [canonicalPack.tarball, aliasPack.tarball]);
   }
 
   if (options.registryMode !== 'none') {
@@ -152,7 +145,7 @@ try {
       expectedGitHead: options.expectedGitHead,
     });
   }
-  if (!options.skipProduction) {
+  if (options.productionSmoke) {
     await runProductionContracts(canonicalConsumer, npmEnvironment);
   }
 
@@ -164,7 +157,7 @@ try {
 
 function parseOptions(args) {
   let registryMode = 'current';
-  let skipProduction = false;
+  let productionSmoke = false;
   let expectedGitHead;
   let packOutput;
   for (const arg of args) {
@@ -172,8 +165,8 @@ function parseOptions(args) {
       continue;
     } else if (arg.startsWith('--registry-mode=')) {
       registryMode = arg.slice('--registry-mode='.length);
-    } else if (arg === '--skip-production') {
-      skipProduction = true;
+    } else if (arg === '--production-smoke') {
+      productionSmoke = true;
     } else if (arg.startsWith('--expected-git-head=')) {
       expectedGitHead = arg.slice('--expected-git-head='.length);
     } else if (arg.startsWith('--pack-output=')) {
@@ -189,7 +182,29 @@ function parseOptions(args) {
     const result = run('git', ['rev-parse', 'HEAD']);
     expectedGitHead = result.stdout.trim();
   }
-  return { registryMode, skipProduction, expectedGitHead, packOutput };
+  return { registryMode, productionSmoke, expectedGitHead, packOutput };
+}
+
+function exportVerifiedPacks(outputDirectory, tarballs) {
+  if (existsSync(outputDirectory)) {
+    throw new Error(`Refusing to replace existing verified-pack output: ${outputDirectory}`);
+  }
+  const parentDirectory = path.dirname(outputDirectory);
+  mkdirSync(parentDirectory, { recursive: true });
+  const stagingDirectory = mkdtempSync(path.join(parentDirectory, '.dmv-release-artifacts-'));
+  try {
+    for (const tarball of tarballs) {
+      copyFileSync(
+        tarball,
+        path.join(stagingDirectory, path.basename(tarball)),
+        fsConstants.COPYFILE_EXCL,
+      );
+    }
+    renameSync(stagingDirectory, outputDirectory);
+  } catch (error) {
+    rmSync(stagingDirectory, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function assertLockfileAuthority() {
@@ -199,6 +214,15 @@ function assertLockfileAuthority() {
   assert.match(rootLock, /^  packages\/dmv-agent:\n/m, 'root pnpm lock owns canonical importer');
   assert.match(rootLock, /^  packages\/dmv-agent-alias:\n/m, 'root pnpm lock owns alias importer');
   assert.match(rootLock, /specifier: \^0\.3\.0\n\s+version: link:\.\.\/dmv-agent/, 'alias resolves to workspace canonical');
+}
+
+function assertNpmConfiguration() {
+  for (const directory of [ROOT, CANONICAL_DIR, ALIAS_DIR]) {
+    const npmrc = path.join(directory, '.npmrc');
+    if (existsSync(npmrc)) {
+      assertNoProvenanceDisablingNpmConfig(readFileSync(npmrc, 'utf8'), npmrc);
+    }
+  }
 }
 
 function assertLicenseCopies() {
@@ -412,6 +436,7 @@ async function verifyAttestation(metadata) {
     packageName: metadata.name,
     version: metadata.version,
     integrity: metadata.dist.integrity,
+    expectedGitHead: metadata.gitHead,
   });
 }
 
@@ -453,9 +478,16 @@ async function verifySecretlessGate(gateName, url, init) {
   const timeout = setTimeout(() => controller.abort(), REGISTRY_TIMEOUT_MS);
   timeout.unref?.();
   try {
-    const response = await fetch(url, { ...init, redirect: 'error', signal: controller.signal });
-    assertSecretlessGateResponse(response.status, gateName);
-    await response.body?.cancel();
+    const response = await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
+    const contentType = response.headers.get('content-type');
+    const bodyText = await response.text();
+    let body;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      throw new Error(`${gateName} secretless gate response is not JSON`);
+    }
+    assertSecretlessGateResponse({ status: response.status, contentType, body }, gateName);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`${gateName} secretless gate timed out after ${REGISTRY_TIMEOUT_MS}ms`);
@@ -584,11 +616,5 @@ function createIsolatedNpmEnvironment(directory) {
   mkdirSync(npmHome, { recursive: true });
   const userConfig = path.join(npmHome, '.npmrc');
   writeFileSync(userConfig, 'audit=false\nfund=false\n');
-  const environment = { ...process.env, HOME: npmHome, USERPROFILE: npmHome, npm_config_userconfig: userConfig };
-  for (const key of Object.keys(environment)) {
-    if (/^(?:NPM_TOKEN|NODE_AUTH_TOKEN|NPM_CONFIG__AUTH|npm_config__auth)$/i.test(key)) {
-      delete environment[key];
-    }
-  }
-  return environment;
+  return createVerifierChildEnvironment(npmHome);
 }
