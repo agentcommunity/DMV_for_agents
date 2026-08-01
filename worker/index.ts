@@ -1117,11 +1117,12 @@ async function handleRegister(request: Request, env: Env): Promise<Response> {
     gateResult = await runFingerprintGatedUpstream(
       createFingerprintCooldownGate(env.REGISTER_FINGERPRINT_LIMITER),
       fingerprintCooldownKey,
-      () =>
+      (signal) =>
         fetchRegistrationUpstream(`${SUPABASE_FUNCTIONS_ORIGIN}/register-agent`, {
           method: 'POST',
           headers: upstreamHeaders,
           body: JSON.stringify(upstreamBody),
+          signal,
         }),
     );
   } catch (error) {

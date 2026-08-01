@@ -271,10 +271,12 @@ with SHA-256 and uses that hash only as the Durable Object name. One
 for that fingerprint, while its SQLite storage contains only claim IDs and
 timestamps — never a raw fingerprint or IP address. A transaction reserves one
 of exactly three rolling 24-hour slots before the upstream request. A fresh
-`201` mint commits the slot; upstream failures and `already_recorded` replays
-release it. A claim whose completion message is lost is conservatively counted
-as a success after its 60-second lease, then expires on the normal 24-hour
-rolling boundary. This fail-safe prevents a crash between mint and completion
+`201` mint commits the slot; explicit upstream failure responses and
+`already_recorded` replays release it. Upstream has a 45-second deadline inside
+the 60-second lease. A timeout, transport error, or lost completion is
+ambiguous and never releases the claim. It is conservatively recovered as a
+success at lease expiry, then expires after a full 24-hour rolling window from
+that timestamp. This fail-safe prevents a crash between mint and completion
 from reopening a fourth slot. `Retry-After` is derived from the oldest committed
 or conservatively recovered slot. The retained `REGISTER_COOLDOWN_KV` binding is
 unused compatibility state and is not part of enforcement.

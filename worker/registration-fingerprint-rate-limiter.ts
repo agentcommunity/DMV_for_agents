@@ -6,6 +6,7 @@ import {
 
 const STATE_KEY = 'fingerprint-budget';
 const WINDOW_MILLISECONDS = FINGERPRINT_COOLDOWN_SECONDS * 1_000;
+const CLAIM_LEASE_MILLISECONDS = FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
 
 interface FingerprintBudgetState {
   successes: Array<number>;
@@ -43,11 +44,14 @@ function pruneSuccesses(successes: Array<number>, now: number): Array<number> {
 }
 
 function reconcileState(state: FingerprintBudgetState, now: number): FingerprintBudgetState {
-  const claimCutoff = now - FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
+  const claimCutoff = now - CLAIM_LEASE_MILLISECONDS;
   const abandoned = state.pending.filter((claim) => claim.claimedAt <= claimCutoff);
   return {
     successes: pruneSuccesses(
-      [...state.successes, ...abandoned.map((claim) => claim.claimedAt)],
+      [
+        ...state.successes,
+        ...abandoned.map((claim) => claim.claimedAt + CLAIM_LEASE_MILLISECONDS),
+      ],
       now,
     ),
     pending: state.pending.filter((claim) => claim.claimedAt > claimCutoff),
@@ -107,7 +111,9 @@ export class RegistrationFingerprintRateLimiter {
           retry_after_seconds: retryAfterSeconds(
             [
               ...current.successes,
-              ...current.pending.map((claim) => claim.claimedAt),
+              ...current.pending.map(
+                (claim) => claim.claimedAt + CLAIM_LEASE_MILLISECONDS,
+              ),
             ].sort((left, right) => left - right),
             now,
           ),

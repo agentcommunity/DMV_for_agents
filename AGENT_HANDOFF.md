@@ -10,25 +10,34 @@ Start here if you're a fresh agent picking up the DMV project after the cross-re
 
 The per-email lifetime cap upgrade (5 unendorsed → 12 endorsed) was reading `registrations.endorsement_status = 'signed'` to decide whether an email qualified for the higher cap. That column is dead on the shared PAGE DB — signing truth there is `registrations.status = 'complete'` (see PAGE's `docs/SUPABASE.md` and `CLAUDE.md`). Members who signed after `endorsement_status` stopped being written were silently stuck at the 5-cert cap. Fixed in `supabase/functions/register-agent/index.ts` to check `status = 'complete'`; the 5/12 cap values themselves are unchanged, and the query stays fail-closed on error. Deliberately does not also check `endorsement_requests` — that table has no reliable email column for this lookup (only `registration_id` and an unreliable `signer_email`), and this check is keyed by email with no `user_id`/`registration_id` available, so `status='complete'` on `registrations` already answers it in one query. New tests in `supabase/functions/register-agent/index.test.ts`.
 
-## 2026-08-01 — Task 3: fingerprint budget is exact under concurrency
+## 2026-08-01 — Task 3: exact fingerprint budget ready in source, not deployed
 
 The former Workers KV read-then-write cooldown was not atomic: simultaneous
 requests could all observe spare capacity and mint more than the documented
-three certificates. It is replaced by one SQLite Durable Object per SHA-256
+three certificates. This branch replaces it with one SQLite Durable Object per SHA-256
 machine-fingerprint hash (`REGISTER_FINGERPRINT_LIMITER`, forward-only v3
 migration). A transaction reserves a claim before upstream work, so pending
 claims and committed successes jointly occupy the three slots. A fresh 201
 mint commits its timestamp; explicit failures and `already_recorded` replays
-release. If COMPLETE never arrives after a Worker reset, the 60-second lease
-is conservatively counted as a possible success until its rolling 24-hour
-window expires. This avoids reopening a fourth mint while still recovering
-automatically. Durable Object failure fails closed with a generic 503; public
+release. Upstream work has a 45-second deadline inside the 60-second claim
+lease. A timeout or other ambiguous transport failure never releases the
+claim. If COMPLETE never arrives, the claim is conservatively recovered as a
+possible success at lease expiry and remains counted for a full rolling 24
+hours from that timestamp. This avoids reopening a fourth mint while still
+recovering automatically. Durable Object failure fails closed with a generic 503; public
 responses never expose claim IDs, raw fingerprints, or raw IPs. Concurrent,
 abandoned-claim, duplicate-token, malformed-token, release, and rollover
 regressions live in `tests/worker-registration-fingerprint-rate-limiter.test.ts`
 and `tests/worker-register-fingerprint-cooldown.test.ts`.
 
-## 2026-08-01 — Task 4: `verify_certificate` MCP name collision resolved (npm package v0.3.0)
+**Production is still pre-v3 as of this handoff.** The deployed registration
+path still uses `REGISTER_COOLDOWN_KV`; no production Worker version or smoke
+evidence exists yet for `REGISTER_FINGERPRINT_LIMITER`. The April browser
+signup proved the older registration path, not this new Durable Object. Treat
+v3 as ready-to-deploy source until the Cloudflare deployment and post-deploy
+smokes are recorded.
+
+## 2026-08-01 — Task 4: `verify_certificate` name collision resolved in source v0.3.0
 
 Code review across both `agentcommunity_PAGE` and this repo found that the
 `@agentcommunity/dmv-agent` npm package's MCP server exposed a tool named
@@ -69,8 +78,11 @@ failures.
 
 ```
 DMV worker         https://dmv.agentcommunity.org         /api/register live end-to-end
-                                                           Turnstile + shared CF rate limits + exact DO budget
-                                                           all verified with real browser signup 2026-04-09
+                                                           Turnstile + shared CF rate limits + KV cooldown
+                                                           pre-v3 path verified with real browser signup 2026-04-09
+
+v3 source          this branch                             exact REGISTER_FINGERPRINT_LIMITER ready
+                                                           NOT deployed or production-verified
 
 DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate active (DMV_PROXY_SECRET shared secret;
                                                            public v1 constant retired 2026-05-29, now 403)
@@ -96,7 +108,7 @@ PAGE main          shared Supabase project                 hardened independentl
 
 ## The hardening arc, in one paragraph
 
-Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentcommunity_PAGE`) → forward to Supabase `register-agent` with `DMV_PROXY_SECRET`. CLI/MCP path: validate JSON → require `machine_fingerprint` → same shared limiters → one exact SQLite Durable Object budget per hashed fingerprint → forward. CAPTCHA always runs before shared counters. The Durable Object claims capacity before upstream, commits only fresh mints, releases explicit non-mints, and fails closed. Supabase validates again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set while omitting `status` so the DB default applies.
+Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentcommunity_PAGE`) → forward to Supabase `register-agent` with `DMV_PROXY_SECRET`. Production CLI/MCP traffic currently uses the older DMV-local KV cooldown after the shared limits. This branch changes that step to one exact SQLite Durable Object budget per hashed fingerprint: claim before upstream, commit only a fresh mint, release only an explicit non-mint, and fail closed. Supabase validates again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set while omitting `status` so the DB default applies.
 
 The live certificate-verification boundary follows the same model. Public
 clients use only
@@ -146,10 +158,13 @@ A push to DMV main triggers a **Cloudflare worker** redeploy (via CF git integra
 ### 6. Registration fingerprint enforcement is a DMV-local Durable Object
 
 `REGISTER_FINGERPRINT_LIMITER` is one SQLite Durable Object per SHA-256
-machine-fingerprint hash and is never shared with PAGE. Preserve the v3 class,
-export, and binding in every roll-forward. The old `REGISTER_COOLDOWN_KV`
-binding is retained temporarily as unused deployment compatibility state; no
-request path reads or writes it, and it must not be described as enforcement.
+machine-fingerprint hash and is never shared with PAGE. It is ready in this
+branch but not deployed. Before v3 deploys, production recovery must preserve
+the already-deployed v1 `CardRenderer` and v2 `CertificateLookupRateLimiter`;
+it must not claim that v3 is live. Once v3 deploys, every roll-forward must
+also preserve the v3 class, export, migration, and binding. The old
+`REGISTER_COOLDOWN_KV` binding remains the current production enforcement and
+is retained as unused compatibility state only in the v3 source path.
 
 ### 7. The npm CLI auto-resolves the scoped package
 
@@ -176,7 +191,8 @@ Worker first is intentional. The completed rollout recorded invalid `400`, then
 deployed only `lookup-agent --no-verify-jwt` and proved `REEF-068-BD0Q` issued,
 `ZZZZ-FFF-FFFD` not-found, direct secretless `403`, exact call-31 `429`, minute
 rollover, and health/card/badge/permalink/registration smokes. Never roll back
-to pre-v2: preserve migrations, DO export, and binding in a roll-forward. If a
+to pre-v2: preserve the deployed v1/v2 migrations, DO exports, and bindings in
+a roll-forward. After v3 deploys, preserve v1/v2/v3 together. If a
 future Worker change fails, stop before Edge; if Edge fails after gating, keep
 the safe Worker `503` and roll Edge forward without reopening direct access.
 Update all status surfaces in DEPLOY.md after any future evidence-backed rollout.

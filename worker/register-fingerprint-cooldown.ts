@@ -13,6 +13,10 @@ export const FINGERPRINT_COOLDOWN_SECONDS = 24 * 60 * 60;
 // after this lease rather than being released: the upstream may already have
 // minted, so release would permit a fourth possible success.
 export const FINGERPRINT_CLAIM_LEASE_SECONDS = 60;
+// Abort the upstream attempt before the claim lease can expire. A timeout is
+// ambiguous because the upstream may have minted before the connection was
+// aborted, so the claim remains pending and later reconciles conservatively.
+export const FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS = 45_000;
 
 export type FingerprintClaimDecision =
   | { allowed: true; claimId: string }
@@ -94,10 +98,11 @@ export function createFingerprintCooldownGate(
 export async function runFingerprintGatedUpstream(
   gate: FingerprintCooldownGate,
   cooldownKey: string | null,
-  callUpstream: () => Promise<Response>,
+  callUpstream: (signal: AbortSignal) => Promise<Response>,
+  options: { deadlineMilliseconds?: number } = {},
 ): Promise<FingerprintGatedUpstreamResult> {
   if (cooldownKey === null) {
-    const upstream = await callUpstream();
+    const upstream = await callUpstream(new AbortController().signal);
     return { blocked: false, upstream, bodyText: await upstream.clone().text() };
   }
 
@@ -106,13 +111,35 @@ export async function runFingerprintGatedUpstream(
     return { blocked: true, retryAfterSeconds: claim.retryAfterSeconds };
   }
 
-  let minted = false;
+  const deadlineMilliseconds = options.deadlineMilliseconds
+    ?? FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS;
+  if (
+    !Number.isSafeInteger(deadlineMilliseconds)
+    || deadlineMilliseconds < 1
+    || deadlineMilliseconds > FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000
+  ) {
+    throw new Error('fingerprint upstream deadline must fit within the claim lease');
+  }
+
+  const controller = new AbortController();
+  const deadlineError = new Error('registration upstream deadline exceeded');
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const upstream = await callUpstream();
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort(deadlineError);
+        reject(deadlineError);
+      }, deadlineMilliseconds);
+    });
+    const upstream = await Promise.race([
+      callUpstream(controller.signal),
+      deadline,
+    ]);
     const bodyText = await upstream.clone().text();
-    minted = isNewCertificateMint(upstream.status, bodyText);
+    const minted = isNewCertificateMint(upstream.status, bodyText);
+    await gate.complete(cooldownKey, claim.claimId, minted);
     return { blocked: false, upstream, bodyText };
   } finally {
-    await gate.complete(cooldownKey, claim.claimId, minted);
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }

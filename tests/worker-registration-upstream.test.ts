@@ -108,32 +108,29 @@ test('isNewCertificateMint treats an unparsable 201 body as a mint (fails toward
   assert.equal(isNewCertificateMint(201, 'not json'), true);
 });
 
-test('maps a registration upstream fetch rejection to unavailable with manual redirect mode', async (t) => {
-  t.mock.method(console, 'error', () => undefined);
+test('propagates an ambiguous registration fetch rejection with manual redirect mode', async () => {
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
     throw new TypeError('network fetch failed');
   }) as typeof fetch;
 
-  const response = await fetchRegistrationUpstream(
-    'https://project.supabase.test/functions/v1/register-agent',
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-dmv-proxy': 'worker-secret',
+  await assert.rejects(
+    fetchRegistrationUpstream(
+      'https://project.supabase.test/functions/v1/register-agent',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-dmv-proxy': 'worker-secret',
+        },
+        body: JSON.stringify({ agent_name: 'mesa-agent' }),
       },
-      body: JSON.stringify({ agent_name: 'mesa-agent' }),
-    },
-    fetchImpl,
+      fetchImpl,
+    ),
+    /network fetch failed/,
   );
 
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), {
-    error: 'registration_unavailable',
-    message: 'Registration is temporarily unavailable. Please try again shortly.',
-  });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');

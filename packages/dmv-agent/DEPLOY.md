@@ -86,6 +86,12 @@ Registration also requires `REGISTER_FINGERPRINT_LIMITER`, the exact SQLite
 Durable Object budget introduced by forward-only v3. The legacy
 `REGISTER_COOLDOWN_KV` binding is retained but unused during rollout.
 
+**Current production status (2026-08-01):** v3 is not deployed. Production
+registration still uses `REGISTER_COOLDOWN_KV`; the completed 2026-07-22
+evidence below proves the lookup v2 rollout, not the v3 registration limiter.
+The first v3 rollout must follow the future order below and record a new Worker
+version plus registration-specific smokes before any document calls it live.
+
 Before merging, run these container gates on a Docker-capable machine:
 
 ```bash
@@ -177,7 +183,8 @@ bypass its platform JWT layer because the Worker authenticates with
 ### v3-safe recovery
 
 Cloudflare's SQLite Durable Object migrations are forward-only operational
-state. Never use Cloudflare rollback to a pre-v3 Worker after v3 deploys: such a
+state. Before v3 deploys, preserve the already-deployed v1/v2 classes,
+migrations, exports, and bindings. Never use Cloudflare rollback to a pre-v3 Worker after v3 deploys: such a
 version lacks the `RegistrationFingerprintRateLimiter` export/binding while the
 account retains the migration. Preserve v1 `CardRenderer`, v2
 `CertificateLookupRateLimiter`, v3 `RegistrationFingerprintRateLimiter`, and

@@ -179,20 +179,77 @@ test('an abandoned claim is conservatively counted, then recovers after its 24h 
     successes: Array<number>;
     pending: Array<unknown>;
   };
-  assert.deepEqual(state.successes, [1_752_537_600_000]);
+  const recoveredAt = 1_752_537_600_000 + FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
+  assert.deepEqual(state.successes, [recoveredAt]);
   assert.deepEqual(state.pending, []);
   assert.equal(
     (await limiter.fetch(request('/complete', { claim_id: abandoned.claim_id, minted: false }))).status,
     409,
   );
 
-  now = 1_752_537_600_000 + FINGERPRINT_COOLDOWN_SECONDS * 1_000;
+  now = recoveredAt + FINGERPRINT_COOLDOWN_SECONDS * 1_000;
   await limiter.alarm();
   const recovered = await json(await limiter.fetch(request('/claim')));
   assert.equal(recovered.allowed, true);
   state = storage.values.get(STATE_KEY) as { successes: Array<number>; pending: Array<unknown> };
   assert.deepEqual(state.successes, []);
   assert.equal(state.pending.length, 1);
+});
+
+test('an abandoned claim cannot reopen a slot before 24 hours after its lease expires', async (t) => {
+  const claimedAt = 1_752_537_600_000;
+  let now = claimedAt;
+  t.mock.method(Date, 'now', () => now);
+  const { limiter } = createLimiter();
+
+  await Promise.all(
+    Array.from({ length: FINGERPRINT_COOLDOWN_THRESHOLD }, () => limiter.fetch(request('/claim'))),
+  );
+
+  // The old claimedAt-based recovery incorrectly reopened all three slots here,
+  // up to one full lease before the latest possible mint's 24-hour window.
+  now = claimedAt + FINGERPRINT_COOLDOWN_SECONDS * 1_000;
+  const tooEarly = await json(await limiter.fetch(request('/claim')));
+  assert.equal(tooEarly.allowed, false);
+  assert.equal(tooEarly.retry_after_seconds, FINGERPRINT_CLAIM_LEASE_SECONDS);
+
+  now = claimedAt
+    + FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000
+    + FINGERPRINT_COOLDOWN_SECONDS * 1_000;
+  const afterFullWindow = await json(await limiter.fetch(request('/claim')));
+  assert.equal(afterFullWindow.allowed, true);
+});
+
+test('a delayed alarm preserves the lease-expiry timestamp and a late completion cannot shorten or double count it', async (t) => {
+  const claimedAt = 1_752_537_600_000;
+  let now = claimedAt;
+  t.mock.method(Date, 'now', () => now);
+  const { limiter, storage } = createLimiter();
+  const claim = await json(await limiter.fetch(request('/claim')));
+
+  now = claimedAt + (FINGERPRINT_CLAIM_LEASE_SECONDS + 600) * 1_000;
+  await limiter.alarm();
+  const recoveredAt = claimedAt + FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000;
+  assert.deepEqual(storage.values.get(STATE_KEY), {
+    successes: [recoveredAt],
+    pending: [],
+  });
+
+  const lateCompletion = await limiter.fetch(
+    request('/complete', { claim_id: claim.claim_id, minted: true }),
+  );
+  assert.equal(lateCompletion.status, 409);
+  assert.deepEqual(storage.values.get(STATE_KEY), {
+    successes: [recoveredAt],
+    pending: [],
+  });
+
+  now = recoveredAt + FINGERPRINT_COOLDOWN_SECONDS * 1_000 - 1;
+  assert.equal((await json(await limiter.fetch(request('/claim')))).allowed, true);
+  assert.deepEqual(
+    (storage.values.get(STATE_KEY) as { successes: Array<number> }).successes,
+    [recoveredAt],
+  );
 });
 
 test('stored state contains only claim ids and timestamps, never caller identity material', async () => {

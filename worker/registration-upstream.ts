@@ -52,25 +52,23 @@ export async function fetchRegistrationUpstream(
   init: RequestInit,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
-  try {
-    const upstream = await fetchImpl(input, { ...init, redirect: 'manual' });
-    if (upstream.status >= 300 && upstream.status < 400) {
-      return unavailableResponse();
-    }
-    const bodyText = await upstream.text();
-    const responseHeaders = new Headers();
-    upstream.headers.forEach((value, key) => {
-      if (!RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
-        responseHeaders.set(key, value);
-      }
-    });
-
-    return new Response(bodyText, {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
-  } catch (error) {
-    console.error('[register] upstream request failed', { error });
+  // A rejected fetch is ambiguous: the upstream may have minted before the
+  // connection failed. Propagate it so the fingerprint claim remains pending;
+  // handleRegister maps the error to the same generic public 503.
+  const upstream = await fetchImpl(input, { ...init, redirect: 'manual' });
+  if (upstream.status >= 300 && upstream.status < 400) {
     return unavailableResponse();
   }
+  const bodyText = await upstream.text();
+  const responseHeaders = new Headers();
+  upstream.headers.forEach((value, key) => {
+    if (!RESPONSE_HEADERS_TO_STRIP.has(key.toLowerCase())) {
+      responseHeaders.set(key, value);
+    }
+  });
+
+  return new Response(bodyText, {
+    status: upstream.status,
+    headers: responseHeaders,
+  });
 }

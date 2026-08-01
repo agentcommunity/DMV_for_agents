@@ -3,8 +3,10 @@ import test from 'node:test';
 
 import {
   createFingerprintCooldownGate,
+  FINGERPRINT_CLAIM_LEASE_SECONDS,
   FINGERPRINT_COOLDOWN_SECONDS,
   FINGERPRINT_COOLDOWN_THRESHOLD,
+  FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS,
   runFingerprintGatedUpstream,
   type FingerprintCooldownGate,
 } from '../worker/register-fingerprint-cooldown.ts';
@@ -90,7 +92,7 @@ for (const [label, upstream] of [
   });
 }
 
-test('a thrown upstream call releases its reservation before propagating', async () => {
+test('an ambiguous thrown upstream call leaves its reservation pending before propagating', async () => {
   const order: Array<string> = [];
   const { gate } = createGate({ order });
 
@@ -101,7 +103,77 @@ test('a thrown upstream call releases its reservation before propagating', async
     }),
     /network failed/,
   );
-  assert.deepEqual(order, ['claim', 'upstream', 'complete:claim-1:released']);
+  assert.deepEqual(order, ['claim', 'upstream']);
+});
+
+test('an upstream deadline aborts the call and leaves its reservation pending', async () => {
+  const order: Array<string> = [];
+  const { gate } = createGate({ order });
+
+  await assert.rejects(
+    runFingerprintGatedUpstream(
+      gate,
+      KEY,
+      async (signal) => {
+        await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            order.push('upstream-aborted');
+            reject(signal.reason);
+          }, { once: true });
+        });
+      },
+      { deadlineMilliseconds: 5 },
+    ),
+    /deadline/i,
+  );
+  assert.deepEqual(order, ['claim', 'upstream-aborted']);
+});
+
+test('a prompt explicit upstream response clears the deadline timer', async () => {
+  const { gate } = createGate();
+  let upstreamSignal: AbortSignal | undefined;
+
+  const result = await runFingerprintGatedUpstream(
+    gate,
+    KEY,
+    async (signal) => {
+      upstreamSignal = signal;
+      return jsonResponse({ error: 'Registration failed.' }, 500);
+    },
+    { deadlineMilliseconds: 5 },
+  );
+  assert.equal(result.blocked, false);
+
+  await new Promise<void>((resolve) => setTimeout(resolve, 15));
+  assert.equal(upstreamSignal?.aborted, false);
+});
+
+test('a late upstream settlement after the deadline never completes the claim', async () => {
+  const order: Array<string> = [];
+  const { gate } = createGate({ order });
+
+  await assert.rejects(
+    runFingerprintGatedUpstream(
+      gate,
+      KEY,
+      async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        order.push('upstream-settled-late');
+        return jsonResponse({ certificate_id: 'MESA-DD6-660J' }, 201);
+      },
+      { deadlineMilliseconds: 5 },
+    ),
+    /deadline/i,
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(order, ['claim', 'upstream-settled-late']);
+});
+
+test('the upstream deadline is bounded by the abandoned-claim lease', () => {
+  assert.ok(FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS > 0);
+  assert.ok(
+    FINGERPRINT_UPSTREAM_DEADLINE_MILLISECONDS <= FINGERPRINT_CLAIM_LEASE_SECONDS * 1_000,
+  );
 });
 
 test('UI traffic without a fingerprint bypasses the fingerprint object', async () => {
