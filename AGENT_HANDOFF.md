@@ -1,6 +1,65 @@
-# Agent Handoff — DMV API Hardening (updated 2026-07-22)
+# Agent Handoff — DMV API Hardening (updated 2026-08-01)
 
-Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This is the current production snapshot: both registration and certificate lookup are live. The rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) record the production boundary and recovery rules.
+Start here if you're a fresh agent picking up the DMV project after the cross-repo API hardening arc. This is the current production snapshot: both registration and certificate lookup are live. The rest of the repo's docs (`CLAUDE.md`, `AUTH_DMV.md`, `ARCHITECTURE.md`, `CLOUDFLARE.md`, `README.md`, `SECURITY.md`) record the production boundary and recovery rules. The cross-repo hardening work landed 2026-08-01 — see the four Task entries below.
+
+## 2026-08-01 — Task 1: `register-agent` stores hashed client IP, never raw
+
+`registrations.metadata.client_ip` was storing the raw client IP in the shared production DB that PAGE also reads, violating the hash-only invariant the Worker already follows everywhere via `sha256Hex`. Fixed in `supabase/functions/register-agent/index.ts`: the metadata key is now `client_ip_hash` (SHA-256 hex via Deno `crypto.subtle`), and the raw `client_ip` key is dropped entirely. Both repos were grepped for readers of `metadata->>'client_ip'` — none found, so dropping the raw value was safe; the hash keeps abuse-triage utility. `handleRegisterAgent(req, dependencies)` is now exported (mirroring `lookup-agent/index.ts`'s pattern) so the function is unit-testable; HTTP-boundary behavior is unchanged. New test coverage: `supabase/functions/register-agent/index.test.ts`, asserting inserted metadata contains `client_ip_hash` matching `/^[0-9a-f]{64}$/` and never a raw `client_ip` key, across `x-forwarded-for`, `cf-connecting-ip`, and no-IP cases. **Not deployed** — deploying the edge function is a separate human step (`supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt`). Existing rows with raw IPs are untouched; backfill is a separate decision.
+
+## 2026-08-01 — Task 2: endorsed-cap check reads the live signing column, not the dead one
+
+The per-email lifetime cap upgrade (5 unendorsed → 12 endorsed) was reading `registrations.endorsement_status = 'signed'` to decide whether an email qualified for the higher cap. That column is dead on the shared PAGE DB — signing truth there is `registrations.status = 'complete'` (see PAGE's `docs/SUPABASE.md` and `CLAUDE.md`). Members who signed after `endorsement_status` stopped being written were silently stuck at the 5-cert cap. Fixed in `supabase/functions/register-agent/index.ts` to check `status = 'complete'`; the 5/12 cap values themselves are unchanged, and the query stays fail-closed on error. Deliberately does not also check `endorsement_requests` — that table has no reliable email column for this lookup (only `registration_id` and an unreliable `signer_email`), and this check is keyed by email with no `user_id`/`registration_id` available, so `status='complete'` on `registrations` already answers it in one query. New tests in `supabase/functions/register-agent/index.test.ts`.
+
+## 2026-08-01 — Task 3: fingerprint cooldown reworked to count successful mints only, with an honest `Retry-After`
+
+The fingerprint cooldown used to increment on every request *before* forwarding to `register-agent`, so an upstream 5xx (plus the npm client's automatic retries) or an `already_recorded` replay could exhaust a machine's 24h budget with zero successful registrations — directly contradicting its own "Allow 3 successful registrations" comment. Fixed across two commits:
+
+- `worker/rate-limit-kv.ts`: `checkKvCooldown` now gates the request read-only (no write), and `incrementKvCooldown` only fires after `isNewCertificateMint` confirms a real 201 that isn't an `already_recorded` replay. KV now stores `{count, firstAt}` instead of a bare count, so `Retry-After` reports the actual remaining window instead of a flat 86400 seconds; legacy bare-count values are still parsed and carried forward without resetting.
+- `worker/register-fingerprint-cooldown.ts` (new module, `runFingerprintGatedUpstream`): pulls the check-before/call-upstream/increment-after composition out of `handleRegister` into an injectable, unit-tested function with no `./container-instance` import, so it can be imported directly in tests without a build step. This exists because the composition itself was the exact bug — a review pass found that reverting the ordering, or dropping the `isNewCertificateMint` gate, left all prior tests green. `tests/worker-register-fingerprint-cooldown.test.ts` pins call order via a recording fake gate, verified by mutation (reverting the ordering locally failed 4 of 7 tests).
+- **Follow-up fix in this pass:** `FINGERPRINT_COOLDOWN_THRESHOLD` had stayed `4` through both commits above, which — under the new success-only counting — let 4 successful mints through and only blocked the 5th, contradicting the "3/machine/24h" figure documented everywhere else (`CLAUDE.md`, `AUTH_DMV.md`, this file). The constant is now `3` (moved to `worker/register-fingerprint-cooldown.ts` so it's importable by tests), and `tests/worker-register-fingerprint-cooldown.test.ts` has an absolute-budget regression test (3 mints succeed, the 4th blocks) pinned against the real `rate-limit-kv.ts` implementation, not a mocked gate.
+
+## 2026-08-01 — Task 4: `verify_certificate` MCP name collision resolved (npm package v0.3.0)
+
+Code review across both `agentcommunity_PAGE` and this repo found that the
+`@agentcommunity/dmv-agent` npm package's MCP server exposed a tool named
+`verify_certificate` that only checked the Luhn mod-36 check digit
+(`packages/dmv-agent/src/certificate.ts`), while `agentcommunity_PAGE`'s
+`/mcp` endpoint exposes a tool of the **same name** that checks live issuance
+via `GET /api/lookup` on this Worker. An agent with both MCP servers
+configured could ask "is CERT-ID valid?" and get a "yes" from one server and
+a "no, not found" from the other, for the same ID.
+
+**Decision: Option A (wire the package to the real lookup), not Option B
+(rename).** The package's `verify_certificate` (MCP) and `dmv-agent verify`
+(CLI) now call `GET https://dmv.agentcommunity.org/api/lookup?id=<id>` by
+default — the same public, rate-limited (~30/60s per IP) Worker route the
+main site's tool uses — via the new `packages/dmv-agent/src/lookup.ts`. A
+`format_only: true` MCP argument / `--format-only` CLI flag preserves the old
+check-digit-only behavior with no network call. If the live call fails
+(network error, timeout, malformed response, or the Worker itself reporting
+`status: "unavailable"`), the tool automatically falls back to the offline
+check digit and labels the result `(format-only ...)` in its text output; a
+network failure is never reported as "not issued". Full detail in
+`packages/dmv-agent/CHANGELOG.md` (0.3.0) and `packages/dmv-agent/README.md`.
+
+**Update (2026-08-01, re-verified live):** `GET /api/lookup` now returns real
+`not_found` (and, for issued certificates, real `issued`) results —
+`{"certificate_id":"MESA-DD6-660J","status":"not_found","valid_format":true,"issued":false,...}`
+against a real, unissued but valid-format ID; `status: "unavailable"` is no
+longer what production returns for a normal request. The `lookup-agent`
+Supabase upstream is live, not "implementation-ready but unpublished" as
+earlier revisions of this doc said. `dmv-agent verify` / the MCP tool now
+give a conclusive live-check result rather than the inconclusive
+`unavailable` fallback described above when this section was first written
+earlier the same day. Nothing was published to npm as part of the
+`verify_certificate` wiring change itself; `packages/dmv-agent/package.json`
+was bumped to `0.3.0`, still unpublished until someone explicitly runs
+`npm publish --access public` from `packages/dmv-agent`. The `dmv-agent`
+alias still declares `@agentcommunity/dmv-agent@^0.2.1` in-tree — a `^0.3.0`
+range breaks `pnpm install --frozen-lockfile` (which the Cloudflare build
+uses) because `0.3.0` is not yet on the registry. Publish order: publish
+`@agentcommunity/dmv-agent@0.3.0` first, then bump the alias dependency to
+`^0.3.0` and publish the alias. See `packages/dmv-agent/CHANGELOG.md`.
 
 ## Current production state — registration and lookup live
 
@@ -18,10 +77,12 @@ DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate acti
 npm                @agentcommunity/dmv-agent@0.2.1         published, routes through /api/register
                    dmv-agent@0.1.1 alias                  depends on @agentcommunity/dmv-agent ^0.2.1
 
-Lookup boundary    GET /api/lookup + lookup-agent          live on main fabafe6 (PR #20)
-                                                           Worker d9755e66-3883-4970-be84-a59307011f14
-                                                           created 2026-07-22T12:01:52.501Z
-                                                           direct Edge gate verified 403
+Lookup boundary    GET /api/lookup + lookup-agent          LIVE — deployed on main fabafe6 (PR #20), Worker
+                                                           d9755e66-3883-4970-be84-a59307011f14 (2026-07-22),
+                                                           direct Edge gate verified 403. Re-verified live
+                                                           2026-08-01: real issued/not_found, not "unavailable".
+                                                           Task 8 paperwork (deployed SHA + full smoke record)
+                                                           still outstanding.
 
 DMV main           latest as of this handoff               see `git log` for the current HEAD
 
@@ -107,6 +168,12 @@ Update all status surfaces in DEPLOY.md after any future evidence-backed rollout
 
 ### High (bug/incident risk)
 
+1. **Close out Task 8's paperwork.** `GET /api/lookup` is confirmed live in
+   production as of 2026-08-01 (real `issued`/`not_found`, not `unavailable`
+   — see the 2026-08-01 section above). What's still outstanding is the
+   record-keeping: capture the deployed DMV commit SHA and full smoke
+   evidence for issued/not-found/invalid outcomes and the direct Edge 403
+   boundary.
 1. **Preserve the live lookup boundary.** Future changes must retain public
    certificate-ID-only lookup, exact 30/60 enforcement, the direct Edge 403
    gate, and the no-data-mutation verification discipline.

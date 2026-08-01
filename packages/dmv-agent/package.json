@@ -1,6 +1,6 @@
 {
   "name": "@agentcommunity/dmv-agent",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "CLI and MCP server to pre-register .agent identities at the Department of Machine Verification, run by Agent Community",
   "homepage": "https://dmv.agentcommunity.org",
   "repository": {

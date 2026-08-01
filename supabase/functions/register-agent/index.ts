@@ -135,7 +135,21 @@ function timingSafeStrEqual(a: string | null | undefined, b: string | null | und
   return diff === 0
 }
 
-Deno.serve(async (req) => {
+// SHA-256 hex digest — mirrors worker/index.ts's sha256Hex (used there for every
+// rate-limit key). The client IP must never be stored raw in the shared
+// production DB (PAGE reads this same `registrations` table); this is the only
+// writer that wasn't already hashing it.
+export async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(digest))
+    .map((part) => part.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+export async function handleRegisterAgent(
+  req: Request,
+  dependencies: { createSupabaseClient?: typeof createClient } = {},
+): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: getCorsHeaders(req) })
   }
@@ -207,10 +221,11 @@ Deno.serve(async (req) => {
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     || req.headers.get('cf-connecting-ip')
-    || 'unknown'
+    || null
 
   // Supabase client with service role key (server-side only — created after rate limit check)
-  const supabase = createClient(
+  const createSupabaseClient = dependencies.createSupabaseClient ?? createClient
+  const supabase = createSupabaseClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
@@ -285,12 +300,21 @@ Deno.serve(async (req) => {
   const currentCount = totalCerts ?? 0
 
   if (currentCount >= CAP_UNENDORSED) {
-    // Check if user is endorsed (has endorsement_status = 'signed' on any registration)
+    // Check if user is endorsed. Signing truth on the shared PAGE schema is
+    // `registrations.status = 'complete'` — `endorsement_status` stopped being
+    // written and is a dead column there (see PAGE's docs/SUPABASE.md). We
+    // deliberately do NOT also join endorsement_requests (status IN
+    // ('signed','complete')): that table has no email column, only
+    // `registration_id` and an unreliable `signer_email`, and this cap check
+    // is keyed by email (no user_id/registration_id available here), so that
+    // join would require first resolving every registration_id for the email
+    // via `registrations` anyway — status='complete' on `registrations`
+    // already gives us that in one query with no extra join.
     const { data: endorsed } = await supabase
       .from('registrations')
-      .select('endorsement_status')
+      .select('status')
       .eq('email', email)
-      .eq('endorsement_status', 'signed')
+      .eq('status', 'complete')
       .limit(1)
 
     const cap = endorsed?.length ? CAP_ENDORSED : CAP_UNENDORSED
@@ -336,7 +360,9 @@ Deno.serve(async (req) => {
       signup_source: signupSource,
       metadata: {
         agent_description: description,
-        client_ip: ip,
+        // Hashed, never raw — see sha256Hex above. `registrations` is the same
+        // production table the PAGE app reads; raw IPs never belong here.
+        client_ip_hash: ip ? await sha256Hex(ip) : null,
       },
     })
 
@@ -419,4 +445,8 @@ Deno.serve(async (req) => {
     }),
     { status: 201, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
   )
-})
+}
+
+if (import.meta.main) {
+  Deno.serve((req) => handleRegisterAgent(req))
+}

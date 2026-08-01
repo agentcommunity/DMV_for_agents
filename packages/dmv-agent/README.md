@@ -30,8 +30,12 @@ bunx dmv-agent register \
   --email operator@example.com \
   --operator "Acme Labs"
 
-# Verify a certificate ID (offline, no network)
+# Verify a certificate ID — live issuance check against the DMV Worker by
+# default (falls back to the offline check digit if the network call fails)
 bunx dmv-agent verify MESA-DD6-660J
+
+# Offline only: just the Luhn check digit, no network call
+bunx dmv-agent verify MESA-DD6-660J --format-only
 
 # Check issuance (public Worker, certificate ID only)
 curl "https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J"
@@ -104,7 +108,7 @@ Exposes three tools:
 |------|-------------|
 | `dmv_doctor` | Read-only DMV readiness check: health, card PNG, badge SVG, and validation-only register rejection |
 | `register_agent` | Pre-register an .agent identity (agent_name, email, operator_name, description?) |
-| `verify_certificate` | Check a certificate ID's Luhn mod-36 check digit |
+| `verify_certificate` | Live issuance check against `GET /api/lookup` on the DMV Worker by default — confirms whether a matching registration row exists, not just whether the ID is well-formed. Pass `format_only: true` to skip the network call and only check the Luhn mod-36 check digit offline. If the live call fails (network error, timeout, service unavailable), the tool automatically falls back to the offline check and labels the result as format-only — a network failure is never reported as "not issued". |
 
 ## Badges
 
@@ -192,17 +196,18 @@ MESA-DD6-660J
 └──────────── word from 32-word dictionary
 ```
 
-Offline verification — no network needed:
+`dmv-agent verify` checks live issuance against the DMV Worker by default.
+For a pure offline check-digit validation with no network call:
 
 ```bash
-bunx dmv-agent verify MESA-DD6-660J
-# ✓ Certificate MESA-DD6-660J has a valid check digit.
+bunx dmv-agent verify MESA-DD6-660J --format-only
+# ✓ Certificate MESA-DD6-660J has a valid check digit. (format-only check — does not confirm the certificate was issued)
 ```
 
 ## Programmatic use
 
 ```ts
-import { registerAgent, verifyCertificateId } from '@agentcommunity/dmv-agent';
+import { registerAgent, verifyCertificateId, verifyCertificate } from '@agentcommunity/dmv-agent';
 
 const result = await registerAgent({
   agentName: 'my-agent',
@@ -217,8 +222,15 @@ console.log(result.domain);       // my-agent.agent
 console.log(result.permalinkUrl); // https://dmv.agentcommunity.org/c/MESA-DD6-660J/my-agent
 console.log(result.badgeUrl);     // https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J
 
-// Offline verification
+// Offline check-digit only — no network call, does not confirm issuance
 verifyCertificateId('MESA-DD6-660J'); // true
+
+// Live issuance check against the DMV Worker, with an automatic offline
+// fallback (labeled via `checkMode`/`fallbackReason`) if the network call fails
+const verification = await verifyCertificate('MESA-DD6-660J');
+console.log(verification.checkMode); // 'live' (or 'format_only' on fallback)
+console.log(verification.status);    // 'issued' | 'not_found' | 'invalid_format' | 'unavailable'
+console.log(verification.issued);    // true | false | null
 ```
 
 ## Security
@@ -287,10 +299,19 @@ The canonical endpoint for browser, CLI, MCP, and JS API traffic. CLI and MCP cl
 
 ### GET /api/lookup
 
-**Status (2026-07-22): live.** Merged `main` `fabafe6` (PR #20, including the
-manual redirect runtime fix) is deployed as Worker version
-`d9755e66-3883-4970-be84-a59307011f14` created `2026-07-22T12:01:52.501Z`.
-The only public network lookup endpoint is:
+**Status (2026-08-01, verified live): the Supabase `lookup-agent` upstream is
+published and the route returns real results** — `status: "issued"` for
+issued certificates and `status: "not_found"` for valid-format IDs that
+don't exist, not `status: "unavailable"`. Deployed since `main` `fabafe6`
+(PR #20, manual-redirect runtime fix), Worker version
+`d9755e66-3883-4970-be84-a59307011f14` (`2026-07-22`). (`AGENT_HANDOFF.md`
+Task 8 still has some record-keeping outstanding — deployed SHA + a full
+smoke-evidence writeup — but the behavior itself is live in production.) This
+package's `verifyCertificate()` (and therefore `dmv-agent verify` / the
+`verify_certificate` MCP tool) call this route by default; `unavailable`
+remains the fallback for genuine failures (network error, timeout, malformed
+response) and is still treated as inconclusive, never as "not issued". The
+only public network lookup endpoint is and will remain:
 
 ```http
 GET https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J

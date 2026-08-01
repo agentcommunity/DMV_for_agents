@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { fetchRegistrationUpstream } from '../worker/registration-upstream.ts';
+import { fetchRegistrationUpstream, isNewCertificateMint } from '../worker/registration-upstream.ts';
 
 test('passes through a normal 201 registration response and strips unsafe headers', async () => {
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
@@ -69,6 +69,43 @@ test('fails closed for a registration upstream redirect without following it or 
   assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');
   assert.ok(calls.every(({ input }) => input !== redirectTarget));
+});
+
+test('isNewCertificateMint is true only for a 201 that is not an already_recorded replay', () => {
+  assert.equal(
+    isNewCertificateMint(201, JSON.stringify({ certificate_id: 'MESA-DD6-660J' })),
+    true,
+  );
+});
+
+test('isNewCertificateMint is false for a 200 already_recorded replay', () => {
+  assert.equal(
+    isNewCertificateMint(
+      200,
+      JSON.stringify({ certificate_id: 'MESA-DD6-660J', already_recorded: true }),
+    ),
+    false,
+  );
+});
+
+test('isNewCertificateMint is false for any non-201 status, including 5xx', () => {
+  assert.equal(isNewCertificateMint(500, JSON.stringify({ error: 'Registration failed.' })), false);
+  assert.equal(isNewCertificateMint(503, JSON.stringify({ error: 'registration_unavailable' })), false);
+  assert.equal(isNewCertificateMint(403, JSON.stringify({ error: 'quota exceeded' })), false);
+  assert.equal(isNewCertificateMint(409, JSON.stringify({ error: 'Certificate ID collision.' })), false);
+});
+
+test('isNewCertificateMint defensively checks the body flag even on a 201, not just the status', () => {
+  // Guards the counting logic against a future response-shape regression
+  // where a replay accidentally carries a 201 status.
+  assert.equal(
+    isNewCertificateMint(201, JSON.stringify({ already_recorded: true })),
+    false,
+  );
+});
+
+test('isNewCertificateMint treats an unparsable 201 body as a mint (fails toward counting a real success)', () => {
+  assert.equal(isNewCertificateMint(201, 'not json'), true);
 });
 
 test('maps a registration upstream fetch rejection to unavailable with manual redirect mode', async (t) => {

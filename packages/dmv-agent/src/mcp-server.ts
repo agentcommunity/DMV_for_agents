@@ -25,7 +25,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { registerAgent } from './register.js';
-import { verifyCertificateId } from './certificate.js';
+import { verifyCertificate, formatVerificationResult } from './lookup.js';
 import { runDoctor } from './doctor.js';
 import { packageVersion } from './package-info.js';
 import { resolveRegistrationUrls } from './urls.js';
@@ -96,14 +96,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'verify_certificate',
       description:
-        'Verify that a DMV certificate ID is valid (check digit passes). ' +
-        'Does not check if the certificate exists in the database.',
+        'Verify a DMV certificate ID. By default this performs a LIVE issuance check ' +
+        'against the public DMV Worker (GET /api/lookup, rate-limited ~30 requests per ' +
+        '60s per IP): it confirms whether a matching registration row actually exists in ' +
+        'the database, not merely whether the ID is well-formed. "issued: true" means a ' +
+        'registration row exists — it does NOT mean the operator completed email ' +
+        'verification or that DNS delegation exists. If the live check cannot complete ' +
+        '(network error, timeout, or the lookup service being unavailable), this tool ' +
+        'automatically falls back to an offline check-digit-only validation and clearly ' +
+        'labels the result as format-only — a network failure is never reported as ' +
+        '"not issued". Set format_only: true to skip the network call entirely and only ' +
+        'validate the Luhn mod-36 check digit offline (fast, no rate limit, but does not ' +
+        'confirm the certificate exists).',
       inputSchema: {
         type: 'object' as const,
         properties: {
           certificate_id: {
             type: 'string',
             description: 'The certificate ID to verify (e.g. NOVA-7F3-AB2C)',
+          },
+          format_only: {
+            type: 'boolean',
+            description:
+              'If true, skip the live database lookup and only check the offline Luhn ' +
+              'check digit (no network call, does not confirm issuance). Defaults to false.',
           },
         },
         required: ['certificate_id'],
@@ -204,17 +220,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   if (name === 'verify_certificate') {
     const certId = (args?.certificate_id as string) || '';
-    const valid = verifyCertificateId(certId);
+    const formatOnly = args?.format_only === true;
+    const baseUrl = process.env.DMV_BASE_URL;
+    const result = await verifyCertificate(certId, { formatOnly, baseUrl });
+
+    // Rate limited and "unavailable" are inconclusive, not errors — a network
+    // failure or a throttled request is never reported as "not issued".
+    const isError = result.rateLimited
+      ? false
+      : result.checkMode === 'live'
+        ? result.status === 'invalid_format' || result.status === 'not_found'
+        : !result.formatValid;
 
     return {
-      content: [
-        {
-          type: 'text' as const,
-          text: valid
-            ? `✓ Certificate ${certId} has a valid check digit.`
-            : `✗ Certificate ${certId} has an invalid check digit.`,
-        },
-      ],
+      content: [{ type: 'text' as const, text: formatVerificationResult(result) }],
+      isError,
     };
   }
 
