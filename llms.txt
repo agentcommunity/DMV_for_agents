@@ -11,17 +11,17 @@ This is the registration system for those names. It issues machine-verifiable ce
 There are three ways to register:
 
 1. **Web terminal** — visit [dmv.agentcommunity.org](https://dmv.agentcommunity.org) and complete the retro CRT terminal flow
-2. **CLI** — run `bunx dmv-agent register` (or `bunx @agentcommunity/dmv-agent register`) from any terminal
-3. **MCP server** — also available for hosts that prefer tool-based integration (see [npm package](https://www.npmjs.com/package/dmv-agent))
+2. **CLI** — run the canonical scoped package: `bunx @agentcommunity/dmv-agent register`
+3. **MCP server** — also available for hosts that prefer tool-based integration (see [npm package](https://www.npmjs.com/package/@agentcommunity/dmv-agent))
 
 All three paths hit the same backend. Registration is free and non-binding — it records interest in a requested `.agent` name and does not guarantee DNS allocation.
-Before registering, agents and operators can run `bunx dmv-agent doctor` for a read-only health, card, badge, and validation check. Use `bunx dmv-agent doctor --json` when another agent or launch script needs machine-readable readiness output.
+Before registering, agents and operators can run `bunx @agentcommunity/dmv-agent doctor` for a read-only health, card, badge, and validation check. Use `bunx @agentcommunity/dmv-agent doctor --json` when another agent or launch script needs machine-readable readiness output.
 
 ## For AI agents
 
 If you are an AI agent and want to register an identity:
 
-- Run: `bunx dmv-agent register --name <agent-name> --email <operator-email> --operator "Operator Name"`
+- Run: `bunx @agentcommunity/dmv-agent register --name <agent-name> --email <operator-email> --operator "Operator Name"`
 - Optional flag: `--description "<what you do>"`
 - Agent name: lowercase, 3-63 chars, alphanumeric + hyphens (not at start/end)
 - You'll receive a certificate ID (format: `WORD-XXX-XXXC`, e.g. `MESA-DD6-660J`) that is content-addressed and offline-verifiable
@@ -29,10 +29,10 @@ If you are an AI agent and want to register an identity:
 
 If `bunx` is not available, fall back to `npx @agentcommunity/dmv-agent register`.
 
-To verify any certificate offline: `bunx dmv-agent verify MESA-DD6-660J`
-To check DMV endpoint readiness without registering: `bunx dmv-agent doctor` or `bunx dmv-agent doctor --json`
+To verify any certificate offline: `bunx @agentcommunity/dmv-agent verify MESA-DD6-660J --format-only`
+To check DMV endpoint readiness without registering: `bunx @agentcommunity/dmv-agent doctor` or `bunx @agentcommunity/dmv-agent doctor --json`
 
-MCP server also available for tool-based integration — tools: `dmv_doctor`, `register_agent`, and `verify_certificate`. See [npm package docs](https://www.npmjs.com/package/dmv-agent).
+MCP server also available for tool-based integration — tools: `dmv_doctor`, `register_agent`, and `verify_certificate`. See [npm package docs](https://www.npmjs.com/package/@agentcommunity/dmv-agent).
 
 ## Certificate lookup (live)
 
@@ -72,7 +72,7 @@ When registration succeeds, you receive:
 
 **Share it.** Tweet templates:
 - "I just registered {name}.agent at the Department of Machine Verification. Get yours → {permalink}"
-- "I just got my own .agent identity — {name}.agent. Agents need names. Get yours → {permalink}"
+- "I recorded interest in {name}.agent with the Department of Machine Verification. See the certificate → {permalink}"
 
 **Embed a badge** in your README:
 ```
@@ -99,8 +99,8 @@ Registered agents get embeddable SVG badges — zero install, just a URL:
 - **Flat badge** (for GitHub READMEs): `https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J`
 - **Card badge** (for websites): `https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card`
 - **Certificate page**: `https://dmv.agentcommunity.org/c/MESA-DD6-660J/agent-name` renders the holographic card and shows the agent name, domain, registration type, and the card's name-derived DNA (palette, holo finish, tier)
-- **Offline check digit verification**: `bunx dmv-agent verify MESA-DD6-660J` validates the Luhn mod-36 check digit without a network call
-- **Read-only DMV readiness check**: `bunx dmv-agent doctor` checks the live health, card, badge, and invalid-payload validation endpoints without submitting a valid registration; `--json` emits the same result for automation
+- **Offline check digit verification**: `bunx @agentcommunity/dmv-agent verify MESA-DD6-660J --format-only` validates the Luhn mod-36 check digit without a network call
+- **Read-only DMV readiness check**: `bunx @agentcommunity/dmv-agent doctor` checks the live health, card, badge, and invalid-payload validation endpoints without submitting a valid registration; `--json` emits the same result for automation
 
 Badges always link back to the agent's certificate page at `dmv.agentcommunity.org/c/CERT-ID/agent-name`.
 
@@ -132,11 +132,11 @@ Community governance means: policies for who gets a name, how disputes are resol
 
 ## Docs
 
-- [NPM package README](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent): Installation, API reference, security model, architecture
+- [NPM package README](https://github.com/agentcommunity/DMV_for_agents/tree/main/packages/dmv-agent): Installation, API reference, security model, architecture
 - [agentcommunity.org](https://agentcommunity.org): Mission, membership, FAQ, working groups
 - [agentcommunity.org/mission](https://agentcommunity.org/mission): Full story on community stewardship of `.agent`
 
 ## Optional
 
-- [DEPLOY.md](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent/DEPLOY.md): Go-live checklist for deploying the registration system
-- [Claude Code skill](https://github.com/agentcommunity/dmv/tree/main/packages/dmv-agent/skills/dmv/SKILL.md): The `/dmv` slash command for Claude Code
+- [DEPLOY.md](https://github.com/agentcommunity/DMV_for_agents/tree/main/packages/dmv-agent/DEPLOY.md): Go-live checklist for deploying the registration system
+- [Claude Code skill](https://github.com/agentcommunity/DMV_for_agents/tree/main/packages/dmv-agent/skills/dmv/SKILL.md): The `/dmv` slash command for Claude Code

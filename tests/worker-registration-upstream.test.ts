@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { fetchRegistrationUpstream, isNewCertificateMint } from '../worker/registration-upstream.ts';
+import {
+  classifyRegistrationOutcome,
+  fetchRegistrationUpstream,
+} from '../worker/registration-upstream.ts';
+
+function registrationPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    certificate_id: 'MESA-DD6-660J',
+    agent_name: 'mesa-agent',
+    domain: 'mesa-agent.agent',
+    registration_type: 'AGENT',
+    queue_number: 42,
+    permalink_url: 'https://dmv.agentcommunity.org/c/MESA-DD6-660J/mesa-agent',
+    badge_url: 'https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J',
+    badge_card_url: 'https://dmv.agentcommunity.org/badge?id=MESA-DD6-660J&style=card',
+    message: 'Certificate MESA-DD6-660J issued for mesa-agent.agent.',
+    ...overrides,
+  };
+}
 
 test('passes through a normal 201 registration response and strips unsafe headers', async () => {
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
@@ -71,69 +89,106 @@ test('fails closed for a registration upstream redirect without following it or 
   assert.ok(calls.every(({ input }) => input !== redirectTarget));
 });
 
-test('isNewCertificateMint is true only for a 201 that is not an already_recorded replay', () => {
+test('a well-formed 201 is classified as a fresh mint', () => {
   assert.equal(
-    isNewCertificateMint(201, JSON.stringify({ certificate_id: 'MESA-DD6-660J' })),
-    true,
+    classifyRegistrationOutcome(201, JSON.stringify(registrationPayload())),
+    'minted',
   );
 });
 
-test('isNewCertificateMint is false for a 200 already_recorded replay', () => {
+test('a well-formed 200 already_recorded replay is releasable', () => {
   assert.equal(
-    isNewCertificateMint(
+    classifyRegistrationOutcome(
       200,
-      JSON.stringify({ certificate_id: 'MESA-DD6-660J', already_recorded: true }),
+      JSON.stringify(registrationPayload({
+        queue_number: null,
+        message: 'Pre-registration already recorded for mesa-agent.agent.',
+        already_recorded: true,
+      })),
     ),
-    false,
+    'releasable',
   );
 });
 
-test('isNewCertificateMint is false for any non-201 status, including 5xx', () => {
-  assert.equal(isNewCertificateMint(500, JSON.stringify({ error: 'Registration failed.' })), false);
-  assert.equal(isNewCertificateMint(503, JSON.stringify({ error: 'registration_unavailable' })), false);
-  assert.equal(isNewCertificateMint(403, JSON.stringify({ error: 'quota exceeded' })), false);
-  assert.equal(isNewCertificateMint(409, JSON.stringify({ error: 'Certificate ID collision.' })), false);
-});
-
-test('isNewCertificateMint defensively checks the body flag even on a 201, not just the status', () => {
-  // Guards the counting logic against a future response-shape regression
-  // where a replay accidentally carries a 201 status.
+test('only audited pre-insert error statuses are releasable', () => {
   assert.equal(
-    isNewCertificateMint(201, JSON.stringify({ already_recorded: true })),
-    false,
+    classifyRegistrationOutcome(400, JSON.stringify({ error: 'agent_name is required' })),
+    'releasable',
+  );
+  assert.equal(
+    classifyRegistrationOutcome(403, JSON.stringify({
+      error: "You've maxed out your quota on this email: up to 5 agent identities. Members who've signed the endorsement letter can pre-register up to 12.",
+      current: 5,
+      limit: 5,
+      endorsed: false,
+    })),
+    'releasable',
+  );
+  assert.equal(
+    classifyRegistrationOutcome(409, JSON.stringify({
+      error: 'Certificate ID collision. Please retry with a different name.',
+    })),
+    'releasable',
   );
 });
 
-test('isNewCertificateMint treats an unparsable 201 body as a mint (fails toward counting a real success)', () => {
-  assert.equal(isNewCertificateMint(201, 'not json'), true);
+test('all 5xx and 546 responses are ambiguous even with a normal error body', () => {
+  for (const status of [500, 503, 504, 546]) {
+    assert.equal(
+      classifyRegistrationOutcome(status, JSON.stringify({ error: 'upstream failed' })),
+      'ambiguous',
+    );
+  }
 });
 
-test('maps a registration upstream fetch rejection to unavailable with manual redirect mode', async (t) => {
-  t.mock.method(console, 'error', () => undefined);
+test('malformed and unexpected response shapes are ambiguous', () => {
+  assert.equal(classifyRegistrationOutcome(201, 'not json'), 'ambiguous');
+  assert.equal(classifyRegistrationOutcome(201, JSON.stringify({ ok: true })), 'ambiguous');
+  assert.equal(
+    classifyRegistrationOutcome(201, JSON.stringify({ certificate_id: 'MESA-DD6-660J' })),
+    'ambiguous',
+  );
+  assert.equal(
+    classifyRegistrationOutcome(201, JSON.stringify({ certificate_id: 'X', already_recorded: true })),
+    'ambiguous',
+  );
+  assert.equal(classifyRegistrationOutcome(400, JSON.stringify({ ok: false })), 'ambiguous');
+  assert.equal(classifyRegistrationOutcome(400, JSON.stringify({ error: 'unknown rejection' })), 'ambiguous');
+  assert.equal(classifyRegistrationOutcome(403, JSON.stringify({ error: 'quota' })), 'ambiguous');
+  assert.equal(classifyRegistrationOutcome(409, JSON.stringify({ error: 'conflict' })), 'ambiguous');
+  assert.equal(classifyRegistrationOutcome(400, JSON.stringify({ error: '   ' })), 'ambiguous');
+  assert.equal(classifyRegistrationOutcome(201, JSON.stringify({ certificate_id: '   ' })), 'ambiguous');
+  assert.equal(classifyRegistrationOutcome(200, JSON.stringify({ certificate_id: 'X' })), 'ambiguous');
+  assert.equal(
+    classifyRegistrationOutcome(200, JSON.stringify({ certificate_id: 'X', already_recorded: true })),
+    'ambiguous',
+  );
+  assert.equal(classifyRegistrationOutcome(204, ''), 'ambiguous');
+});
+
+test('propagates an ambiguous registration fetch rejection with manual redirect mode', async () => {
   const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
     throw new TypeError('network fetch failed');
   }) as typeof fetch;
 
-  const response = await fetchRegistrationUpstream(
-    'https://project.supabase.test/functions/v1/register-agent',
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-dmv-proxy': 'worker-secret',
+  await assert.rejects(
+    fetchRegistrationUpstream(
+      'https://project.supabase.test/functions/v1/register-agent',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-dmv-proxy': 'worker-secret',
+        },
+        body: JSON.stringify({ agent_name: 'mesa-agent' }),
       },
-      body: JSON.stringify({ agent_name: 'mesa-agent' }),
-    },
-    fetchImpl,
+      fetchImpl,
+    ),
+    /network fetch failed/,
   );
 
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), {
-    error: 'registration_unavailable',
-    message: 'Registration is temporarily unavailable. Please try again shortly.',
-  });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init?.redirect, 'manual');
   assert.equal(new Headers(calls[0].init?.headers).get('x-dmv-proxy'), 'worker-secret');

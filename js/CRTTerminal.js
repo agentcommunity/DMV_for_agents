@@ -120,8 +120,8 @@ export class CRTTerminal {
     this.onComplete = null;
     this.onSubmit = null;
     this.onCopyAgentCli = null;
-    this.agentCliCommand = 'bunx dmv-agent register';
-    this.agentMcpCommand = 'bunx dmv-agent';
+    this.agentCliCommand = 'bunx @agentcommunity/dmv-agent register';
+    this.agentMcpCommand = 'bunx @agentcommunity/dmv-agent';
     this.isSubmitting = false;
 
     // Boot sequence text — phase 2a (init lines, shown first)
@@ -240,7 +240,7 @@ export class CRTTerminal {
     this.dirty = true;
   }
 
-  setAgentRegistrationCommands(cliCommand, mcpCommand = 'bunx dmv-agent') {
+  setAgentRegistrationCommands(cliCommand, mcpCommand = 'bunx @agentcommunity/dmv-agent') {
     if (typeof cliCommand === 'string' && cliCommand.trim()) {
       this.agentCliCommand = cliCommand.trim();
     }

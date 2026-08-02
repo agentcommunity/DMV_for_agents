@@ -61,6 +61,61 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '') || DEFAULT_BASE_URL;
 }
 
+function hasExactKeys(record: Record<string, unknown>, keys: Array<string>): boolean {
+  return Object.keys(record).sort().join(',') === [...keys].sort().join(',');
+}
+
+const PUBLIC_RESULT_KEYS = [
+  'certificate_id',
+  'status',
+  'valid_format',
+  'issued',
+  'agent_name',
+  'certificate_url',
+];
+
+function isExactIssuedEnvelope(
+  record: Record<string, unknown>,
+  certificateId: string,
+): record is Record<string, unknown> & { agent_name: string; certificate_url: string } {
+  if (!hasExactKeys(record, PUBLIC_RESULT_KEYS)) return false;
+  if (
+    record.certificate_id !== certificateId
+    || record.status !== 'issued'
+    || record.valid_format !== true
+    || record.issued !== true
+    || typeof record.agent_name !== 'string'
+    || record.agent_name.trim().length === 0
+    || typeof record.certificate_url !== 'string'
+  ) {
+    return false;
+  }
+  const expectedUrl = `${DEFAULT_BASE_URL}/c/${encodeURIComponent(certificateId)}/${encodeURIComponent(record.agent_name)}`;
+  return record.certificate_url === expectedUrl;
+}
+
+function isExactEmptyEnvelope(
+  record: Record<string, unknown>,
+  certificateId: string,
+  status: 'not_found' | 'unavailable',
+): boolean {
+  return hasExactKeys(record, PUBLIC_RESULT_KEYS)
+    && record.certificate_id === certificateId
+    && record.status === status
+    && record.valid_format === true
+    && record.issued === (status === 'not_found' ? false : null)
+    && record.agent_name === null
+    && record.certificate_url === null;
+}
+
+function parseRateLimitEnvelope(record: Record<string, unknown>): number | null {
+  if (!hasExactKeys(record, ['error', 'retry_after_seconds'])) return null;
+  if (record.error !== 'rate_limited') return null;
+  if (!Number.isSafeInteger(record.retry_after_seconds)) return null;
+  const retryAfterSeconds = record.retry_after_seconds as number;
+  return retryAfterSeconds >= 1 && retryAfterSeconds <= 60 ? retryAfterSeconds : null;
+}
+
 /**
  * Verify a DMV certificate ID.
  *
@@ -117,10 +172,26 @@ export async function verifyCertificate(
   try {
     const response = await fetchFn(
       `${normalizedBaseUrl}/api/lookup?id=${encodeURIComponent(certificateId)}`,
-      { method: 'GET', signal: controller.signal },
+      { method: 'GET', redirect: 'manual', signal: controller.signal },
     );
 
     const text = await response.text();
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+      throw new Error(`lookup returned a non-JSON response (HTTP ${response.status})`);
+    }
+
+    let json: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('response body is not an object');
+      }
+      json = parsed as Record<string, unknown>;
+    } catch {
+      throw new Error(`lookup returned invalid JSON (HTTP ${response.status})`);
+    }
 
     // The Worker's rate-limit response (`{error: "rate_limited", retry_after_seconds}`,
     // both the coarse Cloudflare limiter and the exact Durable Object one — see
@@ -128,14 +199,9 @@ export async function verifyCertificate(
     // the generic shape check below, so a 429 is never mislabeled as "malformed" —
     // the live check DID run, it was just throttled.
     if (response.status === 429) {
-      let retryAfterSeconds: number | undefined;
-      try {
-        const body = JSON.parse(text) as Record<string, unknown>;
-        if (typeof body.retry_after_seconds === 'number') {
-          retryAfterSeconds = body.retry_after_seconds;
-        }
-      } catch {
-        // A malformed 429 body doesn't change what the status code already told us.
+      const retryAfterSeconds = parseRateLimitEnvelope(json);
+      if (retryAfterSeconds === null) {
+        throw new Error('lookup returned a malformed rate-limit response (HTTP 429)');
       }
       return {
         certificateId,
@@ -146,26 +212,40 @@ export async function verifyCertificate(
       };
     }
 
-    let json: Record<string, unknown>;
-    try {
-      json = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      throw new Error(`lookup returned invalid JSON (HTTP ${response.status})`);
+    if (response.status === 200 && isExactIssuedEnvelope(json, certificateId)) {
+      return {
+        certificateId,
+        formatValid,
+        checkMode: 'live',
+        status: 'issued',
+        issued: true,
+        agentName: json.agent_name,
+        certificateUrl: json.certificate_url,
+      };
     }
-
-    if (typeof json.status !== 'string') {
-      throw new Error(`lookup returned a malformed response (HTTP ${response.status})`);
+    if (response.status === 200 && isExactEmptyEnvelope(json, certificateId, 'not_found')) {
+      return {
+        certificateId,
+        formatValid,
+        checkMode: 'live',
+        status: 'not_found',
+        issued: false,
+        agentName: null,
+        certificateUrl: null,
+      };
     }
-
-    return {
-      certificateId,
-      formatValid,
-      checkMode: 'live',
-      status: json.status as CertificateLookupStatus,
-      issued: typeof json.issued === 'boolean' ? json.issued : null,
-      agentName: typeof json.agent_name === 'string' ? json.agent_name : null,
-      certificateUrl: typeof json.certificate_url === 'string' ? json.certificate_url : null,
-    };
+    if (response.status === 503 && isExactEmptyEnvelope(json, certificateId, 'unavailable')) {
+      return {
+        certificateId,
+        formatValid,
+        checkMode: 'live',
+        status: 'unavailable',
+        issued: null,
+        agentName: null,
+        certificateUrl: null,
+      };
+    }
+    throw new Error(`lookup returned an inconsistent response (HTTP ${response.status})`);
   } catch (err) {
     const reason = err instanceof Error && err.name === 'AbortError'
       ? `timed out after ${timeoutMs}ms`

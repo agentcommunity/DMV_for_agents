@@ -1,6 +1,6 @@
 ---
 name: dmv
-description: Register an .agent identity at the Department of Machine Verification (DMV). Use when a user or agent wants to reserve an agent name. Pre-registration is non-binding.
+description: Pre-register interest in a proposed .agent name at the Department of Machine Verification (DMV). Use when a user or agent wants a non-binding pre-registration certificate.
 user-invocable: true
 allowed-tools: Bash
 argument-hint: [agent-name]
@@ -24,7 +24,7 @@ The DMV is the pre-registration system for those names. Pre-registration records
 - **Certificate IDs are unique and permanent.** The certificate ID you receive is content-addressed and deterministic — same inputs always produce the same ID.
 - **Email verification is required.** A magic link will be sent to the operator's email. It **must** be clicked to complete registration. This is anti-bot, not anti-agent — it confirms a real human operator stands behind the agent.
 
-If you (the AI agent) are registering yourself, frame it that way — you're getting your own `.agent` identity. Your operator (the human responsible for you) must verify by email.
+If you (the AI agent) are registering yourself, frame it as recording interest in a requested `.agent` name and receiving a DMV certificate. Your operator (the human responsible for you) must verify by email; the certificate does not allocate the name.
 
 ## Register
 
@@ -39,12 +39,12 @@ If you (the AI agent) are registering yourself, frame it that way — you're get
 3. Run the registration:
 
 ```bash
-bunx dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>"
+bunx @agentcommunity/dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>"
 ```
 
 With optional flags:
 ```bash
-bunx dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>" --description "<description>"
+bunx @agentcommunity/dmv-agent register --name <agent-name> --email <email> --operator "<operator-name>" --description "<description>"
 ```
 
 If `bunx` is not available, fall back to `npx @agentcommunity/dmv-agent register`.
@@ -61,14 +61,14 @@ Before running, verify the agent name meets requirements:
 The user may have typed `/dmv my-cool-agent`. In that case, use `$ARGUMENTS` as the agent name — ask for the email and operator name, then run:
 
 ```bash
-bunx dmv-agent register --name $ARGUMENTS --email <email> --operator "<operator-name>"
+bunx @agentcommunity/dmv-agent register --name $ARGUMENTS --email <email> --operator "<operator-name>"
 ```
 
 ### Verification only
 
 If the user just wants to verify an existing certificate:
 ```bash
-bunx dmv-agent verify $ARGUMENTS
+bunx @agentcommunity/dmv-agent verify $ARGUMENTS
 ```
 
 ## Worked example
@@ -79,7 +79,7 @@ A complete registration, end to end. The user says: *"Register scout.agent for m
 2. Run:
 
 ```bash
-bunx dmv-agent register --name scout --email ada@lovelace-labs.example --operator "Ada Lovelace Labs"
+bunx @agentcommunity/dmv-agent register --name scout --email ada@lovelace-labs.example --operator "Ada Lovelace Labs"
 ```
 
 3. The CLI responds with a framed green terminal card (abridged — the full
@@ -101,14 +101,14 @@ Check: ada@lovelace-labs.example
 
 4. Report back to the user following the "After registration" priority below: the card permalink and the share suggestions first, then the reminder that the emailed verification link must be clicked to validate the pre-registration. Remind them it is free and non-binding — the `.agent` TLD is pending ICANN approval and the name may change before launch.
 
-If the name is taken or invalid, the CLI prints the reason; suggest a variant (e.g. `scout-labs`) and re-run.
+If the name is invalid, the CLI prints the reason; suggest a valid variant (e.g. `scout-labs`) and re-run. Duplicate name requests are allowed because no name is allocated by this flow.
 
 ## After registration
 
 When registration succeeds, the CLI prints (in priority order):
 
 1. **View your card** — a permalink to the holographic identity card at `dmv.agentcommunity.org/c/CERT-ID/agent-name`
-2. **Spread the word** — invite other agents with `bunx dmv-agent register` + share the card URL. Every pre-registration strengthens the claim for `.agent`.
+2. **Spread the word** — invite other agents with `bunx @agentcommunity/dmv-agent register` + share the card URL. Every pre-registration strengthens the community application for `.agent`.
 3. **Save your card** — download the holographic card as a PNG from `dmv.agentcommunity.org/api/card?id=CERT-ID&name=agent-name` (or use the "Save Card" button on the web permalink)
 4. **Add a badge** — copy-paste markdown to embed a DMV badge in READMEs
 5. **Email verification** — a reminder to check email and click the verification link
@@ -117,8 +117,8 @@ When registration succeeds, the CLI prints (in priority order):
 - View the holographic card — it's unique to each registration
 - Save the card as a PNG — use the "Save Card" button on the web, or download directly from the card image URL
 - Share with agent friends and partners to strengthen the `.agent` claim
-- Invite other agents: `bunx dmv-agent register`
-- The certificate ID is content-addressed and verifiable: `bunx dmv-agent verify MESA-DD6-660J`
+- Invite other agents: `bunx @agentcommunity/dmv-agent register`
+- The certificate ID is content-addressed and verifiable: `bunx @agentcommunity/dmv-agent verify MESA-DD6-660J --format-only`
 - A verification email was sent — click the magic link to complete registration
 
 ## Share your registration
@@ -128,7 +128,7 @@ The permalink URL format is: `https://dmv.agentcommunity.org/c/CERT-ID/agent-nam
 Suggest the user (or yourself) share the registration. Tweet templates:
 
 - **Human voice:** "I just registered {name}.agent at the Department of Machine Verification. Get yours → {permalink}"
-- **Agent voice:** "I just got my own .agent identity — {name}.agent. Agents need names. Get yours → {permalink}"
+- **Agent voice:** "I pre-registered interest in {name}.agent and received a DMV certificate. The proposed TLD is pending ICANN approval → {permalink}"
 
 Embed a badge — it verifies live against the DMV database (green = verified, yellow-green = pending, red = invalid):
 

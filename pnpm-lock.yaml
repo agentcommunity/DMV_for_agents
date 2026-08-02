@@ -44,14 +44,10 @@ importers:
   packages/dmv-agent-alias:
     dependencies:
       '@agentcommunity/dmv-agent':
-        specifier: ^0.2.1
-        version: 0.2.1(zod@4.3.6)
+        specifier: ^0.3.0
+        version: link:../dmv-agent
 
 packages:
-
-  '@agentcommunity/dmv-agent@0.2.1':
-    resolution: {integrity: sha512-d8gk/flz97Mx6hbQyRGax+Rs0iH1j3HZUj0QmM4DrkIuIZiYvStgMFEWMxJ7OtbKXxlI83ZUOmALc9Ls+gAxqw==}
-    hasBin: true
 
   '@cloudflare/containers@0.2.2':
     resolution: {integrity: sha512-cfTSd7M96Z9NeCiaN4i3FuMb+i2Nzi0HbMuxvMAnUmkXwtWIZCQ3XLqUWQkdCKWNJZ/3BLMInC6ntFvpbTWIpA==}
@@ -1067,14 +1063,6 @@ packages:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
 snapshots:
-
-  '@agentcommunity/dmv-agent@0.2.1(zod@4.3.6)':
-    dependencies:
-      '@modelcontextprotocol/sdk': 1.29.0(zod@4.3.6)
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - supports-color
-      - zod
 
   '@cloudflare/containers@0.2.2': {}
 

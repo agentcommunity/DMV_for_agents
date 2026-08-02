@@ -9,7 +9,8 @@ Step-by-step guide to take the DMV agent registration system from dev to product
 - [ ] Supabase CLI installed (`brew install supabase/tap/supabase`)
 - [ ] Logged in to Supabase (`supabase login`)
 - [ ] Linked to the agentcommunity project (`supabase link --project-ref tcymqfwwphacnosnnzxl`)
-- [ ] npm account with publish access to `@agentcommunity` scope
+- [ ] npm owner access for both `@agentcommunity/dmv-agent` and the existing
+      `dmv-agent` compatibility alias
 
 ---
 
@@ -28,7 +29,7 @@ certificate_id      TEXT        -- UNIQUE partial index (WHERE certificate_id IS
 signup_source       TEXT        -- 'ui' | 'cli' | 'mcp' | 'api'
 status              ENUM        -- NOT set by register-agent; uses DB default 'pending_profile'
 user_id             UUID        -- nullable (set by trigger, NOT by register-agent)
-metadata            JSONB       -- { agent_description, client_ip }
+metadata            JSONB       -- { agent_description, client_ip_hash }; raw IPs are never stored
 created_at          TIMESTAMPTZ -- default now()
 ```
 
@@ -38,6 +39,8 @@ created_at          TIMESTAMPTZ -- default now()
 - `certificate_id` has a UNIQUE partial index — prevents same user re-registering the same agent
 - `user_id` is nullable — register-agent INSERTs with NULL, the `on_dmv_registration` trigger fills it in
 - CHECK constraints enforce `full_name` for INDIVIDUAL/ORGANIZATION and `organization_name` for ORGANIZATION
+- `metadata.client_ip_hash`, when present, is one-way SHA-256 hex. Never add a
+  raw client IP field or use the shared database as an IP-rate-limit fallback.
 
 ### Trigger chain (managed by agentcommunity.org)
 
@@ -82,7 +85,38 @@ and the Supabase project. Never put its value in `.env.example`, documentation,
 shell history, or client configuration. The Worker also requires
 `RL_CERT_LOOKUP` (coarse 60/60), `CERT_LOOKUP_LIMITER` (exact SQLite DO 30/60),
 and `BADGE_CACHE_KV` (lookup result cache) as configured in `wrangler.jsonc`.
-`REGISTER_COOLDOWN_KV` remains registration-only.
+Registration also requires `REGISTER_FINGERPRINT_LIMITER`, the exact SQLite
+Durable Object budget introduced by forward-only v3. The legacy
+`REGISTER_COOLDOWN_KV` binding is retained but unused during rollout.
+
+**Current production status (2026-08-02):** v3 is now live. A non-main branch
+was accidentally promoted to production on 2026-08-02 because Cloudflare's
+non-production branch command ran a production deploy. The dashboard has been
+corrected and verified: production uses `npx wrangler deploy`; non-production
+uses `npx wrangler versions upload`. The repository guard also selects from
+`WORKERS_CI_BRANCH`, uploads non-main Workers Builds, and rejects local
+non-main/detached production attempts. `pnpm cf:preview` is the explicit
+upload-only local path.
+
+Because v3 reached production, the Durable Object migration is forward-only
+operational state even if the promotion itself was accidental. Preserve
+v1/v2/v3 and their classes, exports, bindings, and migrations in `main` and in
+every recovery Worker. Do not deploy a pre-v3 `main`. The completed 2026-07-22
+evidence below remains lookup v2 evidence; do not mislabel it as the separate v3
+registration smoke record.
+
+The v3 source uses a closed completion classification. Only a well-formed fresh
+`201` commits a fingerprint claim. Only well-formed pre-INSERT `400`/`403`/`409`
+responses and an exact `200 already_recorded` replay release one. Every 5xx/546,
+unexpected or malformed response, body-read failure, timeout/abort, or transport
+failure stays pending. The 45-second Worker response timeout is local only and
+does not claim to cancel Supabase execution. A pending claim is converted to a
+possible-success timestamp at claim time + 600 seconds, then held for the full
+24-hour rolling window. That 600-second horizon covers Supabase's documented
+150-second request-idle timeout, 400-second Edge Function wall-clock duration,
+and a 50-second safety margin. Current primary references:
+[`functions/limits`](https://supabase.com/docs/guides/functions/limits) and
+[`Workers Request.signal`](https://developers.cloudflare.com/workers/runtime-apis/request/#properties).
 
 Before merging, run these container gates on a Docker-capable machine:
 
@@ -112,15 +146,17 @@ The completed rollout used the order below. Final production results were:
   verification. The limiter and result-cache smokes intentionally wrote Durable
   Object/KV operational state.
 
-### Future rollout order
+### Required rollout order
 
 1. Before merging, record the target feature-branch SHA and the currently
    deployed production Worker SHA/version in the launch notes. In the
    Cloudflare account, confirm that native rate-limit namespace `1002` is
    allocated to `RL_CERT_LOOKUP` and does not collide with another account-wide
-   binding. Confirm `BADGE_CACHE_KV`, `CERT_LOOKUP_LIMITER`, the v1/v2 Durable
-   Object migrations, and the shared `DMV_PROXY_SECRET` are configured without
-   printing the secret.
+   binding. Confirm `BADGE_CACHE_KV`, `CERT_LOOKUP_LIMITER`,
+   `REGISTER_FINGERPRINT_LIMITER`, all forward-only v1/v2/v3 Durable Object
+   migrations, and the shared `DMV_PROXY_SECRET` are configured without
+   printing the secret. The v3 class and binding must remain together in every
+   deployment now that registration traffic has reached the v3 Worker.
 2. Merge to `main`, record the resulting merged `main` SHA, and use the Cloudflare
    Git integration's automatic build as the single authoritative Worker deploy
    path. Watch that build and capture its deployed commit SHA/version. If no
@@ -170,13 +206,15 @@ bypass its platform JWT layer because the Worker authenticates with
    and validation-only registration. Record their statuses/results. Only after
    these final smokes pass may the rollout be handed off or declared live.
 
-### v2-safe recovery
+### v3-safe recovery
 
-Cloudflare's v2 SQLite Durable Object migration is forward-only operational
-state. Never use Cloudflare rollback to a pre-v2 Worker: such a version lacks
-the `CertificateLookupRateLimiter` export/binding while the account retains the
-v2 migration. Preserve both v1 and v2 migrations, the class export, and the
-`CERT_LOOKUP_LIMITER` binding in every recovery version.
+Cloudflare's SQLite Durable Object migrations are forward-only operational
+state. Preserve the deployed v1/v2/v3 classes, migrations, exports, and
+bindings. Never use Cloudflare rollback to a pre-v3 Worker: such a
+version lacks the `RegistrationFingerprintRateLimiter` export/binding while the
+account retains the migration. Preserve v1 `CardRenderer`, v2
+`CertificateLookupRateLimiter`, v3 `RegistrationFingerprintRateLimiter`, and
+all corresponding bindings in every recovery version.
 
 Cloudflare's runtime rejects `redirect: 'error'`. Keep the internal upstream
 fetch at `redirect: 'manual'`; any 3xx remains fail-closed and must never be
@@ -345,22 +383,80 @@ Then bump the cache-busting version:
 
 ## 4. NPM Package — Publish
 
-```bash
-# From repo root: run the full release gate first.
-pnpm build
+The registry currently contains canonical `@agentcommunity/dmv-agent@0.2.2`
+and compatibility alias `dmv-agent@0.1.2`. Source `0.3.0` and alias `0.1.3`
+are release candidates, not published releases. npm versions are immutable, so
+do not publish either candidate manually or before all gates pass.
 
-# Then publish the package.
-cd packages/dmv-agent
-npm publish --access public
+An npm owner must configure the same exact GitHub trusted publisher for **each**
+package: organization `agentcommunity`, repository `DMV_for_agents`, workflow
+filename `publish-dmv-packages.yml`, environment `npm-production`, and allowed
+action `npm publish`. In GitHub, create that exact protected environment with
+required reviewers and a deployment branch rule allowing `main` only. The
+workflow also enforces `refs/heads/main`. Keep these repository, workflow, and
+environment values identical for both packages.
+
+Unprivileged jobs run all candidate checkout/build/test/pack/state/proof code.
+Only the two minimal publish jobs receive `id-token: write`; they use the
+protected environment, download the already-verified run artifact, and execute
+one exact `npm publish <tgz> --access public --provenance` command. Verifier
+child processes scrub GitHub OIDC request variables and npm credential
+variables. The workflow uses GitHub-hosted runners, exact Node `24.18.1` and npm
+`12.0.2`, and no dependency cache. npm's current trusted-publishing minimums are
+Node 22.14 and npm 11.5.1. Do not add `NPM_TOKEN` or `NODE_AUTH_TOKEN`.
+
+Before authorizing the workflow, run from the repository root:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm test
+pnpm build
+pnpm cf:build
+pnpm exec tsc --noEmit
+pnpm verify:packages -- --registry-mode=current
 ```
 
-Repo-root `pnpm build` runs text-surface checks, compiles
-`@agentcommunity/dmv-agent`, runs `tests/dmv-agent-cli.test.mjs` against the
-built CLI, and runs `tests/dmv-agent-packed-cli.test.mjs`, which packs the npm
-tarball, installs it into a temporary consumer project, and exercises the
-installed `dmv-agent` binary against a local capture server. Package-level
-`pnpm build` from `packages/dmv-agent/` only runs `tsc`; use it for a quick
-compile check, not as the pre-publish smoke gate.
+`pnpm verify:packages` is the executable package evidence gate. It reads both
+source manifests, rejects package-local lockfiles (the root
+`pnpm-lock.yaml` is the sole authority), builds from clean source, compares
+`npm pack --dry-run --json` with actual canonical/alias archives, enforces
+exact allow-lists, exact README/CHANGELOG/LICENSE bytes, and no secret/source/
+test leakage. It clean-installs with scripts disabled, invokes both aliases of
+the CLI plus the canonical MCP server, checks bounded registry requests and
+tarball integrity. Its default mode performs no production operation. Run
+`pnpm verify:packages -- --registry-mode=current --production-smoke` separately
+only when live evidence is intended. That opt-in performs doctor, issued lookup,
+and exact secretless registration/lookup-gate checks. It never submits a
+registration or writes business data, but it consumes live rate-limit/lookup
+quota and may populate caches. Every mode removes its generated package `dist`.
+
+Dispatch `Publish DMV npm packages` only with the exact confirmation string.
+The workflow produces and uploads two verified tarballs once. For each immutable
+version, a registry `404` is absent and publishes; a present candidate must match
+the exact local SRI and pass full proof, then skips safely. A different or
+ambiguous result fails with `version bump required`. This makes reruns safe after
+canonical-only publication and after alias completion without repacking inside
+an OIDC job. Canonical exact proof completes before alias state or publication.
+The final gate requires the alias dependency range to be exactly
+`@agentcommunity/dmv-agent@^0.3.0` and proves SRI/downloaded bytes, `gitHead`,
+DSSE/in-toto/SLSA type, GitHub-hosted builder, exact repo/workflow/main ref,
+resolved source commit, and package subject digest. `npm audit signatures`
+cryptographically verifies signatures, attestations, and transparency evidence;
+registry signatures remain distinct from provenance.
+
+Trusted-publisher setup and workflow dispatch are external owner actions. No
+package is published merely by merging this source. After the first successful
+OIDC release, restrict traditional token publication and revoke obsolete
+automation tokens only after confirming the trusted publisher works.
+
+Primary release references checked 2026-08-01:
+
+- [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+- [npm publish and pack contents](https://docs.npmjs.com/cli/publish/)
+- [GitHub deployment environments and protection rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+- [GitHub OIDC job permissions](https://docs.github.com/en/actions/reference/security/oidc)
+- [Node.js release status](https://nodejs.org/en/about/previous-releases)
+- [GitHub `setup-node`](https://github.com/actions/setup-node/blob/main/README.md)
 
 ### Verify it works
 
@@ -423,7 +519,7 @@ Type `/dmv` in Claude Code → should guide through registration via CLI.
 | `Registration failed (HTTP 500)` | Service role key not set or DB schema mismatch | Check Supabase dashboard → Edge Functions → Logs |
 | `already_recorded=true` | Same user re-registering same agent | Expected — returns cert ID + permalink for recovery |
 | `Rate limited` (429) | Too many registrations from same email or (IP, email) within 60s | Wait 60s. Check shared CF rate limit counters in Cloudflare dashboard. |
-| `fingerprint_cooldown` (429) | CLI/MCP machine fingerprint exceeded local KV cooldown | Wait `retry_after_seconds`. Counter is in DMV-local `REGISTER_COOLDOWN_KV`. |
+| `fingerprint_cooldown` (429) | CLI/MCP machine fingerprint exhausted the exact Durable Object budget | Wait `retry_after_seconds`. Inspect `REGISTER_FINGERPRINT_LIMITER`; never expose object claim IDs or raw fingerprints. |
 | CLI hangs on `bunx` | Package not published or npm registry cache | Try `npx @agentcommunity/dmv-agent` or `bunx --force` |
 
 ---
@@ -459,8 +555,8 @@ User's machine             Cloudflare Worker                  Supabase cloud
  │  /dmv skill        │──▶│ validate JSON        │──forward─▶│ validate (again)      │
  │  MCP tool          │   │ require fingerprint │           │ lifetime cap (DB)     │
  └───────────────────┘    │ shared CF limits     │           │ generate cert, INSERT │
-                          │ DMV-local KV         │           └──────────┬───────────┘
- ┌───────────────────┐    │ cooldown             │                       │
+                          │ exact fingerprint DO │           └──────────┬───────────┘
+ ┌───────────────────┐    │ claim/complete       │                       │
  │ Web UI             │──▶│                      │                       │
  │ js/supabase.js     │   │ (browser path:       │                       │
  └───────────────────┘    │  Turnstile siteverify│                       │

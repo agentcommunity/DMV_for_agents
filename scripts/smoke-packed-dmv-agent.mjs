@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,6 +28,7 @@ try {
   mkdirSync(homeDir, { recursive: true });
   const tarball = packTarball();
   installTarball(tarball);
+  assertInstalledPackageDocs();
   runInstalledVerify();
   await runInstalledDoctor();
   await runInstalledRegistration();
@@ -71,11 +72,19 @@ function installTarball(tarball) {
   });
 }
 
+function assertInstalledPackageDocs() {
+  const changelog = readFileSync(
+    path.join(projectDir, 'node_modules', '@agentcommunity', 'dmv-agent', 'CHANGELOG.md'),
+    'utf8',
+  );
+  assert.match(changelog, /^# Changelog/m);
+  assert.match(changelog, /^## 0\.3\.0$/m);
+}
+
 function runInstalledVerify() {
   // --format-only: this smoke test proves the packed binary works end-to-end
   // (pack, install, invoke), not that dmv.agentcommunity.org/api/lookup is
-  // reachable or has published the lookup upstream (see AGENT_HANDOFF.md
-  // Task 8). The default live-check path is covered against a local mock
+  // reachable. The default live-check path is covered against a local mock
   // server in tests/dmv-agent-cli.test.mjs.
   const result = runSyncWithTimeout(installedBin(), ['verify', 'MESA-DD6-660J', '--format-only'], {
     cwd: projectDir,

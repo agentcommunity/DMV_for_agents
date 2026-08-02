@@ -109,7 +109,8 @@ function existingRegistrationPayload(args: {
 // Proxy header gate — only the DMV worker at dmv.agentcommunity.org/api/register
 // is allowed to call this function (it is deployed with --no-verify-jwt, so this
 // header is its ONLY defense against direct internet callers who would bypass the
-// worker's Turnstile + rate limits + KV cooldown). The worker sets the shared
+// worker's Turnstile + shared limits + exact fingerprint Durable Object budget).
+// The worker sets the shared
 // secret `DMV_PROXY_SECRET` as the `x-dmv-proxy` header on every forwarded request
 // (see worker/index.ts handleRegister). Any direct POST to this Supabase URL
 // without a matching header value is rejected with 403.
@@ -168,7 +169,7 @@ export async function handleRegisterAgent(
           'Direct access to this edge function is no longer supported. Use ' +
           'https://dmv.agentcommunity.org/api/register (the DMV worker proxy) ' +
           'or update @agentcommunity/dmv-agent to the latest version via ' +
-          '`bunx dmv-agent register`.',
+          '`bunx @agentcommunity/dmv-agent register`.',
       }),
       { status: 403, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
     )
@@ -419,14 +420,19 @@ export async function handleRegisterAgent(
   // Counted after the insert so the new row is included (#1 for the first
   // registrant). Approximate under concurrent inserts, which is fine for a
   // cosmetic counter. Fail OPEN: the registration already succeeded, so a
-  // count error just omits the field rather than failing the request.
+  // structured error or rejected query just omits the field rather than
+  // turning a committed INSERT into an ambiguous 5xx response.
   let queueNumber: number | null = null
-  const { count: globalCount, error: queueCountError } = await supabase
-    .from('registrations')
-    .select('*', { count: 'exact', head: true })
-    .not('certificate_id', 'is', null)
-  if (!queueCountError && typeof globalCount === 'number' && globalCount > 0) {
-    queueNumber = globalCount
+  try {
+    const { count: globalCount, error: queueCountError } = await supabase
+      .from('registrations')
+      .select('*', { count: 'exact', head: true })
+      .not('certificate_id', 'is', null)
+    if (!queueCountError && typeof globalCount === 'number' && globalCount > 0) {
+      queueNumber = globalCount
+    }
+  } catch {
+    queueNumber = null
   }
 
   return new Response(

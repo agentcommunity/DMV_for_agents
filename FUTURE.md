@@ -14,7 +14,7 @@ If the Supabase backend changes, update `SUPABASE_FUNCTIONS_ORIGIN` in `worker/i
 
 ## ~~API Hardening~~ — DONE (2026-04-08)
 
-Browser, CLI, and MCP registration all converge on the worker `/api/register` endpoint now. The worker owns Turnstile (browser path), shared CF rate limits with `agentCommunity_PAGE` (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both `namespace_id` values shared at the CF account level), and a DMV-local KV fingerprint cooldown (`REGISTER_COOLDOWN_KV`) for headless clients. Upstash Redis was removed from `register-agent` entirely. CAPTCHA always runs before shared counters so invalid tokens cannot exhaust quota for real users.
+Browser, CLI, and MCP registration all converge on the worker `/api/register` endpoint now. The worker owns Turnstile (browser path), shared CF rate limits with `agentCommunity_PAGE` (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both `namespace_id` values shared at the CF account level), and an exact transactional `REGISTER_FINGERPRINT_LIMITER` SQLite Durable Object budget for headless clients. Upstash Redis was removed from `register-agent` entirely. CAPTCHA always runs before shared counters so invalid tokens cannot exhaust quota for real users.
 
 Design walked back from the original Option E plan (which over-coupled DMV to PAGE) per `docs/plans/2026-04-08-cross-repo-hardening-handoff-prompt.md`. The handoff prompt is the source of truth for all coupling decisions.
 

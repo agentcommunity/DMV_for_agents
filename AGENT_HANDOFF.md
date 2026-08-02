@@ -10,15 +10,39 @@ Start here if you're a fresh agent picking up the DMV project after the cross-re
 
 The per-email lifetime cap upgrade (5 unendorsed → 12 endorsed) was reading `registrations.endorsement_status = 'signed'` to decide whether an email qualified for the higher cap. That column is dead on the shared PAGE DB — signing truth there is `registrations.status = 'complete'` (see PAGE's `docs/SUPABASE.md` and `CLAUDE.md`). Members who signed after `endorsement_status` stopped being written were silently stuck at the 5-cert cap. Fixed in `supabase/functions/register-agent/index.ts` to check `status = 'complete'`; the 5/12 cap values themselves are unchanged, and the query stays fail-closed on error. Deliberately does not also check `endorsement_requests` — that table has no reliable email column for this lookup (only `registration_id` and an unreliable `signer_email`), and this check is keyed by email with no `user_id`/`registration_id` available, so `status='complete'` on `registrations` already answers it in one query. New tests in `supabase/functions/register-agent/index.test.ts`.
 
-## 2026-08-01 — Task 3: fingerprint cooldown reworked to count successful mints only, with an honest `Retry-After`
+## 2026-08-01 — Task 3: exact fingerprint budget ready in source, not deployed
 
-The fingerprint cooldown used to increment on every request *before* forwarding to `register-agent`, so an upstream 5xx (plus the npm client's automatic retries) or an `already_recorded` replay could exhaust a machine's 24h budget with zero successful registrations — directly contradicting its own "Allow 3 successful registrations" comment. Fixed across two commits:
+The former Workers KV read-then-write cooldown was not atomic: simultaneous
+requests could all observe spare capacity and mint more than the documented
+three certificates. This branch replaces it with one SQLite Durable Object per SHA-256
+machine-fingerprint hash (`REGISTER_FINGERPRINT_LIMITER`, forward-only v3
+migration). A transaction reserves a claim before upstream work, so pending
+claims and committed successes jointly occupy the three slots. A well-formed
+fresh `201` commits; only audited, well-formed pre-INSERT `400`/`403`/`409`
+responses and exact `200 already_recorded` replays release. Every 5xx/546,
+malformed/unexpected response, body-read failure, timeout/abort, and transport
+failure stays pending. The Worker's 45-second local response timeout does not
+claim to cancel Supabase execution. If COMPLETE never arrives, the claim stays
+pending for a conservative 600-second horizon: Supabase's documented 150-second
+request-idle timeout plus its 400-second Edge Function wall clock plus a
+50-second safety margin. It then becomes a possible success and remains counted
+for a full rolling 24 hours from the horizon timestamp. This avoids reopening a fourth mint while still
+recovering automatically. Durable Object failure fails closed with a generic 503; public
+responses never expose claim IDs, raw fingerprints, or raw IPs. Concurrent,
+abandoned-claim, duplicate-token, malformed-token, release, and rollover
+regressions live in `tests/worker-registration-fingerprint-rate-limiter.test.ts`
+and `tests/worker-register-fingerprint-cooldown.test.ts`.
 
-- `worker/rate-limit-kv.ts`: `checkKvCooldown` now gates the request read-only (no write), and `incrementKvCooldown` only fires after `isNewCertificateMint` confirms a real 201 that isn't an `already_recorded` replay. KV now stores `{count, firstAt}` instead of a bare count, so `Retry-After` reports the actual remaining window instead of a flat 86400 seconds; legacy bare-count values are still parsed and carried forward without resetting.
-- `worker/register-fingerprint-cooldown.ts` (new module, `runFingerprintGatedUpstream`): pulls the check-before/call-upstream/increment-after composition out of `handleRegister` into an injectable, unit-tested function with no `./container-instance` import, so it can be imported directly in tests without a build step. This exists because the composition itself was the exact bug — a review pass found that reverting the ordering, or dropping the `isNewCertificateMint` gate, left all prior tests green. `tests/worker-register-fingerprint-cooldown.test.ts` pins call order via a recording fake gate, verified by mutation (reverting the ordering locally failed 4 of 7 tests).
-- **Follow-up fix in this pass:** `FINGERPRINT_COOLDOWN_THRESHOLD` had stayed `4` through both commits above, which — under the new success-only counting — let 4 successful mints through and only blocked the 5th, contradicting the "3/machine/24h" figure documented everywhere else (`CLAUDE.md`, `AUTH_DMV.md`, this file). The constant is now `3` (moved to `worker/register-fingerprint-cooldown.ts` so it's importable by tests), and `tests/worker-register-fingerprint-cooldown.test.ts` has an absolute-budget regression test (3 mints succeed, the 4th blocks) pinned against the real `rate-limit-kv.ts` implementation, not a mocked gate.
+**Production v3 status (2026-08-02):** `REGISTER_FINGERPRINT_LIMITER` is live
+after an accidental non-main branch promotion to production. Cloudflare's
+dashboard commands are corrected: production uses `npx wrangler deploy`, and
+non-production uses `npx wrangler versions upload`. The repository deploy guard
+uses `WORKERS_CI_BRANCH` as a second layer. Because the v3 migration reached
+production, every future deployment and recovery source must preserve v1/v2/v3
+even though the promotion was accidental. The April browser signup remains
+evidence for the older registration path, not a v3 registration smoke record.
 
-## 2026-08-01 — Task 4: `verify_certificate` MCP name collision resolved (npm package v0.3.0)
+## 2026-08-01 — Task 4: `verify_certificate` name collision resolved in source v0.3.0
 
 Code review across both `agentcommunity_PAGE` and this repo found that the
 `@agentcommunity/dmv-agent` npm package's MCP server exposed a tool named
@@ -35,38 +59,47 @@ a "no, not found" from the other, for the same ID.
 default — the same public, rate-limited (~30/60s per IP) Worker route the
 main site's tool uses — via the new `packages/dmv-agent/src/lookup.ts`. A
 `format_only: true` MCP argument / `--format-only` CLI flag preserves the old
-check-digit-only behavior with no network call. If the live call fails
-(network error, timeout, malformed response, or the Worker itself reporting
-`status: "unavailable"`), the tool automatically falls back to the offline
-check digit and labels the result `(format-only ...)` in its text output; a
-network failure is never reported as "not issued". Full detail in
-`packages/dmv-agent/CHANGELOG.md` (0.3.0) and `packages/dmv-agent/README.md`.
+check-digit-only behavior with no network call. Network errors, timeouts,
+unexpected HTTP statuses, and malformed, partial, extra-field, mismatched-ID,
+or otherwise inconsistent JSON fall back to the offline check digit and label the result
+`(format-only ...)` in its text output; a network failure is never reported
+as "not issued". An exact typed HTTP 503 `unavailable` response and an exact
+HTTP 429 rate-limit response remain live but inconclusive. Redirects are
+manual and never followed. Full detail in `packages/dmv-agent/CHANGELOG.md` (0.3.0)
+and `packages/dmv-agent/README.md`.
 
-**Update (2026-08-01, re-verified live):** `GET /api/lookup` now returns real
-`not_found` (and, for issued certificates, real `issued`) results —
-`{"certificate_id":"MESA-DD6-660J","status":"not_found","valid_format":true,"issued":false,...}`
-against a real, unissued but valid-format ID; `status: "unavailable"` is no
-longer what production returns for a normal request. The `lookup-agent`
-Supabase upstream is live, not "implementation-ready but unpublished" as
-earlier revisions of this doc said. `dmv-agent verify` / the MCP tool now
-give a conclusive live-check result rather than the inconclusive
-`unavailable` fallback described above when this section was first written
-earlier the same day. Nothing was published to npm as part of the
-`verify_certificate` wiring change itself; `packages/dmv-agent/package.json`
-was bumped to `0.3.0`, still unpublished until someone explicitly runs
-`npm publish --access public` from `packages/dmv-agent`. The `dmv-agent`
-alias still declares `@agentcommunity/dmv-agent@^0.2.1` in-tree — a `^0.3.0`
-range breaks `pnpm install --frozen-lockfile` (which the Cloudflare build
-uses) because `0.3.0` is not yet on the registry. Publish order: publish
-`@agentcommunity/dmv-agent@0.3.0` first, then bump the alias dependency to
-`^0.3.0` and publish the alias. See `packages/dmv-agent/CHANGELOG.md`.
+The lookup boundary is live. Nothing was published to npm as part of this
+source change: the published packages remain
+`@agentcommunity/dmv-agent@0.2.2` and the compatibility alias
+`dmv-agent@0.1.2`. The canonical source manifest is `0.3.0`, the compatibility
+alias source is `0.1.3`, and publication remains an explicit package-owner
+action after the release gates pass. The source now includes a GitHub-hosted
+OIDC workflow and reproducibility verifier, but npm trusted-publisher
+configuration and workflow dispatch have not occurred. No provenance is
+claimed for the current `0.2.2`/`0.1.2` releases.
+
+The release workflow now confines OIDC to two main-only, protected
+`npm-production` publish jobs; candidate code runs only in unprivileged jobs.
+It resumes through absent-or-exact canonical and alias states, cryptographically
+verifies provenance with `npm audit signatures`, and requires a version bump on
+any mismatch or ambiguous state. The default package verifier performs no
+production operation. Its explicit non-registration `--production-smoke` does
+consume live quota and may populate caches. External owner setup for both npm
+trusted publishers and the protected GitHub environment remains outstanding.
+
+Production was re-verified on 2026-08-01: normal requests return real `issued`
+or `not_found` results, while `unavailable` remains reserved for genuine
+failures.
 
 ## Current production state — registration and lookup live
 
 ```
 DMV worker         https://dmv.agentcommunity.org         /api/register live end-to-end
-                                                           Turnstile + shared CF rate limits + KV cooldown
-                                                           all verified with real browser signup 2026-04-09
+                                                           Turnstile + shared CF rate limits + v3 exact fingerprint DO
+                                                           v3 live as of 2026-08-02; preserve v1/v2/v3 forward-only
+
+v3 source          this branch                             exact REGISTER_FINGERPRINT_LIMITER live
+                                                           separate registration smoke evidence still required
 
 DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate active (DMV_PROXY_SECRET shared secret;
                                                            public v1 constant retired 2026-05-29, now 403)
@@ -74,15 +107,16 @@ DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate acti
                                                            status NOT set on INSERT (DB default applies)
                                                            MUST be deployed with --no-verify-jwt
 
-npm                @agentcommunity/dmv-agent@0.2.1         published, routes through /api/register
-                   dmv-agent@0.1.1 alias                  depends on @agentcommunity/dmv-agent ^0.2.1
+npm registry       @agentcommunity/dmv-agent@0.2.2         published canonical package
+                   dmv-agent@0.1.2                         published compatibility alias
+
+npm source         @agentcommunity/dmv-agent@0.3.0         source-ready, not published
+                   dmv-agent@0.1.3                         source-ready, depends on canonical ^0.3.0
 
 Lookup boundary    GET /api/lookup + lookup-agent          LIVE — deployed on main fabafe6 (PR #20), Worker
                                                            d9755e66-3883-4970-be84-a59307011f14 (2026-07-22),
                                                            direct Edge gate verified 403. Re-verified live
                                                            2026-08-01: real issued/not_found, not "unavailable".
-                                                           Task 8 paperwork (deployed SHA + full smoke record)
-                                                           still outstanding.
 
 DMV main           latest as of this handoff               see `git log` for the current HEAD
 
@@ -92,7 +126,7 @@ PAGE main          shared Supabase project                 hardened independentl
 
 ## The hardening arc, in one paragraph
 
-Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentCommunity_PAGE`) → forward to Supabase `register-agent` edge function with the `x-dmv-proxy` header set to the `DMV_PROXY_SECRET` shared secret (the public `v1` constant was retired 2026-05-29). CLI/MCP path: validate JSON → require `machine_fingerprint` → same shared limiters → DMV-local KV cooldown (`REGISTER_COOLDOWN_KV`, key `dmv:register:fingerprint:<sha256>`) → forward. CAPTCHA always runs before shared counters so invalid tokens can't burn quota. Supabase edge function verifies the `x-dmv-proxy` header (rejecting direct-to-Supabase calls with 403 `direct_access_deprecated`), validates input again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set — **crucially, not setting `status`**, because the PAGE schema uses `certificate_id IS NOT NULL` as the DMV-row marker (see the quirks section below).
+Browser / CLI / MCP / JS API registration all converge on `/api/register` on the `dmv-agentcommunity` Cloudflare Worker. Browser path: validate JSON → require `cf-turnstile-response` → Turnstile siteverify (hostname + `dmv_register` action checked server-side) → shared CF rate limiters (`RL_OTP_EMAIL` 5/60s and `RL_OTP_IP_EMAIL` 4/60s, both sharing `namespace_id` at the Cloudflare account level with `agentcommunity_PAGE`) → forward to Supabase `register-agent` with `DMV_PROXY_SECRET`. Production CLI/MCP traffic currently uses the older DMV-local KV cooldown after the shared limits. This branch changes that step to one exact SQLite Durable Object budget per hashed fingerprint: claim before upstream, commit only a well-formed fresh mint, release only an audited pre-INSERT response or exact replay, leave every uncertain outcome pending, and fail closed. Supabase validates again, enforces the DB lifetime cap (5 unendorsed / 12 endorsed per email), generates the certificate ID, and INSERTs with `certificate_id` set while omitting `status` so the DB default applies. Its nonessential post-INSERT queue count cannot turn a committed mint into a 5xx; structured errors and rejected queries both yield a `201` with `queue_number: null`.
 
 The live certificate-verification boundary follows the same model. Public
 clients use only
@@ -139,13 +173,27 @@ A push to DMV main triggers a **Cloudflare worker** redeploy (via CF git integra
 
 `RL_OTP_EMAIL` namespace_id `4005` and `RL_OTP_IP_EMAIL` namespace_id `4007` are shared at the Cloudflare account level with `agentCommunity_PAGE`. A single attacker spending email-keyed quota on PAGE has less of it available on DMV. This is intentional. If PAGE ever bumps these values or changes the email-hash keying function, DMV silently drifts — watch for it in cross-repo coordination. PAGE's `RL_AUTH` (4001) and `RL_OTP_IP` (4006) are NOT shared; `RL_OTP_IP` (4006) was dropped entirely from PAGE's wrangler.jsonc in PR #82 and nothing references it anymore.
 
-### 6. DMV-local `REGISTER_COOLDOWN_KV` is a separate KV namespace from PAGE's
+### 6. Registration fingerprint enforcement is a DMV-local Durable Object
 
-ID: `ec0cdc55c2f94267af84f0218c961a00` (preview: `dc0c4a98b4764d448f35872de11984be`). DMV-only. Do NOT share it with PAGE. PAGE has its own `KV_RATE_LIMIT` namespace (`c0e0d88fff1a4c59805ab85c7a03100f`) for its OTP cooldown — different namespace, different key schema, fully separate.
+`REGISTER_FINGERPRINT_LIMITER` is one SQLite Durable Object per SHA-256
+machine-fingerprint hash and is never shared with PAGE. It is live as of
+2026-08-02. Production recovery must preserve v1 `CardRenderer`, v2
+`CertificateLookupRateLimiter`, the v3 class/export/migration/binding, and all
+corresponding configuration in every roll-forward. The old
+`REGISTER_COOLDOWN_KV` binding is retained as unused compatibility state.
 
 ### 7. The npm CLI auto-resolves the scoped package
 
-`bunx dmv-agent register` installs `dmv-agent@0.1.1` (the unscoped alias), which depends on `@agentcommunity/dmv-agent^0.2.1`. The currently published scoped package is `0.2.1`. Publishing a compatible new scoped version can transparently update what alias users get, subject to that caret range. When publishing: `cd packages/dmv-agent && npm publish --access public`. Do NOT publish from the repo root — the root `package.json` has `"private": true` as a safety rail, but a missing private flag would ship 17 MB of everything. See `.gitignore` for `.worktrees/` exclusion that backstops this.
+Use `bunx @agentcommunity/dmv-agent register`. The published canonical package
+is `@agentcommunity/dmv-agent@0.2.2`; `dmv-agent@0.1.2` is a compatibility alias,
+not a second capability. This branch prepares canonical source `0.3.0` and
+compatibility alias source `0.1.3` with a dependency on `^0.3.0`, but neither
+may be published without the separate
+release-owner authorization and artifact gates. Publish only from the explicit
+package directory, never the repo root. The root `package.json` has
+`"private": true` as a safety rail, but a missing private flag would ship the
+whole repository. See `.gitignore` for the `.worktrees/` exclusion that
+backstops this.
 
 ### 8. Lookup deployment record and future order
 
@@ -159,7 +207,8 @@ Worker first is intentional. The completed rollout recorded invalid `400`, then
 deployed only `lookup-agent --no-verify-jwt` and proved `REEF-068-BD0Q` issued,
 `ZZZZ-FFF-FFFD` not-found, direct secretless `403`, exact call-31 `429`, minute
 rollover, and health/card/badge/permalink/registration smokes. Never roll back
-to pre-v2: preserve migrations, DO export, and binding in a roll-forward. If a
+to pre-v3: preserve the deployed v1/v2/v3 migrations, DO exports, and bindings in
+a roll-forward. If a
 future Worker change fails, stop before Edge; if Edge fails after gating, keep
 the safe Worker `503` and roll Edge forward without reopening direct access.
 Update all status surfaces in DEPLOY.md after any future evidence-backed rollout.
@@ -168,12 +217,6 @@ Update all status surfaces in DEPLOY.md after any future evidence-backed rollout
 
 ### High (bug/incident risk)
 
-1. **Close out Task 8's paperwork.** `GET /api/lookup` is confirmed live in
-   production as of 2026-08-01 (real `issued`/`not_found`, not `unavailable`
-   — see the 2026-08-01 section above). What's still outstanding is the
-   record-keeping: capture the deployed DMV commit SHA and full smoke
-   evidence for issued/not-found/invalid outcomes and the direct Edge 403
-   boundary.
 1. **Preserve the live lookup boundary.** Future changes must retain public
    certificate-ID-only lookup, exact 30/60 enforcement, the direct Edge 403
    gate, and the no-data-mutation verification discipline.
@@ -210,7 +253,10 @@ Update all status surfaces in DEPLOY.md after any future evidence-backed rollout
 - Don't run `ALTER TYPE registration_status ADD VALUE 'provisional_dmv'` (see quirk #2)
 - Don't deploy `register-agent` without `--no-verify-jwt` (see quirk #1)
 - Don't `wrangler secret put` on `dmv-agentcommunity` (see quirk #3) — use the dashboard
-- Don't `npm publish` from the DMV repo root (see quirk #7) — always `cd packages/dmv-agent` first
+- Don't publish either npm package manually. Use the owner-authorized
+  `publish-dmv-packages.yml` workflow, which publishes the exact verified
+  canonical tarball first, blocks the alias until canonical provenance passes,
+  and requires the protected `npm-production` environment on `main`.
 - Don't push PAGE changes to main without reviewing them — PAGE auto-deploys via CF git integration
 - Don't remove the `x-dmv-proxy` gate or weaken it back to a public constant — it's now secret-backed (`DMV_PROXY_SECRET`, constant-time compared, fail-closed) and is the only thing closing the direct-Supabase bypass
 - Don't call or document `lookup-agent` as a public API, restore domain lookup, or deploy the lookup Edge Function before the Worker replacement
@@ -231,7 +277,12 @@ fa22190  Merge PR #7 (the main hardening PR)
 **Key files** (read these before touching the registration flow):
 
 - `worker/index.ts` — worker entry, `/api/register` handler at `handleRegister()`, Turnstile verification at `verifyTurnstileToken()`, forward logic with `x-dmv-proxy` header set at `:1091`
-- `worker/rate-limit-kv.ts` — DMV-local KV cooldown helper
+- `worker/registration-fingerprint-rate-limiter.ts` — transactional SQLite
+  Durable Object that reserves, commits, releases, and conservatively recovers
+  exact fingerprint-budget slots without storing raw fingerprints or IP addresses
+- `worker/register-fingerprint-cooldown.ts` — Worker-side adapter that talks to
+  the per-hash Durable Object for claim/completion, applies the closed upstream
+  outcome classification, and keeps ambiguous results pending
 - `supabase/functions/register-agent/index.ts` — Supabase upstream, the `x-dmv-proxy` gate, no status field on INSERT
 - `packages/dmv-agent/src/register.ts` — CLI/MCP client, POSTs to `https://dmv.agentcommunity.org/api/register`
 - `js/supabase.js` — browser client, same-origin `/api/register`
@@ -324,7 +375,7 @@ If you pick this up and something is broken, the single highest-leverage thing i
   - `'turnstile_failed'` — Turnstile siteverify rejected the token
   - `'machine_fingerprint_required'` — CLI/MCP path missing `machine_fingerprint`
   - `'rate_limited'` — shared CF limiter (`RL_OTP_EMAIL` or `RL_OTP_IP_EMAIL`) fired
-  - `'fingerprint_cooldown'` — DMV-local KV cooldown fired
+  - `'fingerprint_cooldown'` — exact DMV-local fingerprint mint budget fired
   - `'supabase'` — request successfully forwarded and Supabase returned 2xx
   - `'supabase_<status>'` — request forwarded but Supabase returned a non-2xx (e.g., `supabase_403` for lifetime-cap hits, `supabase_400` for Supabase validation, `supabase_500` for DB errors)
 

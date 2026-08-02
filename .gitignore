@@ -9,6 +9,7 @@ supabase/.temp/
 #  and double-ship everything; root package.json "private": true is
 #  the hard safety, this is belt-and-suspenders)
 .worktrees/
+.release-artifacts/
 
 # Cloudflare migration build outputs
 dist/
