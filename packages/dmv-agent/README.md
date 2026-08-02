@@ -411,7 +411,7 @@ Sigstore transparency evidence have been verified.
 supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
-After the v3 registration limiter deploys, never roll back to a pre-v3 Worker.
+The v3 registration limiter is live; never roll back to a pre-v3 Worker.
 See [DEPLOY.md](DEPLOY.md) for the automatic deploy, compatibility, evidence,
 status-update, and roll-forward checklist.
 

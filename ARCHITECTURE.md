@@ -194,7 +194,7 @@ unexpected HTTP/status relationships, and partial, extra-field, mismatched-ID,
 or otherwise inconsistent JSON fall back to explicitly labeled format-only
 validation.
 
-**Register path source target** (`/api/register`): five layers, ordered cheapest-to-most-expensive. The exact fingerprint layer is ready in this branch but not deployed as of 2026-08-01; production remains on the pre-v3 KV cooldown until a v3 Worker rollout is verified.
+**Register path** (`/api/register`): five layers, ordered cheapest-to-most-expensive. The exact fingerprint layer is live as of 2026-08-02; the retained legacy KV binding is compatibility state rather than the live enforcement path.
 
 | Layer | Scope | Limit | Backend | Notes |
 |-------|-------|-------|---------|-------|

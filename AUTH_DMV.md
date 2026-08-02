@@ -285,16 +285,15 @@ success at claim time + 600 seconds: the documented 150-second Supabase request
 idle timeout + 400-second Edge Function wall clock + a 50-second safety margin.
 It then expires only after a full 24-hour rolling window from that timestamp.
 This fail-safe prevents a crash between mint and completion from reopening a
-fourth slot. In this source-ready v3 contract, `Retry-After` is derived from the
+fourth slot. In the live v3 contract, `Retry-After` is derived from the
 oldest committed success timestamp or, while a claim is still pending, that
 claim's conservative-horizon timestamp (`claimedAt + 600s`). A fresh set of
 pending claims can therefore produce at most 87,000 seconds: the 24-hour rolling
-window plus the 600-second uncertainty horizon. Production is still on the
-pre-v3 cooldown until the forward-only Durable Object migration is deployed.
-The retained `REGISTER_COOLDOWN_KV` binding is unused compatibility state and is
+window plus the 600-second uncertainty horizon. The forward-only Durable Object
+migration is live as of 2026-08-02. The retained `REGISTER_COOLDOWN_KV` binding is unused compatibility state and is
 not part of v3 enforcement.
 
-**Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `429` with `{ error: 'fingerprint_cooldown', message: '...', retry_after_seconds }`, where source-ready v3 `Retry-After` reflects the honest remaining time from the oldest committed success or pending claim's conservative-horizon timestamp, not a flat duration; its maximum is 24 hours + 600 seconds. Production remains pre-v3 until the forward-only migration is deployed. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
+**Rate limit responses:** Worker returns `429` with `Retry-After: 60` and JSON body `{ error: 'rate_limited', message: '...', retry_after_seconds: 60 }`. Fingerprint cooldown returns `429` with `{ error: 'fingerprint_cooldown', message: '...', retry_after_seconds }`, where live v3 `Retry-After` reflects the honest remaining time from the oldest committed success or pending claim's conservative-horizon timestamp, not a flat duration; its maximum is 24 hours + 600 seconds. Lifetime cap inside Supabase still returns `403` with `{ current, limit, endorsed }`.
 
 ## Certificate ID System
 
@@ -498,7 +497,7 @@ results, invalid `400`, direct secretless Edge `403`, exact 31st-call `429`, and
 next-minute recovery. `REEF-068-BD0Q` is the issued fixture; `ZZZZ-FFF-FFFD`
 is generated valid-but-absent. Retain this ordering for future changes.
 
-After v3 deploys, never use Cloudflare rollback to a pre-v3 Worker. Retain all
+Now that v3 is live, never use Cloudflare rollback to a pre-v3 Worker. Retain all
 v1/v2/v3 migrations, Durable Object class exports, and their bindings in a
 compatible roll-forward. Edge
 failure stays fail-closed (`503`) while the Edge function rolls forward; do not

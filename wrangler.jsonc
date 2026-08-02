@@ -8,7 +8,8 @@
  *                             └─ caches.default (L1 edge cache, in front of R2)
  *
  * Local dev: `pnpm cf:dev`   (runs cf:build → wrangler dev)
- * Deploy:    `pnpm cf:deploy` (runs cf:build → wrangler deploy)
+ * Deploy:    `pnpm cf:deploy` (runs cf:build → branch-aware release guard)
+ * Preview:   `pnpm cf:preview` (runs cf:build → wrangler versions upload)
  *
  * See CLOUDFLARE.md for full architecture, cache hierarchy, and
  * build-time drift invariants enforced by scripts/build-cf.mjs.

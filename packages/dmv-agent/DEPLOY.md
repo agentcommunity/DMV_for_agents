@@ -89,11 +89,21 @@ Registration also requires `REGISTER_FINGERPRINT_LIMITER`, the exact SQLite
 Durable Object budget introduced by forward-only v3. The legacy
 `REGISTER_COOLDOWN_KV` binding is retained but unused during rollout.
 
-**Current production status (2026-08-01):** v3 is not deployed. Production
-registration still uses `REGISTER_COOLDOWN_KV`; the completed 2026-07-22
-evidence below proves the lookup v2 rollout, not the v3 registration limiter.
-The first v3 rollout must follow the future order below and record a new Worker
-version plus registration-specific smokes before any document calls it live.
+**Current production status (2026-08-02):** v3 is now live. A non-main branch
+was accidentally promoted to production on 2026-08-02 because Cloudflare's
+non-production branch command ran a production deploy. The dashboard has been
+corrected and verified: production uses `npx wrangler deploy`; non-production
+uses `npx wrangler versions upload`. The repository guard also selects from
+`WORKERS_CI_BRANCH`, uploads non-main Workers Builds, and rejects local
+non-main/detached production attempts. `pnpm cf:preview` is the explicit
+upload-only local path.
+
+Because v3 reached production, the Durable Object migration is forward-only
+operational state even if the promotion itself was accidental. Preserve
+v1/v2/v3 and their classes, exports, bindings, and migrations in `main` and in
+every recovery Worker. Do not deploy a pre-v3 `main`. The completed 2026-07-22
+evidence below remains lookup v2 evidence; do not mislabel it as the separate v3
+registration smoke record.
 
 The v3 source uses a closed completion classification. Only a well-formed fresh
 `201` commits a fingerprint claim. Only well-formed pre-INSERT `400`/`403`/`409`
@@ -136,7 +146,7 @@ The completed rollout used the order below. Final production results were:
   verification. The limiter and result-cache smokes intentionally wrote Durable
   Object/KV operational state.
 
-### Future rollout order
+### Required rollout order
 
 1. Before merging, record the target feature-branch SHA and the currently
    deployed production Worker SHA/version in the launch notes. In the
@@ -145,8 +155,8 @@ The completed rollout used the order below. Final production results were:
    binding. Confirm `BADGE_CACHE_KV`, `CERT_LOOKUP_LIMITER`,
    `REGISTER_FINGERPRINT_LIMITER`, all forward-only v1/v2/v3 Durable Object
    migrations, and the shared `DMV_PROXY_SECRET` are configured without
-   printing the secret. The v3 class and binding must deploy together before
-   registration traffic reaches the new Worker.
+   printing the secret. The v3 class and binding must remain together in every
+   deployment now that registration traffic has reached the v3 Worker.
 2. Merge to `main`, record the resulting merged `main` SHA, and use the Cloudflare
    Git integration's automatic build as the single authoritative Worker deploy
    path. Watch that build and capture its deployed commit SHA/version. If no
@@ -199,8 +209,8 @@ bypass its platform JWT layer because the Worker authenticates with
 ### v3-safe recovery
 
 Cloudflare's SQLite Durable Object migrations are forward-only operational
-state. Before v3 deploys, preserve the already-deployed v1/v2 classes,
-migrations, exports, and bindings. Never use Cloudflare rollback to a pre-v3 Worker after v3 deploys: such a
+state. Preserve the deployed v1/v2/v3 classes, migrations, exports, and
+bindings. Never use Cloudflare rollback to a pre-v3 Worker: such a
 version lacks the `RegistrationFingerprintRateLimiter` export/binding while the
 account retains the migration. Preserve v1 `CardRenderer`, v2
 `CertificateLookupRateLimiter`, v3 `RegistrationFingerprintRateLimiter`, and

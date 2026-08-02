@@ -83,7 +83,7 @@ being served.
 | `/models/tv1.glb`, `/audio/*`, `/css/*`, `/js/*`, etc. | Workers Static Assets | Direct edge cache, free egress |
 | `/api/card?name=&id=&type=` | Worker → L1 → R2 → Container | 880×630 PNG (raw card). Container only invoked on first miss per unique `(name, type, id)` |
 | `/api/og?name=&id=&type=` | Worker → L1 → R2 → Container | Same Skia card composited on a 1200×630 canvas (perfect for OG/Twitter). Separate cache namespace from `/api/card` |
-| `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint. Browser path: validate → Turnstile → shared CF limits → forward. The source-ready, not-yet-deployed v3 CLI/MCP path validates `machine_fingerprint`, applies shared limits, then claims `REGISTER_FINGERPRINT_LIMITER` before upstream. A well-formed fresh 201 commits; only audited pre-INSERT 400/403/409 responses and exact 200 replays release. All uncertainty stays pending for a conservative 600-second remote-execution horizon, then counts for 24 hours. Production remains on the pre-v3 KV cooldown until rollout verification. |
+| `POST /api/register` | Worker (`handleRegister`) → Supabase | Canonical registration endpoint. Browser path: validate → Turnstile → shared CF limits → forward. The live v3 CLI/MCP path validates `machine_fingerprint`, applies shared limits, then claims `REGISTER_FINGERPRINT_LIMITER` before upstream. A well-formed fresh 201 commits; only audited pre-INSERT 400/403/409 responses and exact 200 replays release. All uncertainty stays pending for a conservative 600-second remote-execution horizon, then counts for 24 hours. |
 | `GET /api/lookup?id=CERT-ID` | Worker (`handleCertificateLookup`) → Supabase | **Live 2026-07-22:** merged `main` `fabafe6` (PR #20) is deployed as version `d9755e66-3883-4970-be84-a59307011f14` created `2026-07-22T12:01:52.501Z`. The only public certificate lookup; certificate IDs only and domain lookup is removed. `RL_CERT_LOOKUP` is a coarse 60/60 filter; `CERT_LOOKUP_LIMITER` is the exact 30/60 authority before the KV result cache. Returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`; `issued` means a matching registration row exists, not that email verification or DNS allocation completed. |
 | `/c/:certId/:agentName` | Worker (HTMLRewriter or pass-through) | Crawler UA → fetch `index.html` via `env.ASSETS` and inject card-specific `<title>` + `og:*` + `twitter:*` meta tags via streaming HTMLRewriter. Human UA → serve `index.html` unchanged so the SPA renders the permalink card client-side |
 | `/badge/*` | Worker (proxy) | Forwards to the Supabase badge edge function with header hygiene + path-traversal defense |
@@ -167,7 +167,10 @@ docker info
 pnpm cf:container:build
 
 # Merge to main and let Cloudflare Git deploy the Worker. Use pnpm cf:deploy
-# only if no automatic build started, after confirming no deploy is active.
+# locally only from main, if no automatic build started and no deploy is active.
+
+# Explicit local preview upload; this never promotes to production.
+pnpm cf:preview
 
 # Only after the Worker-first compatibility smokes, deploy the changed Edge
 # function (not register-agent or badge).
@@ -184,8 +187,29 @@ open test-harness/output/index.html
    QR encoder drift, writes `worker/container-instance.ts` with the fresh
    container content-hash, and copies the production-facing static files
    into `dist/`.
-2. `wrangler deploy` — builds the container image, pushes it to the CF
-   registry, and rolls out the Worker.
+2. `scripts/cloudflare-release-guard.mjs` — reads the Cloudflare-injected
+   `WORKERS_CI` and `WORKERS_CI_BRANCH` values. `main` runs
+   `npx wrangler deploy`; a non-main Workers Build runs
+   `npx wrangler versions upload`; local non-main or detached runs fail closed.
+   A local `main` remains the deliberate production fallback.
+
+`pnpm cf:preview` runs the same build and guard with `--preview`; it always uses
+`npx wrangler versions upload` and never promotes a version to production.
+
+### Branch promotion incident (2026-08-02)
+
+On 2026-08-02, a non-main branch was accidentally promoted to production
+because the Cloudflare non-production branch command ran a production deploy.
+The dashboard has been corrected and verified: the production deploy command is
+`npx wrangler deploy`, while the non-production branch deploy command is
+`npx wrangler versions upload`. The repository guard is a second safety layer
+for repo commands; it does not replace those dashboard branch controls.
+
+That promotion made the v3 Durable Object migration live. Cloudflare Durable
+Object migrations are forward-only operational state, so `main` and every
+recovery source must contain v1/v2/v3 before another production deployment.
+Never promote or roll back to a Worker missing the v3 class, export, binding, or
+migration.
 
 ### Completed lookup rollout (2026-07-22)
 
@@ -217,12 +241,11 @@ badge, permalink, and validation-only registration also passed. No Supabase
 registration or member rows were deleted or mutated during verification; the
 limiter/cache smokes intentionally wrote Durable Object/KV operational state.
 
-The deployed v2 SQLite migration is forward-only operational state; production
-recovery currently preserves v1 `CardRenderer` and v2
-`CertificateLookupRateLimiter`. This branch's v3
-`RegistrationFingerprintRateLimiter` is ready but not deployed. After v3 is
-deployed, never roll back to a pre-v3 Worker: preserve v1/v2/v3 and all
-corresponding bindings in a compatible roll-forward. If Worker smokes fail, stop
+The deployed v2 and v3 SQLite migrations are forward-only operational state;
+production recovery must preserve v1 `CardRenderer`, v2
+`CertificateLookupRateLimiter`, v3 `RegistrationFingerprintRateLimiter`, and
+all corresponding bindings in a compatible roll-forward. Never roll back to a
+pre-v3 Worker. If Worker smokes fail, stop
 before Edge and ship a new compatible Worker. If Edge fails after gating, leave
 the Worker's fail-closed 503 in place and roll Edge forward; never reopen legacy
 direct access. Full recovery and evidence steps are in
@@ -284,7 +307,7 @@ fail-closed without following a redirect that could receive the shared secret.
   lookup so rejected requests don't eat cache-tier work; prewarm cron
   requests bypass via UA check (`dmv-cf-prewarm/1.0`). DMV-local namespace.
 
-  **Register path source contract (v3 ready, not deployed)** (`/api/register`): guarded by two SHARED bindings —
+  **Register path contract (v3 live)** (`/api/register`): guarded by two SHARED bindings —
   `RL_OTP_EMAIL` (5 req/60s, namespace `4005`) and `RL_OTP_IP_EMAIL`
   (4 req/60s, namespace `4007`). Both `namespace_id` values are shared at
   the Cloudflare account level with `agentCommunity_PAGE`, so a single
@@ -300,8 +323,8 @@ fail-closed without following a redirect that could receive the shared secret.
   documented 150-second Supabase request-idle timeout plus its 400-second Edge
   Function wall clock plus a 50-second safety margin. At that horizon an
   abandoned claim becomes a possible success and counts for a full 24 hours;
-  any Durable Object failure fails closed. Production continues to use the pre-v3 KV cooldown until this
-  branch is deployed and verified.
+  any Durable Object failure fails closed. The retained legacy KV binding is
+  compatibility state, not the live enforcement path.
   CAPTCHA (Turnstile) runs BEFORE both shared counters on the browser
   path so invalid tokens cannot exhaust quota for real users. PAGE's
   `RL_AUTH` (4001) and `RL_OTP_IP` (4006) are intentionally NOT bound by

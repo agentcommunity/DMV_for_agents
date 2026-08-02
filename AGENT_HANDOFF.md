@@ -33,12 +33,14 @@ abandoned-claim, duplicate-token, malformed-token, release, and rollover
 regressions live in `tests/worker-registration-fingerprint-rate-limiter.test.ts`
 and `tests/worker-register-fingerprint-cooldown.test.ts`.
 
-**Production is still pre-v3 as of this handoff.** The deployed registration
-path still uses `REGISTER_COOLDOWN_KV`; no production Worker version or smoke
-evidence exists yet for `REGISTER_FINGERPRINT_LIMITER`. The April browser
-signup proved the older registration path, not this new Durable Object. Treat
-v3 as ready-to-deploy source until the Cloudflare deployment and post-deploy
-smokes are recorded.
+**Production v3 status (2026-08-02):** `REGISTER_FINGERPRINT_LIMITER` is live
+after an accidental non-main branch promotion to production. Cloudflare's
+dashboard commands are corrected: production uses `npx wrangler deploy`, and
+non-production uses `npx wrangler versions upload`. The repository deploy guard
+uses `WORKERS_CI_BRANCH` as a second layer. Because the v3 migration reached
+production, every future deployment and recovery source must preserve v1/v2/v3
+even though the promotion was accidental. The April browser signup remains
+evidence for the older registration path, not a v3 registration smoke record.
 
 ## 2026-08-01 — Task 4: `verify_certificate` name collision resolved in source v0.3.0
 
@@ -93,11 +95,11 @@ failures.
 
 ```
 DMV worker         https://dmv.agentcommunity.org         /api/register live end-to-end
-                                                           Turnstile + shared CF rate limits + KV cooldown
-                                                           pre-v3 path verified with real browser signup 2026-04-09
+                                                           Turnstile + shared CF rate limits + v3 exact fingerprint DO
+                                                           v3 live as of 2026-08-02; preserve v1/v2/v3 forward-only
 
-v3 source          this branch                             exact REGISTER_FINGERPRINT_LIMITER ready
-                                                           NOT deployed or production-verified
+v3 source          this branch                             exact REGISTER_FINGERPRINT_LIMITER live
+                                                           separate registration smoke evidence still required
 
 DMV edge function  register-agent on tcymqfwwphacnosnnzxl  x-dmv-proxy gate active (DMV_PROXY_SECRET shared secret;
                                                            public v1 constant retired 2026-05-29, now 403)
@@ -174,13 +176,11 @@ A push to DMV main triggers a **Cloudflare worker** redeploy (via CF git integra
 ### 6. Registration fingerprint enforcement is a DMV-local Durable Object
 
 `REGISTER_FINGERPRINT_LIMITER` is one SQLite Durable Object per SHA-256
-machine-fingerprint hash and is never shared with PAGE. It is ready in this
-branch but not deployed. Before v3 deploys, production recovery must preserve
-the already-deployed v1 `CardRenderer` and v2 `CertificateLookupRateLimiter`;
-it must not claim that v3 is live. Once v3 deploys, every roll-forward must
-also preserve the v3 class, export, migration, and binding. The old
-`REGISTER_COOLDOWN_KV` binding remains the current production enforcement and
-is retained as unused compatibility state only in the v3 source path.
+machine-fingerprint hash and is never shared with PAGE. It is live as of
+2026-08-02. Production recovery must preserve v1 `CardRenderer`, v2
+`CertificateLookupRateLimiter`, the v3 class/export/migration/binding, and all
+corresponding configuration in every roll-forward. The old
+`REGISTER_COOLDOWN_KV` binding is retained as unused compatibility state.
 
 ### 7. The npm CLI auto-resolves the scoped package
 
@@ -207,8 +207,8 @@ Worker first is intentional. The completed rollout recorded invalid `400`, then
 deployed only `lookup-agent --no-verify-jwt` and proved `REEF-068-BD0Q` issued,
 `ZZZZ-FFF-FFFD` not-found, direct secretless `403`, exact call-31 `429`, minute
 rollover, and health/card/badge/permalink/registration smokes. Never roll back
-to pre-v2: preserve the deployed v1/v2 migrations, DO exports, and bindings in
-a roll-forward. After v3 deploys, preserve v1/v2/v3 together. If a
+to pre-v3: preserve the deployed v1/v2/v3 migrations, DO exports, and bindings in
+a roll-forward. If a
 future Worker change fails, stop before Edge; if Edge fails after gating, keep
 the safe Worker `503` and roll Edge forward without reopening direct access.
 Update all status surfaces in DEPLOY.md after any future evidence-backed rollout.

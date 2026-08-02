@@ -123,7 +123,7 @@ test('package release docs distinguish registry releases from source versions', 
   assert.doesNotMatch(releaseDocs, /@agentcommunity\/dmv-agent@\^0\.2\.1/);
 });
 
-test('live lookup docs retain evidence without stale Task 8 work', () => {
+test('live lookup docs retain evidence without stale rollout status', () => {
   const lookupDocs = [
     readFileSync('AGENT_HANDOFF.md', 'utf8'),
     readFileSync('README.md', 'utf8'),
@@ -135,8 +135,8 @@ test('live lookup docs retain evidence without stale Task 8 work', () => {
   assert.match(lookupDocs, /fabafe6/);
   assert.match(lookupDocs, /d9755e66-3883-4970-be84-a59307011f14/);
   assert.match(lookupDocs, /v3/i);
-  assert.match(lookupDocs, /(?:source-ready|ready-to-deploy source)/i);
-  assert.match(lookupDocs, /not deployed/i);
+  assert.match(lookupDocs, /(?:live|deployed)/i);
+  assert.doesNotMatch(lookupDocs, /v3 (?:is )?not deployed/i);
 });
 
 test('database guidance permits only hashed client IP metadata', () => {
