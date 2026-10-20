@@ -11,6 +11,10 @@ supabase/.temp/
 .worktrees/
 .release-artifacts/
 
+# Local tooling artifacts (generated)
+.claude/
+deno.lock
+
 # Cloudflare migration build outputs
 dist/
 .wrangler/
