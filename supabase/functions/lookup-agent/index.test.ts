@@ -22,6 +22,12 @@ const assert = {
 
 const VALID_CERTIFICATE_ID = 'MESA-DD6-660J'
 const PROXY_SECRET = 'worker-secret'
+// The key loader fails closed without SUPABASE_URL and a key, so client-creating
+// tests configure both (fixture values only).
+const CONFIGURED_SUPABASE = {
+  SUPABASE_URL: 'https://project.supabase.test',
+  SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+}
 
 interface QueryCall {
   name: 'from' | 'select' | 'eq' | 'maybeSingle'
@@ -152,10 +158,12 @@ Deno.test('allows a certificate-ID lookup with the correct proxy secret', async 
     )
 
     assert.equal(response.status, 200)
-    assert.deepEqual(mock.clientFactoryCalls, [[
+    // Legacy fallback (no dmv_read entry yet): URL and legacy key, plus options.
+    assert.equal(mock.clientFactoryCalls.length, 1)
+    assert.deepEqual(mock.clientFactoryCalls[0].slice(0, 2), [
       'https://project.supabase.test',
       'service-role-key',
-    ]])
+    ])
     assert.deepEqual(mock.calls, [
       { name: 'from', args: ['registrations'] },
       { name: 'select', args: ['certificate_id, domain_requested'] },
@@ -166,7 +174,7 @@ Deno.test('allows a certificate-ID lookup with the correct proxy secret', async 
 })
 
 Deno.test('returns the exact typed not_found envelope with HTTP 200', async () => {
-  await withEnv({ DMV_PROXY_SECRET: PROXY_SECRET }, async () => {
+  await withEnv({ DMV_PROXY_SECRET: PROXY_SECRET, ...CONFIGURED_SUPABASE }, async () => {
     const mock = createSupabaseMock({ data: null, error: null })
 
     const response = await handleLookupAgent(
@@ -183,7 +191,7 @@ Deno.test('returns the exact typed not_found envelope with HTTP 200', async () =
 })
 
 Deno.test('returns only the public certificate fields on success', async () => {
-  await withEnv({ DMV_PROXY_SECRET: PROXY_SECRET }, async () => {
+  await withEnv({ DMV_PROXY_SECRET: PROXY_SECRET, ...CONFIGURED_SUPABASE }, async () => {
     const mock = createSupabaseMock({
       data: {
         certificate_id: VALID_CERTIFICATE_ID,
@@ -243,4 +251,59 @@ Deno.test('OPTIONS does not disclose permissive public CORS', async () => {
     assert.notEqual(response.headers.get('Access-Control-Allow-Origin'), '*')
     assert.equal(mock.clientFactoryCalls.length, 0)
   })
+})
+
+Deno.test('H18: uses the dmv_read named secret key when SUPABASE_SECRET_KEYS has it', async () => {
+  const namedKey = 'sb_secret_fixtureLookupRead0000000000'
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_fixtureDefault000000000000', dmv_read: namedKey }),
+  }, async () => {
+    const mock = createSupabaseMock({ data: null, error: null })
+    const response = await handleLookupAgent(
+      lookupRequest(undefined, { headers: { 'x-dmv-proxy': PROXY_SECRET } }),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+    assert.equal(response.status, 200)
+    assert.equal(mock.clientFactoryCalls.length, 1)
+    assert.equal(mock.clientFactoryCalls[0][1], namedKey)
+    const options = mock.clientFactoryCalls[0][2] as { global?: { fetch?: unknown } }
+    assert.equal(typeof options.global?.fetch, 'function')
+  })
+})
+
+Deno.test('H18: a misconfigured dmv_read entry fails closed with 500, no client', async () => {
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_read: 'sb_publishable_fixture0000000000000' }),
+  }, async () => {
+    const mock = createSupabaseMock({ data: null, error: null })
+    const response = await handleLookupAgent(
+      lookupRequest(undefined, { headers: { 'x-dmv-proxy': PROXY_SECRET } }),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+    assert.equal(response.status, 500)
+    assert.equal(mock.clientFactoryCalls.length, 0)
+  })
+})
+
+Deno.test('H18: fails closed with 500 when SUPABASE_URL or every key is missing', async () => {
+  for (const env of [
+    { SUPABASE_URL: undefined, SUPABASE_SERVICE_ROLE_KEY: 'service-role-key', SUPABASE_SECRET_KEYS: undefined },
+    { SUPABASE_URL: 'https://project.supabase.test', SUPABASE_SERVICE_ROLE_KEY: undefined, SUPABASE_SECRET_KEYS: undefined },
+  ]) {
+    await withEnv({ DMV_PROXY_SECRET: PROXY_SECRET, ...env }, async () => {
+      const mock = createSupabaseMock({ data: null, error: null })
+      const response = await handleLookupAgent(
+        lookupRequest(undefined, { headers: { 'x-dmv-proxy': PROXY_SECRET } }),
+        { createSupabaseClient: mock.createSupabaseClient as never },
+      )
+      assert.equal(response.status, 500)
+      assert.equal(mock.clientFactoryCalls.length, 0)
+    })
+  }
 })

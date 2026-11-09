@@ -11,7 +11,7 @@
 //
 // Badge always links back to dmv.agentcommunity.org for SEO.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createDmvSupabaseClient, type SupabaseCreateClient } from '../_shared/supabase-key.ts'
 
 const CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const DMV_BASE = 'https://dmv.agentcommunity.org'
@@ -142,7 +142,10 @@ function cardBadge(agentName: string | null, certId: string, status: 'registered
 
 // --- Handler ---
 
-Deno.serve(async (req) => {
+export async function handleBadge(
+  req: Request,
+  dependencies: { createSupabaseClient?: SupabaseCreateClient } = {},
+): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
@@ -194,10 +197,7 @@ Deno.serve(async (req) => {
   let status: 'registered' | 'valid' = 'valid'
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    )
+    const supabase = await createDmvSupabaseClient('dmv_read', { createClient: dependencies.createSupabaseClient })
 
     const { data } = await supabase
       .from('registrations')
@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
       status = 'registered'
     }
   } catch {
-    // DB unavailable — fall back to check-digit-only badge
+    // DB unavailable or key misconfigured — fall back to check-digit-only badge
   }
 
   const svg = style === 'card'
@@ -225,4 +225,8 @@ Deno.serve(async (req) => {
       'Access-Control-Allow-Origin': '*',
     },
   })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve((req) => handleBadge(req))
+}

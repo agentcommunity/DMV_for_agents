@@ -2,7 +2,7 @@
 // Proxy for agent registration. Holds service role key server-side.
 // Client packages never see database credentials.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createDmvSupabaseClient, type SupabaseCreateClient } from '../_shared/supabase-key.ts'
 import { normalizeAgentName, validateRegistrationFields } from '../_shared/registration-validation.ts'
 
 // --- Certificate ID generation (duplicated from package — ~50 lines, no deps) ---
@@ -149,7 +149,7 @@ export async function sha256Hex(value: string): Promise<string> {
 
 export async function handleRegisterAgent(
   req: Request,
-  dependencies: { createSupabaseClient?: typeof createClient } = {},
+  dependencies: { createSupabaseClient?: SupabaseCreateClient } = {},
 ): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: getCorsHeaders(req) })
@@ -224,12 +224,17 @@ export async function handleRegisterAgent(
     || req.headers.get('cf-connecting-ip')
     || null
 
-  // Supabase client with service role key (server-side only — created after rate limit check)
-  const createSupabaseClient = dependencies.createSupabaseClient ?? createClient
-  const supabase = createSupabaseClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  )
+  // Supabase client with the dmv_register secret key (server-side only; see ../SWITCH.md)
+  let supabase: Awaited<ReturnType<typeof createDmvSupabaseClient>>
+  try {
+    supabase = await createDmvSupabaseClient('dmv_register', { createClient: dependencies.createSupabaseClient })
+  } catch (error) {
+    console.error('Supabase key error:', error instanceof Error ? error.message : 'unknown')
+    return new Response(
+      JSON.stringify({ error: 'Registration failed. Please try again.' }),
+      { status: 500, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } },
+    )
+  }
 
   // Generate certificate ID before quota checks so an exact retry can recover
   // the already-recorded cert even when the email is at its new-registration cap.

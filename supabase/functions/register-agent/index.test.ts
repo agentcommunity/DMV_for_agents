@@ -34,7 +34,9 @@ function createSupabaseMock(responses: Array<MockResponse>) {
   const insertedRows: Array<Record<string, unknown>> = []
   let callIndex = 0
 
-  const createSupabaseClient = (..._clientArgs: Array<unknown>) => {
+  const clientFactoryCalls: Array<Array<unknown>> = []
+  const createSupabaseClient = (...clientArgs: Array<unknown>) => {
+    clientFactoryCalls.push(clientArgs)
     return {
       from(table: string) {
         const response = responses[callIndex] ?? { data: null, error: null, count: null }
@@ -86,7 +88,7 @@ function createSupabaseMock(responses: Array<MockResponse>) {
     }
   }
 
-  return { calls, insertedRows, createSupabaseClient }
+  return { calls, insertedRows, createSupabaseClient, clientFactoryCalls }
 }
 
 async function withEnv(
@@ -327,5 +329,46 @@ Deno.test('stores a null client_ip_hash when no IP header is present', async () 
     const metadata = mock.insertedRows[0].metadata as Record<string, unknown>
     assert.equal(metadata.client_ip_hash, null)
     assert.ok(!('client_ip' in metadata), 'metadata must not contain a raw client_ip key')
+  })
+})
+
+Deno.test('H19: uses the dmv_register named secret key, never dmv_read or default', async () => {
+  const namedKey = 'sb_secret_fixtureRegister00000000000'
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({
+      default: 'sb_secret_fixtureDefault000000000000',
+      dmv_read: 'sb_secret_fixtureRead000000000000000',
+      dmv_register: namedKey,
+    }),
+  }, async () => {
+    const mock = createSupabaseMock(freshRegistrationResponses())
+    const response = await handleRegisterAgent(
+      registerRequest(validBody({ agent_name: 'named-key-agent' })),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+    assert.equal(response.status, 201)
+    assert.equal(mock.clientFactoryCalls.length, 1)
+    assert.equal(mock.clientFactoryCalls[0][1], namedKey)
+  })
+})
+
+Deno.test('H19: a misconfigured dmv_register entry fails closed with 500 and writes nothing', async () => {
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'eyJlegacy.in.the.wrong.place' }),
+  }, async () => {
+    const mock = createSupabaseMock(freshRegistrationResponses())
+    const response = await handleRegisterAgent(
+      registerRequest(validBody({ agent_name: 'bad-key-agent' })),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+    assert.equal(response.status, 500)
+    assert.equal(mock.clientFactoryCalls.length, 0)
+    assert.equal(mock.insertedRows.length, 0)
   })
 })
