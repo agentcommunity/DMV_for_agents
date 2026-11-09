@@ -196,9 +196,16 @@ export async function handleBadge(
   let agentName: string | null = null
   let status: 'registered' | 'valid' = 'valid'
 
+  let supabase: Awaited<ReturnType<typeof createDmvSupabaseClient>> | null = null
   try {
-    const supabase = await createDmvSupabaseClient('dmv_read', { createClient: dependencies.createSupabaseClient })
+    supabase = await createDmvSupabaseClient('dmv_read', { createClient: dependencies.createSupabaseClient })
+  } catch (error) {
+    // Same log line as lookup-agent/register-agent: the loader's message names
+    // the key, never its value. The badge still renders from the check digit.
+    console.error('Supabase key error:', error instanceof Error ? error.message : 'unknown')
+  }
 
+  if (supabase) try {
     const { data } = await supabase
       .from('registrations')
       .select('certificate_id, domain_requested')
@@ -210,7 +217,7 @@ export async function handleBadge(
       status = 'registered'
     }
   } catch {
-    // DB unavailable or key misconfigured — fall back to check-digit-only badge
+    // DB unavailable — fall back to check-digit-only badge
   }
 
   const svg = style === 'card'

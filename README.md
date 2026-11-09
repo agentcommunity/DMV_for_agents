@@ -103,7 +103,7 @@ You (web / CLI / MCP)
 
 - **Five registration paths** — web terminal, CLI, MCP server, JS API, Claude Code `/dmv` skill
 - **Layered rate limiting** — invisible Turnstile on the browser, machine fingerprint on CLI/MCP, shared Cloudflare rate limits across both (`RL_OTP_EMAIL` 5/60s + `RL_OTP_IP_EMAIL` 4/60s, both shared at the CF account level with `agentCommunity_PAGE`), an exact live per-fingerprint SQLite Durable Object budget for headless clients, and a DB lifetime cap as the final backstop. The v3 limiter is live as of 2026-08-02; v1/v2/v3 are forward-only production state. Upstash is gone.
-- **Zero secrets in client code** — the worker holds the Turnstile secret, the edge function holds the Supabase service role key
+- **Zero secrets in client code** — the worker holds the Turnstile secret, the edge functions hold the named Supabase secret keys (`dmv_read`, `dmv_register`; see `supabase/functions/SWITCH.md`)
 - **Content-addressed IDs** — deterministic hashes, not sequential
 - **Email verification** — operator must click to activate
 - **Pre-registration model** — multiple parties can pre-register interest in the same name. Assignment, if `.agent` is approved, happens later under ICANN-approved policies.

@@ -52,8 +52,10 @@ We'll acknowledge your report within 48 hours and work with you on a fix before 
 ## Architecture notes
 
 - Zero secrets in client code — the Worker holds `TURNSTILE_SECRET_KEY` and
-  `DMV_PROXY_SECRET`; the Edge Functions hold `DMV_PROXY_SECRET` and
-  `SUPABASE_SERVICE_ROLE_KEY`
+  `DMV_PROXY_SECRET`; the Edge Functions hold `DMV_PROXY_SECRET` and the
+  named Supabase secret keys `dmv_read` / `dmv_register` (from
+  `SUPABASE_SECRET_KEYS`; the legacy `SUPABASE_SERVICE_ROLE_KEY` is read only as
+  a fallback until cut-over, see `supabase/functions/SWITCH.md`)
 - Service role keys and the shared proxy secret are only in their server-side
   runtime environments, never in source
 - Certificate IDs are content-addressed hashes rather than sequential values,

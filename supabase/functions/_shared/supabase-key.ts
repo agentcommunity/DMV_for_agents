@@ -102,7 +102,12 @@ export async function resolveDmvSupabaseKey(name: DmvKeyName, options: KeyLoader
 export function apikeyOnlyFetch(key: string, baseFetch: typeof fetch = fetch): typeof fetch {
   const bearerOfKey = `Bearer ${key}`
   return (input: RequestInfo | URL, init?: RequestInit) => {
-    const headers = new Headers(init?.headers)
+    // supabase-js 2.53.0 passes a URL string plus init, but a Request input can
+    // carry its own headers: merge them first so its Bearer is stripped too.
+    // Explicit init headers replace a Request's headers in fetch, so passing the
+    // merged set on init is what the base fetch sends.
+    const headers = new Headers(input instanceof Request ? input.headers : undefined)
+    new Headers(init?.headers).forEach((value, name) => headers.set(name, value))
     if (headers.get('authorization') === bearerOfKey) headers.delete('authorization') // g-code-allow: strips-bearer
     headers.set('apikey', key)
     return baseFetch(input, { ...init, headers })

@@ -1,0 +1,27 @@
+name: Edge functions (tests + G-CODE)
+
+# Runs the Deno tests for the Supabase edge functions, including the G-CODE
+# static key gate for holders H17 badge, H18 lookup-agent and H19 register-agent
+# (Supabase key migration plan 2026-11-08, section 6: G-CODE fails CI).
+# No secrets, no network calls to Supabase: every test uses fixtures.
+# setup-deno usage per https://github.com/denoland/setup-deno (read 2026-11-08).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Edge function tests (G-CODE in its current mode)
+        run: deno test --allow-env --allow-read --allow-net supabase/functions/

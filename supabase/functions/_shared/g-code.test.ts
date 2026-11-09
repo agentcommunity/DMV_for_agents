@@ -6,6 +6,11 @@
 // proof that the holder no longer reads a legacy key and never sends a key as a
 // Bearer token. It scans each holder's whole relative import graph.
 //
+// The scan is line-based and textual. Besides legacy names and Bearer keys it
+// rejects any `default` index (the plan forbids the `default` entry of
+// SUPABASE_SECRET_KEYS) and any Deno.env.toObject (which could assemble a
+// legacy name from pieces). It does not try to defeat deliberate obfuscation.
+//
 // Modes:
 // - Transition (today): DMV_LEGACY_KEY_FALLBACK is true. The single fallback read
 //   in _shared/supabase-key.ts is allow-listed; every other legacy read fails.
@@ -29,11 +34,25 @@ const HOLDERS: Array<{ id: string; dir: string; keyName: string }> = [
 // names an edge runtime can provide).
 const LEGACY_NAME = /SUPABASE_SERVICE_ROLE_KEY|SUPABASE_ANON_KEY|SUPABASE_SERVICE_KEY|MAIN_SUPABASE_KEY|\bSUPABASE_KEY\b/
 const BEARER = /authorization.{0,20}bearer/i
+// The plan forbids the `default` entry of SUPABASE_SECRET_KEYS; the loader only
+// ever reads a named entry. Any `['default']` / `.default` index fails.
+const DEFAULT_ENTRY = /\[\s*['"`]default['"`]\s*\]|\.default\b/
+// Dumping the environment lets a legacy name be assembled from pieces and read
+// past the LEGACY_NAME scan, so Deno.env.toObject fails anywhere in the graph.
+const ENV_DUMP = /Deno\s*\.\s*env\s*\.\s*toObject\b/
+
+type Rule = 'legacy' | 'bearer' | 'default-entry' | 'env-dump'
+const RULES: Array<[Rule, RegExp]> = [
+  ['legacy', LEGACY_NAME],
+  ['bearer', BEARER],
+  ['default-entry', DEFAULT_ENTRY],
+  ['env-dump', ENV_DUMP],
+]
 
 interface AllowEntry {
   file: string // relative to supabase/functions/
   marker: string // must appear on the allowed line; each entry must match exactly one line
-  rule: 'legacy' | 'bearer'
+  rule: Rule
   reason: string
   transitionOnly: boolean
 }
@@ -58,7 +77,7 @@ const ALLOW_LIST: Array<AllowEntry> = [
 export interface Violation {
   file: string
   line: number
-  rule: 'legacy' | 'bearer'
+  rule: Rule
   text: string
 }
 
@@ -70,7 +89,7 @@ export function scanSource(
 ): Array<Violation> {
   const violations: Array<Violation> = []
   source.split('\n').forEach((text, index) => {
-    for (const [rule, pattern] of [['legacy', LEGACY_NAME], ['bearer', BEARER]] as const) {
+    for (const [rule, pattern] of RULES) {
       if (!pattern.test(text)) continue
       const allowed = allowList.some((entry) =>
         entry.file === file && entry.rule === rule && text.includes(entry.marker) &&
@@ -168,6 +187,21 @@ Deno.test('G-CODE scanner catches a direct legacy read and a Bearer key', () => 
   ].join('\n')
   const found = scanSource('badge/index.ts', mutant, false)
   if (found.length !== 3) throw new Error(`expected 3 violations, got ${JSON.stringify(found)}`)
+})
+
+Deno.test('G-CODE scanner catches a default-entry read and an env dump', () => {
+  const mutant = [
+    "const k = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS')!)['default']",
+    "const k2 = keys.default",
+    "const k3 = keys[\"default\"]",
+    "const all = Deno.env.toObject()",
+    "const k4 = Deno.env.toObject()['SUPABASE_' + 'SERVICE_ROLE_KEY']",
+  ].join('\n')
+  const found = scanSource('badge/index.ts', mutant, false)
+  const rules = found.map((v) => v.rule).sort().join(',')
+  if (rules !== 'default-entry,default-entry,default-entry,env-dump,env-dump') {
+    throw new Error(`expected 3 default-entry and 2 env-dump violations, got ${JSON.stringify(found)}`)
+  }
 })
 
 Deno.test('G-CODE scanner: the fallback allow-list stops applying in enforcing mode', () => {

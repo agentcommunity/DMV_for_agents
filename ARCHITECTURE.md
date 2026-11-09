@@ -124,7 +124,7 @@ The Department of Machine Verification is the identity registration system for t
  │  │    → SVG badge (cert ID only, domain lookup     │                   │
  │  │      deprecated — ambiguous with multi-prereg)   │                   │
  │  │                                                  │                   │
- │  │  🔑 Holds SUPABASE_SERVICE_ROLE_KEY              │                   │
+ │  │  🔑 Keys dmv_read, dmv_register (SWITCH.md)      │                   │
  │  └──────────────────────┬──────────────────────────┘                   │
  │                          │                                            │
  │  ┌──────────────────────▼────────────────────────┐                   │
@@ -306,7 +306,7 @@ Worker:          owns public registration and certificate lookup policy
 Edge functions:  verify DMV_PROXY_SECRET before client creation
                  → register: validate, cap, generate cert, INSERT
                  → lookup: select certificate ID + requested name only
-                 (hold service role key; not public API routes)
+                 (hold Supabase secret keys; not public API routes)
 
 Database:        RLS denies all anon access
                  (only reachable through edge function with service key)
@@ -317,7 +317,7 @@ Database:        RLS denies all anon access
 | Spam registrations (browser) | Cloudflare Turnstile (server-side hostname + `dmv_register` action check) + shared CF rate limits (`RL_OTP_EMAIL` 5/60s, `RL_OTP_IP_EMAIL` 4/60s — both shared with `agentCommunity_PAGE` at the CF account level) + DB lifetime cap 5/email (12 if endorsed). CAPTCHA always runs before counters. |
 | Spam registrations (CLI/MCP) | Current production: machine fingerprint + shared CF rate limits + KV cooldown + DB lifetime cap. Source-ready v3 replaces KV with the exact `REGISTER_FINGERPRINT_LIMITER` claim/mint budget; the hashed fingerprint selects the DMV-local Durable Object after deployment. |
 | Name squatting | Pre-registration model — multiple users can claim the same domain. Magic link email verifies identity. |
-| Credential theft | No credentials in client code. Anon key removed. The Worker owns public `/api/register` and `/api/lookup`; `TURNSTILE_SECRET_KEY` and `DMV_PROXY_SECRET` are encrypted Worker secrets, and `SUPABASE_SERVICE_ROLE_KEY` exists only inside Edge Functions. |
+| Credential theft | No credentials in client code. Anon key removed. The Worker owns public `/api/register` and `/api/lookup`; `TURNSTILE_SECRET_KEY` and `DMV_PROXY_SECRET` are encrypted Worker secrets, and the Supabase secret keys (`dmv_read`, `dmv_register` from `SUPABASE_SECRET_KEYS`; legacy `SUPABASE_SERVICE_ROLE_KEY` only as a fallback until cut-over, see `supabase/functions/SWITCH.md`) exist only inside Edge Functions. |
 | Data exfil | Worker `/api/lookup` returns only `certificate_id`, `status`, `valid_format`, `issued`, `agent_name`, and `certificate_url`. No email, IP, operator name, domain record, timestamps, description, or metadata. |
 | Token reuse across properties | Turnstile tokens are scoped to the DMV hostname AND the `dmv_register` action. A token minted on PAGE or for a different DMV route is rejected by `verifyTurnstileToken`. |
 | DDoS on edge fn | The Worker is the public choke point. Secret-gated `register-agent` and `lookup-agent` reject direct calls before creating a database client. Worker rate limits and Cloudflare DDoS protection apply before lookup traffic reaches Supabase. |

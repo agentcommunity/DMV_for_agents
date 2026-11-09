@@ -178,6 +178,24 @@ Deno.test('apikeyOnlyFetch drops a Bearer equal to the key and keeps apikey', as
   assert.equal(seen[1].get('apikey'), NEW_READ_KEY)
 })
 
+Deno.test('apikeyOnlyFetch also strips a Bearer carried by a Request input', async () => {
+  const seen: Array<{ input: RequestInfo | URL; headers: Headers }> = []
+  const base = (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({ input, headers: new Headers(init?.headers) })
+    return Promise.resolve(new Response('[]'))
+  }
+  const wrapped = apikeyOnlyFetch(NEW_READ_KEY, base as typeof fetch)
+  const request = new Request('https://project.supabase.test/rest/v1/registrations', {
+    headers: { Authorization: `Bearer ${NEW_READ_KEY}`, 'X-From-Request': '1' },
+  })
+  await wrapped(request, { headers: { 'X-From-Init': '1' } })
+  // The base fetch gets explicit init headers, which replace the Request's own.
+  assert.equal(seen[0].headers.get('authorization'), null)
+  assert.equal(seen[0].headers.get('apikey'), NEW_READ_KEY)
+  assert.equal(seen[0].headers.get('x-from-request'), '1')
+  assert.equal(seen[0].headers.get('x-from-init'), '1')
+})
+
 Deno.test('createDmvSupabaseClient passes the named key, no-session options and the apikey-only fetch', async () => {
   const calls: Array<Array<unknown>> = []
   const factory = (...args: Array<unknown>) => {

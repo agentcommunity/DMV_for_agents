@@ -65,11 +65,23 @@ Deno.test('H17: badge falls back to the check-digit badge when the key is miscon
     SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_read: 'not-a-secret-key' }),
   }, async () => {
     const mock = createSupabaseMock(null)
-    const response = await handleBadge(
-      new Request(`https://example.test/badge?id=${VALID_CERTIFICATE_ID}`),
-      { createSupabaseClient: mock.createSupabaseClient as never },
-    )
+    const errors: Array<string> = []
+    const originalError = console.error
+    console.error = (...args: Array<unknown>) => errors.push(args.map(String).join(' '))
+    let response: Response
+    try {
+      response = await handleBadge(
+        new Request(`https://example.test/badge?id=${VALID_CERTIFICATE_ID}`),
+        { createSupabaseClient: mock.createSupabaseClient as never },
+      )
+    } finally {
+      console.error = originalError
+    }
     check(response.status === 200, `status ${response.status}`)
     check(mock.clientFactoryCalls.length === 0, 'no client may be created with a misconfigured key')
+    // The misconfiguration must be visible in logs (as lookup-agent/register-agent do),
+    // naming the key but never printing its value.
+    check(errors.some((line) => line.includes('Supabase key error') && line.includes('dmv_read')), `expected a key error log, got ${JSON.stringify(errors)}`)
+    check(!errors.some((line) => line.includes('not-a-secret-key')), 'the key value must never be logged')
   })
 })

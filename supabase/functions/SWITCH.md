@@ -46,7 +46,10 @@ P-DMV; gate G-CODE; rollback section 7). Project: Main, `tcymqfwwphacnosnnzxl`.
 ## Probe (plan section 6: P-EDGE-OUT + P-DMV)
 
 - G-CODE gate: `pnpm test:edge`. It scans each function's import graph for legacy key names and for
-  Bearer-with-key, checks that each function uses its named key, and checks the supabase-js pin.
+  Bearer-with-key, `default`-entry reads and `Deno.env.toObject`, checks that each function uses its named key,
+  and checks the supabase-js pin. CI runs it on every pull request and push to `main`
+  (`.github/workflows/edge-functions.yml`) and in the publish gate (`pnpm test`); still run it locally before
+  each deploy and record the output in the wave ledger.
 - D6 GET again: the version went up and `verify_jwt` is unchanged (`false`).
 - Function logs (dashboard, Edge Functions, Logs) show `key_kind=sb_secret key_source=SUPABASE_SECRET_KEYS` and a
   `key_fp` equal to the ledger value.
