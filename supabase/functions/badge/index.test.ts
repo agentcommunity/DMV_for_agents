@@ -119,3 +119,31 @@ Deno.test('H17: a missing dmv_read logs the structured alert line with reason=mi
     check(!errors.some((line) => line.includes('sb_secret_fixtureDefault')), 'no key value may be logged')
   })
 })
+
+Deno.test('H17: a missing SUPABASE_URL alerts with its own name, not dmv_read (review M-4)', async () => {
+  await withEnv({
+    SUPABASE_URL: undefined,
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_read: 'sb_secret_fixtureBadgeRead00000000000' }),
+  }, async () => {
+    const mock = createSupabaseMock(null)
+    const errors: Array<string> = []
+    const originalError = console.error
+    console.error = (...args: Array<unknown>) => errors.push(args.map(String).join(' '))
+    let response: Response
+    try {
+      response = await handleBadge(
+        new Request(`https://example.test/badge?id=${VALID_CERTIFICATE_ID}`),
+        { createSupabaseClient: mock.createSupabaseClient as never },
+      )
+    } finally {
+      console.error = originalError
+    }
+    check(response.status === 200, `status ${response.status}`)
+    check(mock.clientFactoryCalls.length === 0, 'no client may be created without SUPABASE_URL')
+    check(
+      errors.includes('dmv_alert event=badge_key_error key_name=SUPABASE_URL reason=url_missing fallback=check_digit'),
+      `expected the SUPABASE_URL alert line, got ${JSON.stringify(errors)}`,
+    )
+    check(!errors.some((line) => line.includes('sb_secret_fixtureBadgeRead')), 'no key value may be logged')
+  })
+})

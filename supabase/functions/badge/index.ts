@@ -207,8 +207,12 @@ export async function handleBadge(
     // Review M-4: after the cut-over there is no fallback key, so a missing or
     // bad dmv_read degrades every badge to the check-digit form with HTTP 200.
     // This fixed-format line is what an alert matches on (names only, no value).
-    const reason = /not configured/.test(message) ? 'missing' : 'misconfigured'
-    console.error(`dmv_alert event=badge_key_error key_name=dmv_read reason=${reason} fallback=check_digit`)
+    // A missing SUPABASE_URL also lands here; name it so the alert does not
+    // send an operator to rotate dmv_read when the key is fine.
+    const urlMissing = message.startsWith('SUPABASE_URL ')
+    const reason = urlMissing ? 'url_missing' : /not configured/.test(message) ? 'missing' : 'misconfigured'
+    const keyName = urlMissing ? 'SUPABASE_URL' : 'dmv_read'
+    console.error(`dmv_alert event=badge_key_error key_name=${keyName} reason=${reason} fallback=check_digit`)
   }
 
   if (supabase) try {
