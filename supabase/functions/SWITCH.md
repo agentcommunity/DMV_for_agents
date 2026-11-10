@@ -19,7 +19,9 @@ step F2; no DMV function reads it, and G-CODE fails if anything in a holder's im
   supabase-js import (`2.53.0`; it was a floating `@2` before).
 - The loader reads the named entry from the platform-injected `SUPABASE_SECRET_KEYS` JSON dictionary. It never
   uses the `default` entry. If the entry exists but does not start with `sb_secret_`, the function fails closed:
-  lookup returns 500, register returns 500 before any write, and badge falls back to the check-digit badge.
+  lookup returns 500, register returns 500 before any write, and badge falls back to the check-digit badge (HTTP 200) and logs
+  `dmv_alert event=badge_key_error key_name=dmv_read reason=<missing|misconfigured> fallback=check_digit`.
+  Alert on that line: after the cut-over it is the only sign that every badge has degraded.
 - If the entry is absent, or `SUPABASE_SECRET_KEYS` is missing or not a JSON object, the loader fails closed
   (same responses as above). There is no other key source.
 - Each client creation logs one line with the key name, kind, source and fingerprint. It never logs the key:

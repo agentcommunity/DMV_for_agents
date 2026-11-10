@@ -202,7 +202,13 @@ export async function handleBadge(
   } catch (error) {
     // Same log line as lookup-agent/register-agent: the loader's message names
     // the key, never its value. The badge still renders from the check digit.
-    console.error('Supabase key error:', error instanceof Error ? error.message : 'unknown')
+    const message = error instanceof Error ? error.message : 'unknown'
+    console.error('Supabase key error:', message)
+    // Review M-4: after the cut-over there is no fallback key, so a missing or
+    // bad dmv_read degrades every badge to the check-digit form with HTTP 200.
+    // This fixed-format line is what an alert matches on (names only, no value).
+    const reason = /not configured/.test(message) ? 'missing' : 'misconfigured'
+    console.error(`dmv_alert event=badge_key_error key_name=dmv_read reason=${reason} fallback=check_digit`)
   }
 
   if (supabase) try {
