@@ -29,6 +29,10 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
+      # pnpm test ends with test:edge (deno), so the gate needs deno installed.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - run: corepack enable
       - run: corepack prepare pnpm@10.12.1 --activate
       - run: pnpm install --frozen-lockfile

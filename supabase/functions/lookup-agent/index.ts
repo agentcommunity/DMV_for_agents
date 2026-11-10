@@ -1,8 +1,9 @@
 // Supabase Edge Function — lookup-agent
-// Internal Worker upstream for certificate-ID lookup. Holds the service role key
-// server-side and rejects direct callers before creating a Supabase client.
+// Internal Worker upstream for certificate-ID lookup. Holds the dmv_read secret
+// key server-side (see ../SWITCH.md) and rejects direct callers before creating
+// a Supabase client.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createDmvSupabaseClient, type SupabaseCreateClient } from '../_shared/supabase-key.ts'
 
 const DMV_PROXY_HEADER = 'x-dmv-proxy'
 
@@ -49,7 +50,7 @@ function verifyCertificateId(id: string): boolean {
 
 export async function handleLookupAgent(
   req: Request,
-  dependencies: { createSupabaseClient?: typeof createClient } = {},
+  dependencies: { createSupabaseClient?: SupabaseCreateClient } = {},
 ): Promise<Response> {
   const proxySecret = Deno.env.get('DMV_PROXY_SECRET')
   const suppliedSecret = req.headers.get(DMV_PROXY_HEADER)
@@ -81,11 +82,13 @@ export async function handleLookupAgent(
     return json({ error: 'Invalid certificate ID (check digit failed)', valid: false }, 400)
   }
 
-  const createSupabaseClient = dependencies.createSupabaseClient ?? createClient
-  const supabase = createSupabaseClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  )
+  let supabase: Awaited<ReturnType<typeof createDmvSupabaseClient>>
+  try {
+    supabase = await createDmvSupabaseClient('dmv_read', { createClient: dependencies.createSupabaseClient })
+  } catch (error) {
+    console.error('Supabase key error:', error instanceof Error ? error.message : 'unknown')
+    return json({ error: 'Lookup failed' }, 500)
+  }
 
   const { data, error } = await supabase
     .from('registrations')

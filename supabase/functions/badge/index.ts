@@ -11,7 +11,7 @@
 //
 // Badge always links back to dmv.agentcommunity.org for SEO.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createDmvSupabaseClient, type SupabaseCreateClient } from '../_shared/supabase-key.ts'
 
 const CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const DMV_BASE = 'https://dmv.agentcommunity.org'
@@ -142,7 +142,10 @@ function cardBadge(agentName: string | null, certId: string, status: 'registered
 
 // --- Handler ---
 
-Deno.serve(async (req) => {
+export async function handleBadge(
+  req: Request,
+  dependencies: { createSupabaseClient?: SupabaseCreateClient } = {},
+): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
@@ -193,12 +196,16 @@ Deno.serve(async (req) => {
   let agentName: string | null = null
   let status: 'registered' | 'valid' = 'valid'
 
+  let supabase: Awaited<ReturnType<typeof createDmvSupabaseClient>> | null = null
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    )
+    supabase = await createDmvSupabaseClient('dmv_read', { createClient: dependencies.createSupabaseClient })
+  } catch (error) {
+    // Same log line as lookup-agent/register-agent: the loader's message names
+    // the key, never its value. The badge still renders from the check digit.
+    console.error('Supabase key error:', error instanceof Error ? error.message : 'unknown')
+  }
 
+  if (supabase) try {
     const { data } = await supabase
       .from('registrations')
       .select('certificate_id, domain_requested')
@@ -225,4 +232,8 @@ Deno.serve(async (req) => {
       'Access-Control-Allow-Origin': '*',
     },
   })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve((req) => handleBadge(req))
+}
