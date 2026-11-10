@@ -24,4 +24,4 @@ jobs:
         with:
           deno-version: v2.x
       - name: Edge function tests (G-CODE in its current mode)
-        run: deno test --allow-env --allow-read --allow-net supabase/functions/
+        run: deno test --node-modules-dir=none --allow-env --allow-read --allow-net supabase/functions/
