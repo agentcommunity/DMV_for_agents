@@ -180,8 +180,8 @@ Do not redeploy `register-agent` or `badge` during this rollout. Supabase must
 bypass its platform JWT layer because the Worker authenticates with
 `x-dmv-proxy`. Supabase automatically injects `SUPABASE_URL`,
 `SUPABASE_SECRET_KEYS` and the legacy `SUPABASE_SERVICE_ROLE_KEY`. The functions
-use the named secret keys `dmv_read` / `dmv_register` and read the legacy key
-only as a fallback until cut-over; see `supabase/functions/SWITCH.md`.
+use only the named secret keys `dmv_read` / `dmv_register` and never read the
+legacy key; a missing named key fails closed. See `supabase/functions/SWITCH.md`.
 
 5. Prove issued and generated-valid-but-absent results through the Worker, the
    invalid-format response, exact 30/60 limiting, and a secretless direct

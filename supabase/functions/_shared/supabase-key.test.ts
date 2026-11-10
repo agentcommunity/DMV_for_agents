@@ -54,7 +54,6 @@ Deno.test('reads the named key from SUPABASE_SECRET_KEYS, never the default entr
   const read = await resolveDmvSupabaseKey('dmv_read', {
     env: envOf({ SUPABASE_SECRET_KEYS: dictionary, SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
     log: logs.log,
-    legacyFallback: true,
   })
   assert.equal(read.key, NEW_READ_KEY)
   assert.equal(read.kind, 'sb_secret')
@@ -63,7 +62,6 @@ Deno.test('reads the named key from SUPABASE_SECRET_KEYS, never the default entr
   const register = await resolveDmvSupabaseKey('dmv_register', {
     env: envOf({ SUPABASE_SECRET_KEYS: dictionary }),
     log: logs.log,
-    legacyFallback: false,
   })
   assert.equal(register.key, NEW_REGISTER_KEY)
 })
@@ -73,7 +71,6 @@ Deno.test('logs key_name, key_kind and a 12-hex fingerprint, never the key', asy
   await resolveDmvSupabaseKey('dmv_read', {
     env: envOf({ SUPABASE_SECRET_KEYS: dictionary }),
     log: logs.log,
-    legacyFallback: false,
   })
   assert.equal(logs.lines.length, 1)
   const line = logs.lines[0]
@@ -87,7 +84,6 @@ Deno.test('fingerprint is the first 12 hex of sha256(key), as recorded in the wa
   await resolveDmvSupabaseKey('dmv_read', {
     env: envOf({ SUPABASE_SECRET_KEYS: dictionary }),
     log: logs.log,
-    legacyFallback: false,
   })
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(NEW_READ_KEY))
   const expected = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12)
@@ -101,60 +97,49 @@ Deno.test('fails closed when the named entry is not an sb_secret_ key', async ()
         resolveDmvSupabaseKey('dmv_read', {
           env: envOf({ SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_read: bad }), SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
           log: () => {},
-          legacyFallback: true,
         }),
       /dmv_read.*sb_secret_/,
     )
   }
 })
 
-Deno.test('falls back to the legacy key only while the switch is on', async () => {
+Deno.test('cut-over: never falls back to the legacy key, even with only the default entry present', async () => {
   const logs = captureLogs()
-  const resolved = await resolveDmvSupabaseKey('dmv_read', {
-    env: envOf({ SUPABASE_SECRET_KEYS: JSON.stringify({ default: DEFAULT_KEY }), SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
-    log: logs.log,
-    legacyFallback: true,
-  })
-  assert.equal(resolved.key, LEGACY_KEY)
-  assert.equal(resolved.kind, 'legacy_jwt')
-  assert.equal(resolved.source, 'legacy')
-  assert.ok(/key_kind=legacy_jwt key_source=legacy key_fp=[0-9a-f]{12}$/.test(logs.lines[0]), logs.lines[0])
-
   await assert.rejects(
     () =>
       resolveDmvSupabaseKey('dmv_read', {
         env: envOf({ SUPABASE_SECRET_KEYS: JSON.stringify({ default: DEFAULT_KEY }), SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
-        log: () => {},
-        legacyFallback: false,
+        log: logs.log,
       }),
     /dmv_read.*not configured/,
   )
+  assert.equal(logs.lines.length, 0)
 })
 
-Deno.test('missing or malformed dictionary falls back while on, fails closed when off', async () => {
-  for (const raw of [undefined, '', 'not json', '[]', '"x"']) {
-    const resolved = await resolveDmvSupabaseKey('dmv_register', {
-      env: envOf({ SUPABASE_SECRET_KEYS: raw, SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
-      log: () => {},
-      legacyFallback: true,
-    })
-    assert.equal(resolved.source, 'legacy')
+Deno.test('cut-over: a missing or malformed dictionary fails closed, the injected legacy key is ignored', async () => {
+  for (const raw of [undefined, '', 'not json', '[]', '"x"', 'null']) {
     await assert.rejects(
       () =>
         resolveDmvSupabaseKey('dmv_register', {
           env: envOf({ SUPABASE_SECRET_KEYS: raw, SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
           log: () => {},
-          legacyFallback: false,
         }),
       /dmv_register.*not configured/,
     )
   }
 })
 
-Deno.test('fails closed when neither the named key nor the legacy key is present', async () => {
+Deno.test('fails closed when no key is present at all', async () => {
   await assert.rejects(
-    () => resolveDmvSupabaseKey('dmv_read', { env: envOf({}), log: () => {}, legacyFallback: true }),
+    () => resolveDmvSupabaseKey('dmv_read', { env: envOf({}), log: () => {} }),
     /dmv_read.*not configured/,
+  )
+})
+
+Deno.test('fails closed on a bare sb_secret_ prefix', async () => {
+  await assert.rejects(
+    () => resolveDmvSupabaseKey('dmv_read', { env: envOf({ SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_read: 'sb_secret_' }) }), log: () => {} }),
+    /dmv_read.*sb_secret_/,
   )
 })
 
@@ -206,7 +191,6 @@ Deno.test('createDmvSupabaseClient passes the named key, no-session options and 
     createClient: factory as never,
     env: envOf({ SUPABASE_URL: 'https://project.supabase.test', SUPABASE_SECRET_KEYS: dictionary }),
     log: () => {},
-    legacyFallback: true,
   })
   assert.equal((client as unknown as { marker: boolean }).marker, true)
   assert.equal(calls.length, 1)
@@ -217,21 +201,22 @@ Deno.test('createDmvSupabaseClient passes the named key, no-session options and 
   assert.equal(typeof options.global.fetch, 'function')
 })
 
-Deno.test('legacy fallback client keeps the default supabase-js header behaviour', async () => {
+Deno.test('cut-over: no client is created from the legacy key', async () => {
   const calls: Array<Array<unknown>> = []
   const factory = (...args: Array<unknown>) => {
     calls.push(args)
     return {}
   }
-  await createDmvSupabaseClient('dmv_register', {
-    createClient: factory as never,
-    env: envOf({ SUPABASE_URL: 'https://project.supabase.test', SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
-    log: () => {},
-    legacyFallback: true,
-  })
-  assert.equal(calls[0][1], LEGACY_KEY)
-  const options = calls[0][2] as { global?: unknown }
-  assert.equal(options.global, undefined)
+  await assert.rejects(
+    () =>
+      createDmvSupabaseClient('dmv_register', {
+        createClient: factory as never,
+        env: envOf({ SUPABASE_URL: 'https://project.supabase.test', SUPABASE_SERVICE_ROLE_KEY: LEGACY_KEY }),
+        log: () => {},
+      }),
+    /dmv_register.*not configured/,
+  )
+  assert.equal(calls.length, 0)
 })
 
 Deno.test('fails closed when SUPABASE_URL is missing', async () => {
@@ -241,7 +226,6 @@ Deno.test('fails closed when SUPABASE_URL is missing', async () => {
         createClient: (() => ({})) as never,
         env: envOf({ SUPABASE_SECRET_KEYS: dictionary }),
         log: () => {},
-        legacyFallback: true,
       }),
     /SUPABASE_URL/,
   )
