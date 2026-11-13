@@ -11,15 +11,11 @@
 // SUPABASE_SECRET_KEYS) and any Deno.env.toObject (which could assemble a
 // legacy name from pieces). It does not try to defeat deliberate obfuscation.
 //
-// Modes:
-// - Transition (today): DMV_LEGACY_KEY_FALLBACK is true. The single fallback read
-//   in _shared/supabase-key.ts is allow-listed; every other legacy read fails.
-// - Enforcing (cut-over): set DMV_LEGACY_KEY_FALLBACK = false in
-//   _shared/supabase-key.ts (or run with DMV_GCODE_ENFORCE=1 to preview). The
-//   fallback allow-list entry stops applying, so this test fails until the
-//   fallback line is deleted.
+// Mode: enforcing, always. The cut-over release deleted the legacy fallback
+// (and its DMV_LEGACY_KEY_FALLBACK switch) from _shared/supabase-key.ts, so no
+// legacy read is allow-listed anywhere and there is no transition mode left.
 
-import { DMV_LEGACY_KEY_FALLBACK, SUPABASE_JS_PINNED_URL } from './supabase-key.ts'
+import { SUPABASE_JS_PINNED_URL } from './supabase-key.ts'
 
 const FUNCTIONS_DIR = new URL('../', import.meta.url)
 
@@ -54,23 +50,14 @@ interface AllowEntry {
   marker: string // must appear on the allowed line; each entry must match exactly one line
   rule: Rule
   reason: string
-  transitionOnly: boolean
 }
 
 const ALLOW_LIST: Array<AllowEntry> = [
   {
     file: '_shared/supabase-key.ts',
-    marker: 'g-code-allow: legacy-fallback',
-    rule: 'legacy',
-    reason: 'the one legacy fallback read, behind DMV_LEGACY_KEY_FALLBACK; must be deleted at cut-over',
-    transitionOnly: true,
-  },
-  {
-    file: '_shared/supabase-key.ts',
     marker: 'g-code-allow: strips-bearer',
     rule: 'bearer',
     reason: 'this line removes a Bearer equal to the API key (plan U2); it never adds one',
-    transitionOnly: false,
   },
 ]
 
@@ -84,7 +71,6 @@ export interface Violation {
 export function scanSource(
   file: string,
   source: string,
-  enforcing: boolean,
   allowList: Array<AllowEntry> = ALLOW_LIST,
 ): Array<Violation> {
   const violations: Array<Violation> = []
@@ -92,8 +78,7 @@ export function scanSource(
     for (const [rule, pattern] of RULES) {
       if (!pattern.test(text)) continue
       const allowed = allowList.some((entry) =>
-        entry.file === file && entry.rule === rule && text.includes(entry.marker) &&
-        (!entry.transitionOnly || !enforcing)
+        entry.file === file && entry.rule === rule && text.includes(entry.marker)
       )
       if (!allowed) violations.push({ file, line: index + 1, rule, text: text.trim() })
     }
@@ -120,25 +105,19 @@ async function importGraph(entry: URL): Promise<Map<string, string>> {
   return seen
 }
 
-function enforcingMode(): boolean {
-  return DMV_LEGACY_KEY_FALLBACK === false || Deno.env.get('DMV_GCODE_ENFORCE') === '1'
-}
-
-function fail(violations: Array<Violation>, enforcing: boolean): never {
-  const mode = enforcing ? 'enforcing' : 'transition'
+function fail(violations: Array<Violation>): never {
   throw new Error(
-    `G-CODE (${mode}) found ${violations.length} violation(s):\n` +
+    `G-CODE (enforcing) found ${violations.length} violation(s):\n` +
       violations.map((v) => `  ${v.file}:${v.line} [${v.rule}] ${v.text}`).join('\n'),
   )
 }
 
 for (const holder of HOLDERS) {
   Deno.test(`G-CODE ${holder.id} ${holder.dir}: no legacy key read and no Bearer key in the import graph`, async () => {
-    const enforcing = enforcingMode()
     const graph = await importGraph(new URL(`${holder.dir}/index.ts`, FUNCTIONS_DIR))
     const violations: Array<Violation> = []
-    for (const [file, source] of graph) violations.push(...scanSource(file, source, enforcing))
-    if (violations.length > 0) fail(violations, enforcing)
+    for (const [file, source] of graph) violations.push(...scanSource(file, source))
+    if (violations.length > 0) fail(violations)
   })
 
   Deno.test(`G-CODE ${holder.id} ${holder.dir}: creates its client only through the named key ${holder.keyName}`, async () => {
@@ -185,7 +164,7 @@ Deno.test('G-CODE scanner catches a direct legacy read and a Bearer key', () => 
     "headers.set('Authorization', `Bearer ${k}`)",
     "const a = Deno.env.get('SUPABASE_ANON_KEY')",
   ].join('\n')
-  const found = scanSource('badge/index.ts', mutant, false)
+  const found = scanSource('badge/index.ts', mutant)
   if (found.length !== 3) throw new Error(`expected 3 violations, got ${JSON.stringify(found)}`)
 })
 
@@ -197,22 +176,27 @@ Deno.test('G-CODE scanner catches a default-entry read and an env dump', () => {
     "const all = Deno.env.toObject()",
     "const k4 = Deno.env.toObject()['SUPABASE_' + 'SERVICE_ROLE_KEY']",
   ].join('\n')
-  const found = scanSource('badge/index.ts', mutant, false)
+  const found = scanSource('badge/index.ts', mutant)
   const rules = found.map((v) => v.rule).sort().join(',')
   if (rules !== 'default-entry,default-entry,default-entry,env-dump,env-dump') {
     throw new Error(`expected 3 default-entry and 2 env-dump violations, got ${JSON.stringify(found)}`)
   }
 })
 
-Deno.test('G-CODE scanner: the fallback allow-list stops applying in enforcing mode', () => {
+Deno.test('G-CODE scanner: the old fallback line is rejected, marker or not, in every file', () => {
   const line = "  const legacy = env('SUPABASE_SERVICE_ROLE_KEY') // g-code-allow: legacy-fallback"
-  if (scanSource('_shared/supabase-key.ts', line, false).length !== 0) {
-    throw new Error('transition mode should allow the marked fallback line')
+  for (const file of ['_shared/supabase-key.ts', 'badge/index.ts']) {
+    if (scanSource(file, line).length !== 1) throw new Error(`${file}: the old fallback line must be a violation`)
   }
-  if (scanSource('_shared/supabase-key.ts', line, true).length !== 1) {
-    throw new Error('enforcing mode must reject the fallback line')
-  }
-  if (scanSource('badge/index.ts', line, false).length !== 1) {
-    throw new Error('the marker must only count in its own file')
+  // The strips-bearer marker allows only its own rule in its own file.
+  const strip = "headers.delete('authorization') // Bearer g-code-allow: strips-bearer"
+  if (scanSource('_shared/supabase-key.ts', strip).length !== 0) throw new Error('strips-bearer line should be allowed')
+  if (scanSource('badge/index.ts', strip).length !== 1) throw new Error('the marker must only count in its own file')
+})
+
+Deno.test('G-CODE: the key loader has no fallback switch and no legacy key kind', async () => {
+  const source = await Deno.readTextFile(new URL('_shared/supabase-key.ts', FUNCTIONS_DIR))
+  for (const forbidden of [/LEGACY_KEY_FALLBACK/, /legacyFallback/, /legacy_jwt/, /source:\s*'legacy'/]) {
+    if (forbidden.test(source)) throw new Error(`_shared/supabase-key.ts still contains ${forbidden}`)
   }
 })

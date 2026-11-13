@@ -5,32 +5,29 @@
 // New key: a named secret key in the platform-injected SUPABASE_SECRET_KEYS
 // JSON dictionary (keyed by key name; https://supabase.com/docs/guides/functions/secrets,
 // read 2026-11-08). The `default` entry is never used.
-// Legacy key: read only while DMV_LEGACY_KEY_FALLBACK is true.
+// Cut-over release: there is no legacy fallback. A missing, malformed or
+// non-`sb_secret_` entry fails closed. The platform still injects the legacy
+// service_role variable until plan step F2; nothing here reads it, and the
+// G-CODE test (g-code.test.ts) fails if anything in a holder's import graph does.
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.53.0'
 
 export const SUPABASE_JS_PINNED_URL = 'https://esm.sh/@supabase/supabase-js@2.53.0'
 
-// THE SWITCH. true = transition: use the named key when present, else the
-// legacy service_role key. Set to false at cut-over (and delete the line
-// marked legacy-fallback below); the G-CODE test then enforces.
-export const DMV_LEGACY_KEY_FALLBACK: boolean = true
-
 export type DmvKeyName = 'dmv_read' | 'dmv_register'
-export type KeyKind = 'sb_secret' | 'legacy_jwt' | 'unknown'
+export type KeyKind = 'sb_secret'
 export type SupabaseCreateClient = typeof createClient
 
 export interface ResolvedKey {
   name: DmvKeyName
   key: string
   kind: KeyKind
-  source: 'SUPABASE_SECRET_KEYS' | 'legacy'
+  source: 'SUPABASE_SECRET_KEYS'
 }
 
 export interface KeyLoaderOptions {
   env?: (name: string) => string | undefined
   log?: (line: string) => void
-  legacyFallback?: boolean
 }
 
 export const DMV_SUPABASE_CLIENT_OPTIONS = {
@@ -41,12 +38,6 @@ const SECRET_PREFIX = 'sb_secret_'
 
 function defaultEnv(name: string): string | undefined {
   return Deno.env.get(name)
-}
-
-function classify(key: string): KeyKind {
-  if (key.startsWith(SECRET_PREFIX)) return 'sb_secret'
-  if (key.startsWith('eyJ')) return 'legacy_jwt'
-  return 'unknown'
 }
 
 async function fingerprint(key: string): Promise<string> {
@@ -74,23 +65,15 @@ function readNamedEntry(raw: string | undefined, name: DmvKeyName): { present: b
 export async function resolveDmvSupabaseKey(name: DmvKeyName, options: KeyLoaderOptions = {}): Promise<ResolvedKey> {
   const env = options.env ?? defaultEnv
   const log = options.log ?? ((line: string) => console.log(line))
-  const legacyFallback = options.legacyFallback ?? DMV_LEGACY_KEY_FALLBACK
 
-  let resolved: ResolvedKey | null = null
   const entry = readNamedEntry(env('SUPABASE_SECRET_KEYS'), name)
-  if (entry.present) {
-    // Fail closed: a configured entry that is not a secret key is an operator
-    // error, never a reason to fall back silently.
-    if (typeof entry.value !== 'string' || !entry.value.startsWith(SECRET_PREFIX)) {
-      throw new Error(`Supabase key ${name} in SUPABASE_SECRET_KEYS must start with ${SECRET_PREFIX}`)
-    }
-    resolved = { name, key: entry.value, kind: 'sb_secret', source: 'SUPABASE_SECRET_KEYS' }
-  } else if (legacyFallback) {
-    const legacy = env('SUPABASE_SERVICE_ROLE_KEY') // g-code-allow: legacy-fallback
-    if (legacy) resolved = { name, key: legacy, kind: classify(legacy), source: 'legacy' }
+  // Fail closed: no named entry means no client. There is no other key source.
+  if (!entry.present) throw new Error(`Supabase key ${name} is not configured`)
+  // A configured entry that is not a secret key is an operator error.
+  if (typeof entry.value !== 'string' || !entry.value.startsWith(SECRET_PREFIX) || entry.value.length === SECRET_PREFIX.length) {
+    throw new Error(`Supabase key ${name} in SUPABASE_SECRET_KEYS must start with ${SECRET_PREFIX}`)
   }
-
-  if (!resolved) throw new Error(`Supabase key ${name} is not configured`)
+  const resolved: ResolvedKey = { name, key: entry.value, kind: 'sb_secret', source: 'SUPABASE_SECRET_KEYS' }
   log(`supabase_key key_name=${name} key_kind=${resolved.kind} key_source=${resolved.source} key_fp=${await fingerprint(resolved.key)}`)
   return resolved
 }
@@ -127,12 +110,8 @@ export async function createDmvSupabaseClient(
   if (!url) throw new Error('SUPABASE_URL is not configured')
   const resolved = await resolveDmvSupabaseKey(name, { ...options, env })
   const factory = options.createClient ?? createClient
-  if (resolved.kind === 'sb_secret') {
-    return factory(url, resolved.key, {
-      ...DMV_SUPABASE_CLIENT_OPTIONS,
-      global: { fetch: apikeyOnlyFetch(resolved.key) },
-    }) as SupabaseClient
-  }
-  // Legacy JWT: unchanged header behaviour (apikey + Bearer) until cut-over.
-  return factory(url, resolved.key, { ...DMV_SUPABASE_CLIENT_OPTIONS }) as SupabaseClient
+  return factory(url, resolved.key, {
+    ...DMV_SUPABASE_CLIENT_OPTIONS,
+    global: { fetch: apikeyOnlyFetch(resolved.key) },
+  }) as SupabaseClient
 }

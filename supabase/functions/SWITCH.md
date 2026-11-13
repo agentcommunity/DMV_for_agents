@@ -3,28 +3,36 @@
 Source plan: PAGE `docs/plans/2026-11-08-supabase-key-migration.md` (batch A step 6; probes P-EDGE-OUT and
 P-DMV; gate G-CODE; rollback section 7). Project: Main, `tcymqfwwphacnosnnzxl`.
 
-| Holder | Function | New key (name in `SUPABASE_SECRET_KEYS`) | Legacy fallback |
+| Holder | Function | Key (name in `SUPABASE_SECRET_KEYS`) | Legacy fallback |
 |---|---|---|---|
-| H17 | `badge` | `dmv_read` | `SUPABASE_SERVICE_ROLE_KEY` |
-| H18 | `lookup-agent` | `dmv_read` | `SUPABASE_SERVICE_ROLE_KEY` |
-| H19 | `register-agent` | `dmv_register` | `SUPABASE_SERVICE_ROLE_KEY` |
+| H17 | `badge` | `dmv_read` | none (removed in the cut-over release) |
+| H18 | `lookup-agent` | `dmv_read` | none (removed in the cut-over release) |
+| H19 | `register-agent` | `dmv_register` | none (removed in the cut-over release) |
+
+**State: cut-over release.** The legacy fallback, its `DMV_LEGACY_KEY_FALLBACK` switch and the transition
+mode of the G-CODE test are deleted. The legacy JWT keys (anon and service_role) on Main are disabled
+(2026-11-13, 04:31Z). The platform may still inject the dead legacy service_role variable; no DMV function reads
+it, and G-CODE fails if anything in a holder's import graph does.
 
 ## How the code behaves
 
-- All three functions get their client from `_shared/supabase-key.ts`. That file holds the switch,
-  `DMV_LEGACY_KEY_FALLBACK`, and the one pinned supabase-js import (`2.53.0`; it was a floating `@2` before).
+- All three functions get their client from `_shared/supabase-key.ts`. That file holds the one pinned
+  supabase-js import (`2.53.0`; it was a floating `@2` before).
 - The loader reads the named entry from the platform-injected `SUPABASE_SECRET_KEYS` JSON dictionary. It never
   uses the `default` entry. If the entry exists but does not start with `sb_secret_`, the function fails closed:
-  lookup returns 500, register returns 500 before any write, and badge falls back to the check-digit badge.
-- If the entry is absent and the switch is `true`, the loader falls back to the legacy key. When the switch is
-  `false`, a missing entry fails closed.
+  lookup returns 500, register returns 500 before any write, and badge falls back to the check-digit badge (HTTP 200) and logs
+  `dmv_alert event=badge_key_error key_name=dmv_read reason=<missing|misconfigured> fallback=check_digit`
+  (a missing `SUPABASE_URL` logs `key_name=SUPABASE_URL reason=url_missing`).
+  Alert on that line: after the cut-over it is the only sign that every badge has degraded.
+- If the entry is absent, or `SUPABASE_SECRET_KEYS` is missing or not a JSON object, the loader fails closed
+  (same responses as above). There is no other key source.
 - Each client creation logs one line with the key name, kind, source and fingerprint. It never logs the key:
   `supabase_key key_name=dmv_read key_kind=sb_secret key_source=SUPABASE_SECRET_KEYS key_fp=<12 hex>`.
   `key_fp` is the first 12 hex characters of sha256(key), the same value the owner records in the wave ledger.
 - With an `sb_secret_` key, a fetch wrapper removes the `Authorization: Bearer <key>` header that supabase-js
   2.53.0 adds (`lib/fetch.js` `fetchWithAuth`), so the key goes out only on `apikey`. Docs: "Send publishable and
   secret keys on the `apikey` header, not on `Authorization: Bearer`." (https://supabase.com/docs/guides/api/api-keys,
-  read 2026-11-08). A legacy JWT keeps today's headers.
+  read 2026-11-08).
 - `--no-verify-jwt` stays on every deploy. The `x-dmv-proxy` gate is unchanged.
 
 ## Owner steps (one function per deploy, outside the plan's cron windows)
@@ -33,9 +41,9 @@ P-DMV; gate G-CODE; rollback section 7). Project: Main, `tcymqfwwphacnosnnzxl`.
    and later a key named `dmv_register`. Record each fingerprint in the wave ledger from the owner shell:
    `printf %s "$KEY" | shasum -a 256 | cut -c1-12`, with `$KEY` read silently. Never paste the key into chat or a file.
 2. There is no store to fill. The edge runtime exposes secret keys as `SUPABASE_SECRET_KEYS`, a JSON dictionary
-   keyed by key name (https://supabase.com/docs/guides/functions/secrets, read 2026-11-08). **UNVERIFIED:** the docs
-   do not say that a newly created named key shows up in the dictionary without a redeploy. The probe's `key_source`
-   field settles it: `legacy` means the key did not show up.
+   keyed by key name (https://supabase.com/docs/guides/functions/secrets, read 2026-11-08). The docs do not say that
+   a newly created named key shows up in the dictionary without a redeploy; if it does not, the function fails closed
+   with `Supabase key <name> is not configured` (there is no legacy source any more), so redeploy and re-probe.
 3. Before each deploy, read the function's current state (D6, names and flags only):
    `curl -s -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" https://api.supabase.com/v1/projects/tcymqfwwphacnosnnzxl/functions/<slug> | jq '{version, verify_jwt, status}'`.
    Record the version and `verify_jwt` for rollback. Plan U11: the deployed code may differ from `main`, so compare
@@ -63,15 +71,15 @@ P-DMV; gate G-CODE; rollback section 7). Project: Main, `tcymqfwwphacnosnnzxl`.
 
 ## Cut-over (before plan step F2)
 
-1. In `_shared/supabase-key.ts`, set `DMV_LEGACY_KEY_FALLBACK = false` and delete the line marked
-   `g-code-allow: legacy-fallback`. Remove its allow-list entry in `_shared/g-code.test.ts`.
-2. To preview this before editing, run `pnpm test:edge:enforce`. Today it fails on purpose with 3 failures, all on
-   the fallback line.
-3. `pnpm test:edge` passes, then redeploy the three functions as in step 4.
+Done in code by the cut-over release (fallback, switch and transition mode deleted; G-CODE is always
+enforcing). Merge it only after H17, H18 and H19 each logged `key_kind=sb_secret key_source=SUPABASE_SECRET_KEYS`
+with the ledger `key_fp` (8a records), and before F2. Then `pnpm test:edge` passes and the three functions are
+redeployed as in step 4, one at a time, `--no-verify-jwt` kept; each probe must show `key_source=SUPABASE_SECRET_KEYS`.
 
 ## Rollback (plan section 7)
 
-- Redeploy the previous function version, keeping `verify_jwt` as recorded in step 3. The platform keeps injecting
-  the legacy key until F2, so the old code works.
-- While the switch is still `true`, deleting the named key from the dashboard also sends the function back to the
-  legacy key without a deploy. **UNVERIFIED:** this depends on the dictionary dropping the deleted name.
+- Redeploy the previous function version, keeping `verify_jwt` as recorded in step 3. That version reads the same
+  named key first; its legacy fallback is dead because the legacy keys are disabled, so rollback does not restore
+  a legacy path. It only undoes code changes made in this release.
+- Deleting or renaming a named key in the dashboard makes that function fail closed (no fallback). Recover by
+  restoring the key under the same name, then redeploying the function so the dictionary is re-read.

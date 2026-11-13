@@ -170,6 +170,7 @@ Deno.test('endorsed cap check reads registrations.status, never endorsement_stat
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'sb_secret_fixtureRegister00000000000' }),
   }, async () => {
     // Row has status='complete' (signed) but endorsement_status is null — the
     // dead-column bug would have missed this and wrongly capped at 5.
@@ -199,6 +200,7 @@ Deno.test('unendorsed user (no status=complete row) is capped at CAP_UNENDORSED'
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'sb_secret_fixtureRegister00000000000' }),
   }, async () => {
     const mock = createSupabaseMock(capCheckResponses(5, []))
 
@@ -220,6 +222,7 @@ Deno.test('endorsed user is allowed up to CAP_ENDORSED, then capped at 12', asyn
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'sb_secret_fixtureRegister00000000000' }),
   }, async () => {
     const mock = createSupabaseMock(capCheckResponses(12, [{ status: 'complete' }]))
 
@@ -248,6 +251,7 @@ Deno.test('stores a hashed client IP and never the raw value', async () => {
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'sb_secret_fixtureRegister00000000000' }),
   }, async () => {
     const mock = createSupabaseMock(freshRegistrationResponses())
     const rawIp = '203.0.113.42'
@@ -273,6 +277,7 @@ Deno.test('a rejected nonessential queue count still returns the committed 201 m
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'sb_secret_fixtureRegister00000000000' }),
   }, async () => {
     const mock = createSupabaseMock([
       { data: null, error: null },
@@ -298,6 +303,7 @@ Deno.test('falls back to cf-connecting-ip when x-forwarded-for is absent', async
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'sb_secret_fixtureRegister00000000000' }),
   }, async () => {
     const mock = createSupabaseMock(freshRegistrationResponses())
     const rawIp = '198.51.100.9'
@@ -318,6 +324,7 @@ Deno.test('stores a null client_ip_hash when no IP header is present', async () 
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_register: 'sb_secret_fixtureRegister00000000000' }),
   }, async () => {
     const mock = createSupabaseMock(freshRegistrationResponses())
 
@@ -365,6 +372,24 @@ Deno.test('H19: a misconfigured dmv_register entry fails closed with 500 and wri
     const mock = createSupabaseMock(freshRegistrationResponses())
     const response = await handleRegisterAgent(
       registerRequest(validBody({ agent_name: 'bad-key-agent' })),
+      { createSupabaseClient: mock.createSupabaseClient as never },
+    )
+    assert.equal(response.status, 500)
+    assert.equal(mock.clientFactoryCalls.length, 0)
+    assert.equal(mock.insertedRows.length, 0)
+  })
+})
+
+Deno.test('H19: cut-over: the injected legacy key alone fails closed with 500 and writes nothing', async () => {
+  await withEnv({
+    DMV_PROXY_SECRET: PROXY_SECRET,
+    SUPABASE_URL: 'https://project.supabase.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_fixtureDefault000000000000' }),
+  }, async () => {
+    const mock = createSupabaseMock(freshRegistrationResponses())
+    const response = await handleRegisterAgent(
+      registerRequest(validBody({ agent_name: 'legacy-only-agent' })),
       { createSupabaseClient: mock.createSupabaseClient as never },
     )
     assert.equal(response.status, 500)

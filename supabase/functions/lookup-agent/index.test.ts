@@ -22,11 +22,13 @@ const assert = {
 
 const VALID_CERTIFICATE_ID = 'MESA-DD6-660J'
 const PROXY_SECRET = 'worker-secret'
-// The key loader fails closed without SUPABASE_URL and a key, so client-creating
-// tests configure both (fixture values only).
+// The key loader fails closed without SUPABASE_URL and the named key, so client-creating
+// tests configure both (fixture values only). The legacy variable stays in the fixture
+// because the platform keeps injecting it until F2; the loader must ignore it.
 const CONFIGURED_SUPABASE = {
   SUPABASE_URL: 'https://project.supabase.test',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+  SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_read: 'sb_secret_fixtureRead000000000000000' }),
 }
 
 interface QueryCall {
@@ -143,6 +145,7 @@ Deno.test('allows a certificate-ID lookup with the correct proxy secret', async 
     DMV_PROXY_SECRET: PROXY_SECRET,
     SUPABASE_URL: 'https://project.supabase.test',
     SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+    SUPABASE_SECRET_KEYS: JSON.stringify({ dmv_read: 'sb_secret_fixtureRead000000000000000' }),
   }, async () => {
     const mock = createSupabaseMock({
       data: {
@@ -158,11 +161,11 @@ Deno.test('allows a certificate-ID lookup with the correct proxy secret', async 
     )
 
     assert.equal(response.status, 200)
-    // Legacy fallback (no dmv_read entry yet): URL and legacy key, plus options.
+    // The dmv_read named key, never the injected legacy key: URL and named key, plus options.
     assert.equal(mock.clientFactoryCalls.length, 1)
     assert.deepEqual(mock.clientFactoryCalls[0].slice(0, 2), [
       'https://project.supabase.test',
-      'service-role-key',
+      'sb_secret_fixtureRead000000000000000',
     ])
     assert.deepEqual(mock.calls, [
       { name: 'from', args: ['registrations'] },
@@ -295,6 +298,8 @@ Deno.test('H18: fails closed with 500 when SUPABASE_URL or every key is missing'
   for (const env of [
     { SUPABASE_URL: undefined, SUPABASE_SERVICE_ROLE_KEY: 'service-role-key', SUPABASE_SECRET_KEYS: undefined },
     { SUPABASE_URL: 'https://project.supabase.test', SUPABASE_SERVICE_ROLE_KEY: undefined, SUPABASE_SECRET_KEYS: undefined },
+    // Cut-over: the platform still injects the legacy key until F2; it alone must not create a client.
+    { SUPABASE_URL: 'https://project.supabase.test', SUPABASE_SERVICE_ROLE_KEY: 'service-role-key', SUPABASE_SECRET_KEYS: undefined },
   ]) {
     await withEnv({ DMV_PROXY_SECRET: PROXY_SECRET, ...env }, async () => {
       const mock = createSupabaseMock({ data: null, error: null })

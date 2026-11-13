@@ -21,7 +21,6 @@
     "verify:packages": "node scripts/verify-dmv-packages.mjs",
     "verify:package-release-state": "node scripts/check-dmv-release-state.mjs",
     "test:edge": "deno test --allow-env --allow-net --allow-read supabase/functions/",
-    "test:edge:enforce": "DMV_GCODE_ENFORCE=1 deno test --allow-env --allow-read --allow-net supabase/functions/_shared/g-code.test.ts",
     "test": "pnpm check && pnpm test:web && pnpm test:worker && pnpm test:agent:source && pnpm test:agent:dist && node --test tests/dmv-package-reproducibility.test.mjs tests/dmv-package-workflow.test.mjs && pnpm test:edge",
     "text:audit": "node scripts/text-surfaces/run-audit.mjs",
     "text:audit:json": "node scripts/text-surfaces/run-audit.mjs --json",
