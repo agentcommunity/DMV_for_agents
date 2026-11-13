@@ -179,7 +179,7 @@ supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-v
 Do not redeploy `register-agent` or `badge` during this rollout. Supabase must
 bypass its platform JWT layer because the Worker authenticates with
 `x-dmv-proxy`. Supabase automatically injects `SUPABASE_URL`,
-`SUPABASE_SECRET_KEYS` and the legacy `SUPABASE_SERVICE_ROLE_KEY`. The functions
+`SUPABASE_SECRET_KEYS` and the legacy `SUPABASE_SERVICE_ROLE_KEY` (disabled on Main since 2026-11-13). The functions
 use only the named secret keys `dmv_read` / `dmv_register` and never read the
 legacy key; a missing named key fails closed. See `supabase/functions/SWITCH.md`.
 

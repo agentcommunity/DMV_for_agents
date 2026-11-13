@@ -230,3 +230,24 @@ Deno.test('fails closed when SUPABASE_URL is missing', async () => {
     /SUPABASE_URL/,
   )
 })
+
+Deno.test('end to end: the real pinned supabase-js client sends the named key on apikey only, no Bearer', async () => {
+  const seen: Array<Headers> = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers))
+    return Promise.resolve(new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }))
+  }) as typeof fetch
+  try {
+    const client = await createDmvSupabaseClient('dmv_read', {
+      env: envOf({ SUPABASE_URL: 'https://project.supabase.test', SUPABASE_SECRET_KEYS: dictionary }),
+      log: () => {},
+    })
+    await client.from('registrations').select('certificate_id').limit(1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].get('apikey'), NEW_READ_KEY)
+  assert.equal(seen[0].get('authorization'), null)
+})

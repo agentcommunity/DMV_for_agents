@@ -10,8 +10,9 @@ P-DMV; gate G-CODE; rollback section 7). Project: Main, `tcymqfwwphacnosnnzxl`.
 | H19 | `register-agent` | `dmv_register` | none (removed in the cut-over release) |
 
 **State: cut-over release.** The legacy fallback, its `DMV_LEGACY_KEY_FALLBACK` switch and the transition
-mode of the G-CODE test are deleted. The platform still injects the legacy service_role variable until plan
-step F2; no DMV function reads it, and G-CODE fails if anything in a holder's import graph does.
+mode of the G-CODE test are deleted. The legacy JWT keys (anon and service_role) on Main are disabled
+(2026-11-13, 04:31Z). The platform may still inject the dead legacy service_role variable; no DMV function reads
+it, and G-CODE fails if anything in a holder's import graph does.
 
 ## How the code behaves
 
@@ -40,9 +41,9 @@ step F2; no DMV function reads it, and G-CODE fails if anything in a holder's im
    and later a key named `dmv_register`. Record each fingerprint in the wave ledger from the owner shell:
    `printf %s "$KEY" | shasum -a 256 | cut -c1-12`, with `$KEY` read silently. Never paste the key into chat or a file.
 2. There is no store to fill. The edge runtime exposes secret keys as `SUPABASE_SECRET_KEYS`, a JSON dictionary
-   keyed by key name (https://supabase.com/docs/guides/functions/secrets, read 2026-11-08). **UNVERIFIED:** the docs
-   do not say that a newly created named key shows up in the dictionary without a redeploy. The probe's `key_source`
-   field settles it: `legacy` means the key did not show up.
+   keyed by key name (https://supabase.com/docs/guides/functions/secrets, read 2026-11-08). The docs do not say that
+   a newly created named key shows up in the dictionary without a redeploy; if it does not, the function fails closed
+   with `Supabase key <name> is not configured` (there is no legacy source any more), so redeploy and re-probe.
 3. Before each deploy, read the function's current state (D6, names and flags only):
    `curl -s -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" https://api.supabase.com/v1/projects/tcymqfwwphacnosnnzxl/functions/<slug> | jq '{version, verify_jwt, status}'`.
    Record the version and `verify_jwt` for rollback. Plan U11: the deployed code may differ from `main`, so compare
@@ -77,7 +78,8 @@ redeployed as in step 4, one at a time, `--no-verify-jwt` kept; each probe must 
 
 ## Rollback (plan section 7)
 
-- Redeploy the previous function version, keeping `verify_jwt` as recorded in step 3. The platform keeps injecting
-  the legacy key until F2, so the old code works.
-- After the cut-over release, deleting or renaming a named key in the dashboard makes that function fail closed
-  (no fallback). Recover by restoring the key, or by redeploying the previous (fallback) version until F2.
+- Redeploy the previous function version, keeping `verify_jwt` as recorded in step 3. That version reads the same
+  named key first; its legacy fallback is dead because the legacy keys are disabled, so rollback does not restore
+  a legacy path. It only undoes code changes made in this release.
+- Deleting or renaming a named key in the dashboard makes that function fail closed (no fallback). Recover by
+  restoring the key under the same name, then redeploying the function so the dictionary is re-read.
