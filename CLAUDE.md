@@ -62,6 +62,14 @@ Multiple surfaces carry agent-onboarding content (register → share → AID →
 
 CLI-first everywhere. MCP is available but secondary — `bunx @agentcommunity/dmv-agent register` over MCP config.
 
+## Shared database (Supabase Main)
+
+- This repository writes to Main (`tcymqfwwphacnosnnzxl`, the agentcommunity.org database). Schema and data changes to Main are made only in `agentcommunity_page`, through the loop in its `docs/DATABASE.md`. Never use `psql`, the SQL editor, `supabase db push`, `supabase link` or an MCP write on Main from this repository.
+- `register-agent` inserts `registrations` rows with `certificate_id` set. Each insert fires the `on_dmv_registration` trigger, which calls the `handle-dmv-registration` edge function, which mails a real person. Never insert test rows into production. DMV-only rows are not members.
+- Deploying a function from `supabase/functions/` to Main is a production change: only with the owner's go, in a sitting.
+- Never start or widen mail to members. Never delete rows on Main by hand. No secrets, vault names or member addresses in code, logs or PRs.
+- When unsure, ask the owner.
+
 ## Critical Constraints
 
 - **CRT texture mapping params must not change:** `repeat(1.7, 1.7)`, `offset(-0.64, -0.42)`, `flipY: false` in TV.js. These map the CRT canvas onto the TV screen mesh.
