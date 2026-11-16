@@ -14,6 +14,14 @@ Terse docs for agents. File-by-file, function-by-function.
 
 ---
 
+## Shared database (Supabase Main)
+
+- This repository writes to Main (`tcymqfwwphacnosnnzxl`, the agentcommunity.org database). Schema and data changes to Main are made only in `agentcommunity_page`, through the loop in its `docs/DATABASE.md`. Never use `psql`, the SQL editor, `supabase db push`, `supabase link` or an MCP write on Main from this repository.
+- `register-agent` inserts `registrations` rows with `certificate_id` set. Each insert fires the `on_dmv_registration` trigger, which calls the `handle-dmv-registration` edge function, which mails a real person. Never insert test rows into production. DMV-only rows are not members.
+- Deploying a function from `supabase/functions/` to Main is a production change: only with the owner's go, in a sitting.
+- Never start or widen mail to members. Never delete rows. No secrets, vault names or member addresses in code, logs or PRs.
+- When unsure, ask the owner.
+
 ## File Map
 
 ```
