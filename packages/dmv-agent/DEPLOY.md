@@ -8,7 +8,7 @@ Step-by-step guide to take the DMV agent registration system from dev to product
 
 - [ ] Supabase CLI installed (`brew install supabase/tap/supabase`)
 - [ ] Logged in to Supabase (`supabase login`)
-- [ ] Linked to the agentcommunity project (`supabase link --project-ref tcymqfwwphacnosnnzxl`)
+- [ ] No `supabase link`: linking to Main (`tcymqfwwphacnosnnzxl`) is not allowed. Every deploy line passes `--project-ref`, and a function deploy to Main needs the owner's go, in a sitting (`CLAUDE.md § Shared database (Supabase Main)`)
 - [ ] npm owner access for both `@agentcommunity/dmv-agent` and the existing
       `dmv-agent` compatibility alias
 
