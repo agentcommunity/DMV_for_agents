@@ -6,9 +6,13 @@ Step-by-step guide to take the DMV agent registration system from dev to product
 
 ## Prerequisites
 
-- [ ] Supabase CLI installed (`brew install supabase/tap/supabase`)
-- [ ] Logged in to Supabase (`supabase login`)
-- [ ] Linked to the agentcommunity project (`supabase link --project-ref tcymqfwwphacnosnnzxl`)
+- [ ] `pnpm install` at the repository root. The Supabase CLI is the devDependency
+      `supabase` (`^3.2.0`, exact version held by `pnpm-lock.yaml`); run it as
+      `pnpm exec supabase`, never a global binary or `npx supabase@latest`
+- [ ] Authenticated for the CLI (`SUPABASE_ACCESS_TOKEN` in the environment, or
+      `pnpm exec supabase login`)
+- [ ] Every remote command passes `--project-ref tcymqfwwphacnosnnzxl`; no
+      `supabase link` is needed
 - [ ] npm owner access for both `@agentcommunity/dmv-agent` and the existing
       `dmv-agent` compatibility alias
 
@@ -173,7 +177,7 @@ The completed rollout used the order below. Final production results were:
 4. Deploy **only** the changed lookup function:
 
 ```bash
-supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+pnpm exec supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
 Do not redeploy `register-agent` or `badge` during this rollout. Supabase must
