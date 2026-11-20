@@ -28,7 +28,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system map.
 
 **Frontend** — Edit JS/CSS, refresh the browser. No bundler, no transpilation. All deps are CDN imports via importmap.
 
-**Edge functions** — Requires a Supabase project. Copy `.env.example` to `.env` and fill in your credentials. Deploy with `pnpm exec supabase functions deploy`.
+**Edge functions** — Requires a Supabase project. Copy `.env.example` to `.env` and fill in your credentials. Deploy with `pnpm exec supabase functions deploy <slug> --project-ref <ref>` (`register-agent` and `lookup-agent` also take `--no-verify-jwt`); a deploy to Main (`tcymqfwwphacnosnnzxl`) needs the owner's go. The CLI loads this directory's `.env` and `.env.local`, so keep no `SUPABASE_ACCESS_TOKEN` or `SUPABASE_PROJECT_ID` in them: pass the token in the shell for the one command.
 
 **npm package** — install once from the repository root with
 `pnpm install --frozen-lockfile`; root `pnpm-lock.yaml` is the only lockfile.

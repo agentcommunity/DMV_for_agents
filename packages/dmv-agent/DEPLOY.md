@@ -9,10 +9,13 @@ Step-by-step guide to take the DMV agent registration system from dev to product
 - [ ] `pnpm install` at the repository root. The Supabase CLI is the devDependency
       `supabase` (`^3.2.0`, exact version held by `pnpm-lock.yaml`); run it as
       `pnpm exec supabase`, never a global binary or `npx supabase@latest`
-- [ ] Authenticated for the CLI (`SUPABASE_ACCESS_TOKEN` in the environment, or
-      `pnpm exec supabase login`)
-- [ ] Every remote command passes `--project-ref tcymqfwwphacnosnnzxl`; no
-      `supabase link` is needed
+- [ ] Authenticated for the CLI on purpose: `SUPABASE_ACCESS_TOKEN` exported in the
+      shell for that one command, or `pnpm exec supabase login`. The CLI also loads
+      the repository root's `.env` and `.env.local`: keep no `SUPABASE_ACCESS_TOKEN`
+      or `SUPABASE_PROJECT_ID` there
+- [ ] No `supabase link`: linking to Main (`tcymqfwwphacnosnnzxl`) is not allowed. Every deploy line passes `--project-ref`, and a function deploy to Main needs the owner's go, in a sitting (`CLAUDE.md § Shared database (Supabase Main)`)
+- [ ] A deploy asks for confirmation; do not add `--yes`. An agent that hits the
+      prompt asks the owner first
 - [ ] npm owner access for both `@agentcommunity/dmv-agent` and the existing
       `dmv-agent` compatibility alias
 

@@ -15,7 +15,7 @@ No build system for the SPA. Native ES modules via browser importmap. Serve from
 
 Cloudflare Workers Static Assets + a Cloudflare Container (Node 20 + `@napi-rs/canvas` Skia) for card rendering. Worker `dmv-agentcommunity` on Taqanu account, container instance type `lite`. The Cloudflare Git integration's automatic build from merged `main` is the single authoritative production deploy path. Production uses `npx wrangler deploy`; non-production uses `npx wrangler versions upload`. The repository guard reads `WORKERS_CI_BRANCH`: `pnpm cf:deploy` deploys only `main`, uploads non-main Workers Builds, and rejects local non-main/detached runs. Use `pnpm cf:preview` for an explicit upload-only local preview. Observe automatic builds; use the local-main deploy fallback only after confirming that an automatic build is neither active nor already started, and never run both paths concurrently. On 2026-08-02, an accidental non-main branch promotion to production made v3 live and established the forward-only v1/v2/v3 production floor. Local dev: `pnpm cf:dev`. Architecture, cache hierarchy, and drift invariants: [CLOUDFLARE.md](CLOUDFLARE.md). Broader migration history + container rename gotcha: `docs/admin/CLOUDFLARE-MIGRATION.md` in the `agentcommunity_page` repo.
 
-**Supabase CLI:** the devDependency `supabase` (`^3.2.0`; the exact version comes from `pnpm-lock.yaml`). Always run it as `pnpm exec supabase …`, never a global `supabase` binary or `npx supabase@latest` (CLI 3.0 broke unpinned `@latest` deploys in the sibling PAGE repo, 2026-11-19). Moving the version is a deliberate `pnpm update supabase` in its own PR. Edge function deploys are manual and production changes: owner approval first.
+**Supabase CLI:** the devDependency `supabase` (`^3.2.0`; the exact version comes from `pnpm-lock.yaml`). Always run it as `pnpm exec supabase …`, never a global `supabase` binary or `npx supabase@latest` (CLI 3.0 broke unpinned `@latest` deploys in the sibling PAGE repo, 2026-11-19). Moving the version is a deliberate `pnpm update supabase` in its own PR. Edge function deploys are manual and production changes: owner approval first. The CLI loads the repository root's `.env` and `.env.local`: keep no `SUPABASE_ACCESS_TOKEN` or `SUPABASE_PROJECT_ID` there, pass the token in the shell for one command, and always pass `--project-ref`. A deploy asks for confirmation; never add `--yes` without the owner's go.
 
 ## Architecture
 
@@ -63,6 +63,14 @@ Multiple surfaces carry agent-onboarding content (register → share → AID →
 - **Meta tags** (`index.html`, `<meta name="agent:*">`) — CLI command + MCP config for agent tooling discovery.
 
 CLI-first everywhere. MCP is available but secondary — `bunx @agentcommunity/dmv-agent register` over MCP config.
+
+## Shared database (Supabase Main)
+
+- This repository writes to Main (`tcymqfwwphacnosnnzxl`, the agentcommunity.org database). Schema and data changes to Main are made only in `agentcommunity_page`, through the loop in its `docs/DATABASE.md`. Never use `psql`, the SQL editor, `supabase db push`, `supabase link` or an MCP write on Main from this repository.
+- `register-agent` inserts `registrations` rows with `certificate_id` set. Each insert fires the `on_dmv_registration` trigger, which calls the `handle-dmv-registration` edge function, which mails a real person. Never insert test rows into production. DMV-only rows are not members.
+- Deploying a function from `supabase/functions/` to Main is a production change: only with the owner's go, in a sitting.
+- Never start or widen mail to members. Never delete rows on Main by hand. No secrets, vault names or member addresses in code, logs or PRs.
+- When unsure, ask the owner.
 
 ## Critical Constraints
 
