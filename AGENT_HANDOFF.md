@@ -148,7 +148,7 @@ exists, not that email verification, `.agent` allocation, or DNS delegation is d
 ### 1. `register-agent` MUST be deployed with `--no-verify-jwt`
 
 ```bash
-supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+pnpm exec supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
 The DMV worker does **not** forward an `Authorization` header (the `REGISTER_FORWARD_REQUEST_HEADERS` allow-list in `worker/index.ts:934` only carries content-type, accept, accept-encoding, accept-language, user-agent, plus worker-set x-forwarded-* headers and `x-dmv-proxy` set to the `DMV_PROXY_SECRET` shared secret). If you deploy without `--no-verify-jwt`, Supabase's platform-level JWT verification layer fires first and the worker can't reach the function → every real registration gets `401 Missing authorization header`. The `x-dmv-proxy` gate inside the function is the actual anti-bypass defense; Supabase's JWT layer would just break the worker forwarding without adding real security.
@@ -167,7 +167,7 @@ DMV's `register-agent/index.ts` INSERT **omits the `status` field entirely**. Th
 
 ### 4. DMV has no auto-deploy from main pushes to the Supabase edge function
 
-A push to DMV main triggers a **Cloudflare worker** redeploy (via CF git integration), but it does **not** trigger a Supabase functions deploy. If you change `supabase/functions/register-agent/index.ts` you have to run `supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt` manually. The DMV repo has no GitHub Actions workflow for this.
+A push to DMV main triggers a **Cloudflare worker** redeploy (via CF git integration), but it does **not** trigger a Supabase functions deploy. If you change `supabase/functions/register-agent/index.ts` you have to run `pnpm exec supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt` manually. The DMV repo has no GitHub Actions workflow for this.
 
 ### 5. Shared Cloudflare Rate Limiting namespaces with PAGE
 
@@ -346,7 +346,7 @@ For lookup changes, deploy this Worker step first. Then deploy the internal
 upstream:
 
 ```bash
-supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+pnpm exec supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
 Public lookup smoke:
@@ -358,7 +358,7 @@ curl "https://dmv.agentcommunity.org/api/lookup?id=MESA-DD6-660J"
 
 **Re-deploy the edge function** (after code change to `supabase/functions/register-agent/index.ts`):
 ```bash
-supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+pnpm exec supabase functions deploy register-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 The `--no-verify-jwt` is not optional. See quirk #1.
 

@@ -49,7 +49,7 @@ it, and G-CODE fails if anything in a holder's import graph does.
    Record the version and `verify_jwt` for rollback. Plan U11: the deployed code may differ from `main`, so compare
    before overwriting.
 4. Deploy from this branch, in this order: `lookup-agent`, then `badge`, then `register-agent`:
-   `supabase functions deploy <slug> --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt`.
+   `pnpm exec supabase functions deploy <slug> --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt`.
 
 ## Probe (plan section 6: P-EDGE-OUT + P-DMV)
 

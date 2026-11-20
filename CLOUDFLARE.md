@@ -174,7 +174,7 @@ pnpm cf:preview
 
 # Only after the Worker-first compatibility smokes, deploy the changed Edge
 # function (not register-agent or badge).
-supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+pnpm exec supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 
 # Visual fidelity spot-check: local vs deployed
 CF_LOCAL_URL=http://localhost:8787 pnpm cf:test:render

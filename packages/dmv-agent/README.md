@@ -408,7 +408,7 @@ Sigstore transparency evidence have been verified.
 ```bash
 # Historical rollout command: use only when changing lookup-agent in a new,
 # reviewed rollout. The 2026-07-22 production rollout is complete.
-supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
+pnpm exec supabase functions deploy lookup-agent --project-ref tcymqfwwphacnosnnzxl --no-verify-jwt
 ```
 
 The v3 registration limiter is live; never roll back to a pre-v3 Worker.
